@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { IsArray, IsOptional, IsString, MinLength, ValidateNested } from "class-validator";
+import { IsArray, IsEmail, IsOptional, IsString, MinLength, ValidateNested } from "class-validator";
 import { CreateTeacherAssignmentInputDto } from "./create-teacher-assignment-input.dto";
 
 export class CreateTeacherDto {
@@ -18,6 +18,10 @@ export class CreateTeacherDto {
   @IsOptional()
   @IsString()
   phone?: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
 
   @IsOptional()
   @IsString()

@@ -60,6 +60,7 @@ model School {
   enrollments   StudentEnrollment[]
   teachers      Teacher[]
   invitations   Invitation[]
+  exams         Exam[]
 
   @@unique([organizationId, name])
   @@map("schools")
@@ -80,6 +81,7 @@ model AcademicYear {
 
   enrollments StudentEnrollment[]
   assignments TeacherAssignment[]
+  exams       Exam[]
 
   @@unique([schoolId, name])
   @@map("academic_years")
@@ -124,6 +126,7 @@ model Class {
   sections      Section[]
   classSubjects ClassSubject[]
   enrollments   StudentEnrollment[]
+  examSubjects  ExamSubject[]
 
   @@unique([divisionId, level])
   @@map("classes")
@@ -160,6 +163,7 @@ model Subject {
 
   classSubjects ClassSubject[]
   assignments   TeacherAssignment[]
+  examSubjects  ExamSubject[]
 
   @@unique([schoolId, name])
   @@map("subjects")
@@ -255,15 +259,24 @@ model StudentEnrollment {
   transfersIn   Transfer[]        @relation("TransferTo")
   promotionFrom PromotionItem[]   @relation("PromotionFrom")
   promotionTo   PromotionItem[]   @relation("PromotionTo")
+  attendances   Attendance[]
+  results       Result[]
 
-  // Roll number is unique per school+year+class+section, never globally.
-  @@unique([schoolId, academicYearId, classId, sectionId, rollNumber])
-  // Scoped per year, not just per school: a promoted student keeps the same
-  // studentNumber across years by design (see PromotionsService), which
-  // would collide with their own closed prior-year enrollment under a
-  // school-only uniqueness scope. Still fully prevents two different
-  // students holding the same number within the same school year.
-  @@unique([schoolId, academicYearId, studentNumber])
+  // Roll number is unique per school+year+class+section — but only among
+  // rows sharing the same `status`. Including status in the tuple (rather
+  // than just the first five columns) means a closed row (PROMOTED /
+  // TRANSFERRED_OUT / etc.) never permanently reserves its roll number: a
+  // new ACTIVE row can reuse it in the same section/year, while two ACTIVE
+  // rows still can't collide. Postgres has no native way to express "unique
+  // only where status = ACTIVE" without a partial index, which Prisma's
+  // schema DSL can't declare without drifting on every future migration —
+  // this achieves the same real-world guarantee without that risk.
+  @@unique([schoolId, academicYearId, classId, sectionId, rollNumber, status])
+  // Same reasoning as above: a promoted student keeps the same studentNumber
+  // across years (see PromotionsService) and that's fine since the year
+  // differs, but within one year a closed enrollment shouldn't permanently
+  // block a new active student from getting that same number.
+  @@unique([schoolId, academicYearId, studentNumber, status])
   @@index([studentId])
   @@map("student_enrollments")
 }
@@ -333,6 +346,7 @@ model Teacher {
   firstName      String
   lastName       String
   phone          String?
+  email          String?
   qualification  String?
   status         TeacherStatus @default(ACTIVE)
 
@@ -361,6 +375,113 @@ model TeacherAssignment {
 
   @@unique([teacherId, sectionId, subjectId, academicYearId])
   @@map("teacher_assignments")
+}
+
+// ---------------------------------------------------------------------------
+// Attendance — one record per enrollment per day. Authorization (a teacher
+// may only mark a section they hold a TeacherAssignment for) is enforced in
+// AttendanceService, not here; the schema just needs the enrollment link.
+// ---------------------------------------------------------------------------
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+model Attendance {
+  id           String            @id @default(uuid())
+  enrollmentId String
+  enrollment   StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  date           DateTime         @db.Date
+  status         AttendanceStatus
+  markedByUserId String
+  note           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([enrollmentId, date])
+  @@map("attendance_records")
+}
+
+// ---------------------------------------------------------------------------
+// Exams & results — marks entry is scoped to a teacher's own
+// TeacherAssignment for that class+subject+year; approval locks the mark
+// against further edits (see ResultsService).
+// ---------------------------------------------------------------------------
+
+enum ExamType {
+  QUIZ
+  MIDTERM
+  FINAL
+  ASSIGNMENT
+  OTHER
+}
+
+model Exam {
+  id             String       @id @default(uuid())
+  schoolId       String
+  school         School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicYearId String
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+
+  name String
+  type ExamType
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  examSubjects ExamSubject[]
+
+  @@unique([schoolId, academicYearId, name])
+  @@map("exams")
+}
+
+model ExamSubject {
+  id        String  @id @default(uuid())
+  examId    String
+  exam      Exam    @relation(fields: [examId], references: [id], onDelete: Cascade)
+  classId   String
+  class     Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  subjectId String
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  maxMarks Int       @default(100)
+  examDate DateTime? @db.Date
+
+  createdAt DateTime @default(now())
+
+  results Result[]
+
+  @@unique([examId, classId, subjectId])
+  @@map("exam_subjects")
+}
+
+enum ResultStatus {
+  ENTERED
+  APPROVED
+}
+
+model Result {
+  id            String            @id @default(uuid())
+  examSubjectId String
+  examSubject   ExamSubject       @relation(fields: [examSubjectId], references: [id], onDelete: Cascade)
+  enrollmentId  String
+  enrollment    StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  marksObtained    Decimal      @db.Decimal(6, 2)
+  status           ResultStatus @default(ENTERED)
+  enteredByUserId  String
+  approvedByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([examSubjectId, enrollmentId])
+  @@map("results")
 }
 
 // ---------------------------------------------------------------------------

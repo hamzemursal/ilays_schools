@@ -109,12 +109,30 @@ async function main() {
     "promotions.execute",
     "transfers.create",
     "transfers.approve",
+    "attendance.mark",
+    "attendance.view",
+    "results.enter",
+    "results.approve",
+    "results.view",
   ];
   const schoolAdminPermissions = await prisma.permission.findMany({
     where: { key: { in: schoolAdminPermissionKeys } },
   });
   await prisma.rolePermission.createMany({
     data: schoolAdminPermissions.map((p) => ({ roleId: schoolAdmin.id, permissionId: p.id })),
+    skipDuplicates: true,
+  });
+
+  // TEACHER gets exactly the day-to-day classroom actions — never
+  // results.approve, which stays an admin-level check on the data teachers
+  // enter (see ExamsService.approveResults).
+  const teacherRole = await prisma.role.findUniqueOrThrow({ where: { name: "TEACHER" } });
+  const teacherPermissionKeys = ["attendance.mark", "attendance.view", "results.enter", "results.view"];
+  const teacherPermissions = await prisma.permission.findMany({
+    where: { key: { in: teacherPermissionKeys } },
+  });
+  await prisma.rolePermission.createMany({
+    data: teacherPermissions.map((p) => ({ roleId: teacherRole.id, permissionId: p.id })),
     skipDuplicates: true,
   });
 

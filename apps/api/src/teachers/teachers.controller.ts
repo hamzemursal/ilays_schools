@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { TeachersService } from "./teachers.service";
 import { CreateTeacherDto } from "./dto/create-teacher.dto";
 import { CreateTeacherAssignmentInputDto } from "./dto/create-teacher-assignment-input.dto";
+import { InviteTeacherLoginDto } from "./dto/invite-teacher-login.dto";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { RequirePermissions } from "../auth/decorators/require-permissions.decorator";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
@@ -35,5 +36,16 @@ export class TeachersController {
     @Body() dto: CreateTeacherAssignmentInputDto,
   ) {
     return this.teachers.addAssignment(user, schoolId, teacherId, dto);
+  }
+
+  @RequirePermissions("teachers.update")
+  @Post(":teacherId/invite-login")
+  inviteLogin(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("teacherId") teacherId: string,
+    @Body() dto: InviteTeacherLoginDto,
+  ) {
+    return this.teachers.inviteLogin(user, schoolId, teacherId, dto.email);
   }
 }

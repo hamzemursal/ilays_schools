@@ -1,10 +1,17 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { randomBytes, createHash } from "node:crypto";
 import { Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateTeacherDto } from "./dto/create-teacher.dto";
 import { CreateTeacherAssignmentInputDto } from "./dto/create-teacher-assignment-input.dto";
+
+const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function hashToken(raw: string): string {
+  return createHash("sha256").update(raw).digest("hex");
+}
 
 @Injectable()
 export class TeachersService {
@@ -38,6 +45,7 @@ export class TeachersService {
             lastName: dto.lastName,
             employeeNumber: dto.employeeNumber,
             phone: dto.phone,
+            email: dto.email,
             qualification: dto.qualification,
           },
         });
@@ -104,6 +112,82 @@ export class TeachersService {
       }
       throw error;
     }
+  }
+
+  // Grants an existing Teacher profile a login — deferred from Phase 4,
+  // needed now so a teacher can actually authenticate to mark attendance
+  // and enter marks scoped to their own TeacherAssignments.
+  async inviteLogin(actor: AuthenticatedUser, schoolId: string, teacherId: string, email?: string) {
+    const school = await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+
+    const teacher = await this.prisma.teacher.findFirst({ where: { id: teacherId, schoolId } });
+    if (!teacher) throw new NotFoundException("Teacher not found in this school");
+    if (teacher.userId) throw new ConflictException("This teacher already has a login");
+
+    const targetEmail = email ?? teacher.email;
+    if (!targetEmail) {
+      throw new BadRequestException("This teacher has no email on file — provide one to send the invite");
+    }
+
+    const existingUser = await this.prisma.user.findUnique({ where: { email: targetEmail } });
+    if (existingUser?.status === "ACTIVE") {
+      throw new ConflictException("A user with this email already has an active account");
+    }
+
+    const role = await this.prisma.role.findUniqueOrThrow({ where: { name: "TEACHER" } });
+
+    const rawToken = randomBytes(32).toString("hex");
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.upsert({
+        where: { email: targetEmail },
+        update: {},
+        create: { email: targetEmail, organizationId: school.organizationId, status: "PENDING_SETUP" },
+      });
+
+      await tx.teacher.update({ where: { id: teacher.id }, data: { userId: user.id, email: targetEmail } });
+
+      await tx.userRole.upsert({
+        where: { userId_roleId: { userId: user.id, roleId: role.id } },
+        update: {},
+        create: { userId: user.id, roleId: role.id },
+      });
+
+      await tx.userSchool.upsert({
+        where: { userId_schoolId: { userId: user.id, schoolId } },
+        update: {},
+        create: { userId: user.id, schoolId },
+      });
+
+      await tx.invitation.create({
+        data: {
+          organizationId: school.organizationId,
+          schoolId,
+          roleId: role.id,
+          userId: user.id,
+          invitedByUserId: actor.id,
+          tokenHash: hashToken(rawToken),
+          expiresAt: new Date(Date.now() + INVITATION_TTL_MS),
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          organizationId: school.organizationId,
+          schoolId,
+          actorUserId: actor.id,
+          action: "teacher_login.invite",
+          resource: "Teacher",
+          resourceId: teacher.id,
+          after: { email: targetEmail },
+        },
+      });
+
+      return user;
+    });
+
+    const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3010";
+    return { email: result.email, acceptUrl: `${webOrigin}/accept-invite?token=${rawToken}` };
   }
 
   private async assertAssignmentBelongsToSchool(schoolId: string, a: CreateTeacherAssignmentInputDto) {

@@ -4,6 +4,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
+    public body?: unknown,
   ) {
     super(message);
   }
@@ -26,7 +27,8 @@ async function request<T>(
   const data = await res.json().catch(() => null);
 
   if (!res.ok) {
-    throw new ApiError(data?.message ?? `Request failed with status ${res.status}`, res.status);
+    const message = Array.isArray(data?.message) ? data.message.join(", ") : data?.message;
+    throw new ApiError(message ?? `Request failed with status ${res.status}`, res.status, data);
   }
   return data as T;
 }
@@ -90,6 +92,44 @@ export interface Subject {
   code: string | null;
 }
 
+export type Sex = "MALE" | "FEMALE";
+export type GuardianRelationship = "FATHER" | "MOTHER" | "GUARDIAN" | "OTHER";
+
+export interface StudentListItem {
+  enrollmentId: string;
+  studentId: string;
+  firstName: string;
+  lastName: string;
+  studentNumber: string;
+  rollNumber: number;
+  className: string;
+  sectionName: string;
+}
+
+export interface DuplicateCandidate {
+  id: string;
+  firstName: string;
+  lastName: string;
+  dateOfBirth: string;
+}
+
+export interface CreateStudentInput {
+  firstName: string;
+  lastName: string;
+  dateOfBirth: string;
+  sex: Sex;
+  enrollment: { academicYearId: string; classId: string; sectionId: string };
+  guardians?: {
+    firstName: string;
+    lastName: string;
+    phone?: string;
+    email?: string;
+    relationship: GuardianRelationship;
+    isPrimaryContact?: boolean;
+  }[];
+  confirmDespiteDuplicates?: boolean;
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ accessToken: string }>("/auth/login", { method: "POST", body: { email, password } }),
@@ -144,4 +184,13 @@ export const api = {
     request<Subject[]>(`/schools/${schoolId}/subjects`, { accessToken }),
   createSubject: (accessToken: string, schoolId: string, body: { name: string; code?: string }) =>
     request<Subject>(`/schools/${schoolId}/subjects`, { method: "POST", body, accessToken }),
+
+  listStudents: (accessToken: string, schoolId: string) =>
+    request<StudentListItem[]>(`/schools/${schoolId}/students`, { accessToken }),
+  createStudent: (accessToken: string, schoolId: string, body: CreateStudentInput) =>
+    request<{ student: { id: string }; enrollment: unknown }>(`/schools/${schoolId}/students`, {
+      method: "POST",
+      body,
+      accessToken,
+    }),
 };

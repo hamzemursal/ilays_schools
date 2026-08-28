@@ -35,6 +35,8 @@ const PERMISSIONS = [
   "teachers.view",
   "teachers.create",
   "teachers.update",
+  "guardians.view",
+  "guardians.manage",
   "enrollments.manage",
   "transfers.create",
   "transfers.approve",
@@ -91,11 +93,25 @@ async function main() {
   // School Admin can only ever reach their own school regardless of this
   // permission, since the service filters by UserSchool, not by role name).
   const schoolAdmin = await prisma.role.findUniqueOrThrow({ where: { name: "SCHOOL_ADMIN" } });
-  const academicPermissions = await prisma.permission.findMany({
-    where: { key: { in: ["academic.view", "academic.manage"] } },
+  const schoolAdminPermissionKeys = [
+    "academic.view",
+    "academic.manage",
+    "students.view",
+    "students.create",
+    "students.update",
+    "students.archive",
+    "teachers.view",
+    "teachers.create",
+    "teachers.update",
+    "guardians.view",
+    "guardians.manage",
+    "enrollments.manage",
+  ];
+  const schoolAdminPermissions = await prisma.permission.findMany({
+    where: { key: { in: schoolAdminPermissionKeys } },
   });
   await prisma.rolePermission.createMany({
-    data: academicPermissions.map((p) => ({ roleId: schoolAdmin.id, permissionId: p.id })),
+    data: schoolAdminPermissions.map((p) => ({ roleId: schoolAdmin.id, permissionId: p.id })),
     skipDuplicates: true,
   });
 

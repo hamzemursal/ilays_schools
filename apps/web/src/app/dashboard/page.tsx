@@ -55,20 +55,22 @@ export default function DashboardPage() {
             None — this account isn&apos;t scoped to a specific school (organization-wide access).
           </p>
         ) : (
-          <ul className="mt-2 space-y-1">
-            {user.schools.map((school) =>
-              user.permissions.includes("academic.view") ? (
-                <li key={school.id}>
-                  <Link href={`/schools/${school.id}/academic`} className="text-accent hover:underline">
-                    {school.name}
+          <ul className="mt-2 space-y-2">
+            {user.schools.map((school) => (
+              <li key={school.id} className="flex items-center gap-3">
+                <span className="text-foreground">{school.name}</span>
+                {user.permissions.includes("academic.view") && (
+                  <Link href={`/schools/${school.id}/academic`} className="text-sm text-accent hover:underline">
+                    Academic
                   </Link>
-                </li>
-              ) : (
-                <li key={school.id} className="text-foreground">
-                  {school.name}
-                </li>
-              ),
-            )}
+                )}
+                {user.permissions.includes("students.view") && (
+                  <Link href={`/schools/${school.id}/students`} className="text-sm text-accent hover:underline">
+                    Students
+                  </Link>
+                )}
+              </li>
+            ))}
           </ul>
         )}
       </div>

@@ -41,6 +41,19 @@ export interface Profile {
   schools: { id: string; name: string }[];
 }
 
+export type SchoolType = "PRIMARY" | "SECONDARY" | "PRIMARY_AND_SECONDARY";
+
+export interface School {
+  id: string;
+  name: string;
+  type: SchoolType;
+  status: "ACTIVE" | "INACTIVE";
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  createdAt: string;
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ accessToken: string }>("/auth/login", { method: "POST", body: { email, password } }),
@@ -49,4 +62,17 @@ export const api = {
   acceptInvite: (token: string, password: string) =>
     request<{ accessToken: string }>("/auth/accept-invite", { method: "POST", body: { token, password } }),
   me: (accessToken: string) => request<Profile>("/auth/me", { accessToken }),
+
+  listSchools: (accessToken: string) => request<School[]>("/schools", { accessToken }),
+  getSchool: (accessToken: string, id: string) => request<School>(`/schools/${id}`, { accessToken }),
+  createSchool: (
+    accessToken: string,
+    body: { name: string; type: SchoolType; address?: string; phone?: string; email?: string },
+  ) => request<School>("/schools", { method: "POST", body, accessToken }),
+  inviteSchoolAdmin: (accessToken: string, schoolId: string, email: string) =>
+    request<{ email: string; acceptUrl: string }>(`/schools/${schoolId}/invite-admin`, {
+      method: "POST",
+      body: { email },
+      accessToken,
+    }),
 };

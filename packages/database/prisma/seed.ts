@@ -23,6 +23,9 @@ const ROLES = [
 ] as const;
 
 const PERMISSIONS = [
+  "schools.view",
+  "schools.create",
+  "schools.manage",
   "students.view",
   "students.create",
   "students.update",
@@ -66,12 +69,20 @@ async function main() {
     await prisma.permission.upsert({ where: { key }, update: {}, create: { key } });
   }
 
-  const superAdmin = await prisma.role.findUniqueOrThrow({ where: { name: "SUPER_ADMIN" } });
-  const allPermissions = await prisma.permission.findMany();
-  await prisma.rolePermission.createMany({
-    data: allPermissions.map((p) => ({ roleId: superAdmin.id, permissionId: p.id })),
-    skipDuplicates: true,
+  // SUPER_ADMIN and ORGANIZATION_ADMIN are the only org-wide roles for now —
+  // both get every permission. Every other role starts with none; granting
+  // scoped permissions to TEACHER/SCHOOL_ADMIN/etc. is an admin decision made
+  // through the app later, not something to hardcode here.
+  const orgWideRoles = await prisma.role.findMany({
+    where: { name: { in: ["SUPER_ADMIN", "ORGANIZATION_ADMIN"] } },
   });
+  const allPermissions = await prisma.permission.findMany();
+  for (const role of orgWideRoles) {
+    await prisma.rolePermission.createMany({
+      data: allPermissions.map((p) => ({ roleId: role.id, permissionId: p.id })),
+      skipDuplicates: true,
+    });
+  }
 
   // eslint-disable-next-line no-console
   console.log("Seed complete: organization, roles, permissions.");

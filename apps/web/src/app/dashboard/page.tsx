@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 
@@ -68,6 +69,16 @@ export default function DashboardPage() {
         <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground-soft">Permissions</h2>
         <p className="mt-2 text-sm text-foreground-soft">{user.permissions.length} granted</p>
       </div>
+
+      {user.permissions.includes("schools.view") && (
+        <Link
+          href="/schools"
+          className="mt-4 flex items-center justify-between rounded-xl border border-border bg-surface p-5 hover:border-accent"
+        >
+          <span className="font-medium text-foreground">Manage schools</span>
+          <span className="text-accent">→</span>
+        </Link>
+      )}
     </div>
   );
 }

@@ -30,9 +30,10 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  schools  School[]
-  users    User[]
-  students Student[]
+  schools     School[]
+  users       User[]
+  students    Student[]
+  invitations Invitation[]
 
   @@map("organizations")
 }
@@ -58,6 +59,7 @@ model School {
   subjects      Subject[]
   enrollments   StudentEnrollment[]
   teachers      Teacher[]
+  invitations   Invitation[]
 
   @@unique([organizationId, name])
   @@map("schools")
@@ -472,6 +474,7 @@ model User {
   schools       UserSchool[]
   roles         UserRole[]
   refreshTokens RefreshToken[]
+  invitations   Invitation[]
   guardian      Guardian?
   teacher       Teacher?
 
@@ -497,6 +500,7 @@ model Role {
 
   users       UserRole[]
   permissions RolePermission[]
+  invitations Invitation[]
 
   @@map("roles")
 }
@@ -540,6 +544,40 @@ model RefreshToken {
   createdAt DateTime @default(now())
 
   @@map("refresh_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Invitations — the only way a User ever gets a password. The User row is
+// created up front (PENDING_SETUP); accepting the invite is what activates it.
+// ---------------------------------------------------------------------------
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+model Invitation {
+  id             String        @id @default(uuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  schoolId       String?
+  school         School?       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  roleId         String
+  role           Role          @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash       String           @unique
+  status          InvitationStatus @default(PENDING)
+  invitedByUserId String?
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@map("invitations")
 }
 
 // ---------------------------------------------------------------------------

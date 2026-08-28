@@ -2,6 +2,7 @@ import { Controller, Get, Inject } from "@nestjs/common";
 import type Redis from "ioredis";
 import { PrismaService } from "../prisma/prisma.service";
 import { REDIS_CLIENT } from "../redis/redis.module";
+import { Public } from "../auth/decorators/public.decorator";
 
 @Controller("health")
 export class HealthController {
@@ -10,6 +11,7 @@ export class HealthController {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
+  @Public()
   @Get()
   async check() {
     const [database, redis] = await Promise.all([this.checkDatabase(), this.checkRedis()]);

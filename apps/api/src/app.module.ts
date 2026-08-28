@@ -5,6 +5,9 @@ import { APP_GUARD } from "@nestjs/core";
 import { PrismaModule } from "./prisma/prisma.module";
 import { RedisModule } from "./redis/redis.module";
 import { HealthModule } from "./health/health.module";
+import { AuthModule } from "./auth/auth.module";
+import { JwtAuthGuard } from "./auth/guards/jwt-auth.guard";
+import { PermissionsGuard } from "./auth/guards/permissions.guard";
 
 @Module({
   imports: [
@@ -13,7 +16,14 @@ import { HealthModule } from "./health/health.module";
     PrismaModule,
     RedisModule,
     HealthModule,
+    AuthModule,
   ],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Order matters: auth resolves req.user (or allows @Public through),
+    // then permissions checks it. Every route is deny-by-default.
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
+  ],
 })
 export class AppModule {}

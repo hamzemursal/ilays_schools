@@ -1,6 +1,8 @@
+import { randomBytes, createHash } from "node:crypto";
 import { PrismaClient } from "../generated/client";
 
 const prisma = new PrismaClient();
+const WEB_ORIGIN = process.env.WEB_ORIGIN ?? "http://localhost:3010";
 
 // Base RBAC scaffolding + the one real organization record. This never seeds
 // schools, teachers, students, or sections — those are created deliberately
@@ -73,6 +75,107 @@ async function main() {
 
   // eslint-disable-next-line no-console
   console.log("Seed complete: organization, roles, permissions.");
+
+  // ---------------------------------------------------------------------
+  // Dev-only test fixtures — NOT part of the real school-creation flow.
+  // These exist purely so Phase 1 auth (login/invite/accept) can be
+  // exercised end-to-end in a browser. Production school creation never
+  // auto-creates a school, admin, or invitation like this.
+  // ---------------------------------------------------------------------
+  if (process.env.NODE_ENV !== "production") {
+    await seedDevAuthFixtures();
+  }
+}
+
+async function seedDevAuthFixtures() {
+  const org = await prisma.organization.findUniqueOrThrow({
+    where: { id: "00000000-0000-0000-0000-000000000001" },
+  });
+
+  const school = await prisma.school.upsert({
+    where: { organizationId_name: { organizationId: org.id, name: "Saamalay Primary School (dev)" } },
+    update: {},
+    create: {
+      organizationId: org.id,
+      name: "Saamalay Primary School (dev)",
+      type: "PRIMARY",
+    },
+  });
+
+  const schoolAdminRole = await prisma.role.findUniqueOrThrow({ where: { name: "SCHOOL_ADMIN" } });
+  const superAdminRole = await prisma.role.findUniqueOrThrow({ where: { name: "SUPER_ADMIN" } });
+
+  await createDevInvitation({
+    email: "admin@saamalay.test",
+    organizationId: org.id,
+    roleId: schoolAdminRole.id,
+    schoolId: school.id,
+    label: "School Admin (scoped to Saamalay Primary School)",
+  });
+
+  await createDevInvitation({
+    email: "super@ilays.test",
+    organizationId: org.id,
+    roleId: superAdminRole.id,
+    schoolId: null,
+    label: "Super Admin (organization-wide)",
+  });
+}
+
+async function createDevInvitation(opts: {
+  email: string;
+  organizationId: string;
+  roleId: string;
+  schoolId: string | null;
+  label: string;
+}) {
+  const existingUser = await prisma.user.findUnique({ where: { email: opts.email } });
+  if (existingUser?.status === "ACTIVE") {
+    // eslint-disable-next-line no-console
+    console.log(`Skipped: ${opts.email} already active.`);
+    return;
+  }
+
+  const user = await prisma.user.upsert({
+    where: { email: opts.email },
+    update: {},
+    create: { email: opts.email, organizationId: opts.organizationId, status: "PENDING_SETUP" },
+  });
+
+  await prisma.userRole.upsert({
+    where: { userId_roleId: { userId: user.id, roleId: opts.roleId } },
+    update: {},
+    create: { userId: user.id, roleId: opts.roleId },
+  });
+
+  if (opts.schoolId) {
+    await prisma.userSchool.upsert({
+      where: { userId_schoolId: { userId: user.id, schoolId: opts.schoolId } },
+      update: {},
+      create: { userId: user.id, schoolId: opts.schoolId },
+    });
+  }
+
+  const rawToken = randomBytes(32).toString("hex");
+  const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+
+  await prisma.invitation.create({
+    data: {
+      organizationId: opts.organizationId,
+      schoolId: opts.schoolId,
+      roleId: opts.roleId,
+      userId: user.id,
+      tokenHash,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    },
+  });
+
+  // eslint-disable-next-line no-console
+  console.log(`\n${opts.label}`);
+  // eslint-disable-next-line no-console
+  console.log(`  Email:  ${opts.email}`);
+  // eslint-disable-next-line no-console
+  console.log(`  Accept: ${WEB_ORIGIN}/accept-invite?token=${rawToken}`);
 }
 
 main()

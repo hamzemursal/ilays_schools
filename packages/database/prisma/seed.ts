@@ -106,6 +106,9 @@ async function main() {
     "guardians.view",
     "guardians.manage",
     "enrollments.manage",
+    "promotions.execute",
+    "transfers.create",
+    "transfers.approve",
   ];
   const schoolAdminPermissions = await prisma.permission.findMany({
     where: { key: { in: schoolAdminPermissionKeys } },

@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 :root {
+  color-scheme: light;
   --background: #ffffff;
   --surface: #f5f6f9;
   --border: #dde1e8;
@@ -34,23 +35,8 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0f1420;
-    --surface: #161d2c;
-    --border: #2b3448;
-    --foreground: #e8ebf2;
-    --foreground-soft: #a8b0c3;
-    --accent: #7c9cff;
-    --accent-soft: #1b2740;
-    --success: #4ade94;
-    --success-soft: #123324;
-    --warning: #f0b429;
-    --warning-soft: #3a2c0e;
-    --danger: #ff6b6b;
-    --danger-soft: #3a1616;
-  }
-}
+/* This platform stays on the light/white palette always, by explicit
+   request — it does not follow the OS/browser dark-mode preference. */
 
 body {
   background: var(--background);

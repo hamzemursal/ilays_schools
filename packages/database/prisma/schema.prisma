@@ -258,9 +258,12 @@ model StudentEnrollment {
 
   // Roll number is unique per school+year+class+section, never globally.
   @@unique([schoolId, academicYearId, classId, sectionId, rollNumber])
-  // Student number uniqueness scope defaults to per-school; adjust if the
-  // organization instead wants a single numbering pool across all schools.
-  @@unique([schoolId, studentNumber])
+  // Scoped per year, not just per school: a promoted student keeps the same
+  // studentNumber across years by design (see PromotionsService), which
+  // would collide with their own closed prior-year enrollment under a
+  // school-only uniqueness scope. Still fully prevents two different
+  // students holding the same number within the same school year.
+  @@unique([schoolId, academicYearId, studentNumber])
   @@index([studentId])
   @@map("student_enrollments")
 }

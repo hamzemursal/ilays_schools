@@ -13,6 +13,8 @@ import { AcademicModule } from "./academic/academic.module";
 import { GuardiansModule } from "./guardians/guardians.module";
 import { StudentsModule } from "./students/students.module";
 import { TeachersModule } from "./teachers/teachers.module";
+import { PromotionsModule } from "./promotions/promotions.module";
+import { TransfersModule } from "./transfers/transfers.module";
 
 @Module({
   imports: [
@@ -27,6 +29,8 @@ import { TeachersModule } from "./teachers/teachers.module";
     GuardiansModule,
     StudentsModule,
     TeachersModule,
+    PromotionsModule,
+    TransfersModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

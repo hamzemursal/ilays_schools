@@ -1,0 +1,17 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+fetchTimeout: 600000
+fetchRetries: 5
+fetchRetryFactor: 2
+fetchRetryMintimeout: 15000
+fetchRetryMaxtimeout: 120000
+networkConcurrency: 1
+fetchMinSpeedKiBps: 1
+allowBuilds:
+  '@prisma/client': true
+  '@prisma/engines': true
+  argon2: true
+  esbuild: true
+  prisma: true

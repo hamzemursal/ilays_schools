@@ -26,6 +26,8 @@ const PERMISSIONS = [
   "schools.view",
   "schools.create",
   "schools.manage",
+  "academic.view",
+  "academic.manage",
   "students.view",
   "students.create",
   "students.update",
@@ -84,6 +86,19 @@ async function main() {
     });
   }
 
+  // SCHOOL_ADMIN manages their own school's academic structure — the first
+  // permission this role actually gets, scoped by the resource layer (a
+  // School Admin can only ever reach their own school regardless of this
+  // permission, since the service filters by UserSchool, not by role name).
+  const schoolAdmin = await prisma.role.findUniqueOrThrow({ where: { name: "SCHOOL_ADMIN" } });
+  const academicPermissions = await prisma.permission.findMany({
+    where: { key: { in: ["academic.view", "academic.manage"] } },
+  });
+  await prisma.rolePermission.createMany({
+    data: academicPermissions.map((p) => ({ roleId: schoolAdmin.id, permissionId: p.id })),
+    skipDuplicates: true,
+  });
+
   // eslint-disable-next-line no-console
   console.log("Seed complete: organization, roles, permissions.");
 
@@ -111,6 +126,14 @@ async function seedDevAuthFixtures() {
       name: "Saamalay Primary School (dev)",
       type: "PRIMARY",
     },
+  });
+
+  // Mirrors SchoolsService.create()'s division bootstrap — this fixture
+  // predates that logic, so a fresh seed run has to catch it up too.
+  await prisma.division.upsert({
+    where: { schoolId_type: { schoolId: school.id, type: "PRIMARY" } },
+    update: {},
+    create: { schoolId: school.id, type: "PRIMARY" },
   });
 
   const schoolAdminRole = await prisma.role.findUniqueOrThrow({ where: { name: "SCHOOL_ADMIN" } });

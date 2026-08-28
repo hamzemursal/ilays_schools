@@ -56,11 +56,19 @@ export default function DashboardPage() {
           </p>
         ) : (
           <ul className="mt-2 space-y-1">
-            {user.schools.map((school) => (
-              <li key={school.id} className="text-foreground">
-                {school.name}
-              </li>
-            ))}
+            {user.schools.map((school) =>
+              user.permissions.includes("academic.view") ? (
+                <li key={school.id}>
+                  <Link href={`/schools/${school.id}/academic`} className="text-accent hover:underline">
+                    {school.name}
+                  </Link>
+                </li>
+              ) : (
+                <li key={school.id} className="text-foreground">
+                  {school.name}
+                </li>
+              ),
+            )}
           </ul>
         )}
       </div>

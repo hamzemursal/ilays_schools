@@ -54,6 +54,42 @@ export interface School {
   createdAt: string;
 }
 
+export type DivisionType = "PRIMARY" | "SECONDARY";
+
+export interface Division {
+  id: string;
+  type: DivisionType;
+}
+
+export interface Section {
+  id: string;
+  name: string;
+  capacity: number;
+  _count: { enrollments: number };
+}
+
+export interface ClassWithSections {
+  id: string;
+  name: string;
+  level: number;
+  division: Division;
+  sections: { id: string; name: string; capacity: number }[];
+}
+
+export interface AcademicYear {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  isCurrent: boolean;
+}
+
+export interface Subject {
+  id: string;
+  name: string;
+  code: string | null;
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ accessToken: string }>("/auth/login", { method: "POST", body: { email, password } }),
@@ -75,4 +111,37 @@ export const api = {
       body: { email },
       accessToken,
     }),
+
+  listDivisions: (accessToken: string, schoolId: string) =>
+    request<Division[]>(`/schools/${schoolId}/divisions`, { accessToken }),
+
+  listAcademicYears: (accessToken: string, schoolId: string) =>
+    request<AcademicYear[]>(`/schools/${schoolId}/academic-years`, { accessToken }),
+  createAcademicYear: (
+    accessToken: string,
+    schoolId: string,
+    body: { name: string; startDate: string; endDate: string; isCurrent?: boolean },
+  ) => request<AcademicYear>(`/schools/${schoolId}/academic-years`, { method: "POST", body, accessToken }),
+  setCurrentAcademicYear: (accessToken: string, schoolId: string, id: string) =>
+    request<AcademicYear>(`/schools/${schoolId}/academic-years/${id}`, {
+      method: "PATCH",
+      body: { isCurrent: true },
+      accessToken,
+    }),
+
+  listClasses: (accessToken: string, schoolId: string) =>
+    request<ClassWithSections[]>(`/schools/${schoolId}/classes`, { accessToken }),
+  createClass: (accessToken: string, schoolId: string, body: { divisionId: string; name: string; level: number }) =>
+    request<ClassWithSections>(`/schools/${schoolId}/classes`, { method: "POST", body, accessToken }),
+  createSection: (
+    accessToken: string,
+    schoolId: string,
+    classId: string,
+    body: { name: string; capacity: number },
+  ) => request<Section>(`/schools/${schoolId}/classes/${classId}/sections`, { method: "POST", body, accessToken }),
+
+  listSubjects: (accessToken: string, schoolId: string) =>
+    request<Subject[]>(`/schools/${schoolId}/subjects`, { accessToken }),
+  createSubject: (accessToken: string, schoolId: string, body: { name: string; code?: string }) =>
+    request<Subject>(`/schools/${schoolId}/subjects`, { method: "POST", body, accessToken }),
 };

@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type School } from "@/lib/api";
@@ -64,6 +65,16 @@ export default function SchoolDetailPage({ params }: { params: Promise<{ id: str
       <span className="text-sm font-semibold uppercase tracking-wide text-accent">School</span>
       <h1 className="mt-1 text-2xl font-semibold text-foreground">{school.name}</h1>
       <p className="mt-1 text-foreground-soft">{school.type.replace(/_/g, " ")} · {school.status}</p>
+
+      {user.permissions.includes("academic.view") && (
+        <Link
+          href={`/schools/${school.id}/academic`}
+          className="mt-6 flex items-center justify-between rounded-xl border border-border bg-surface p-4 hover:border-accent"
+        >
+          <span className="font-medium text-foreground">Academic structure</span>
+          <span className="text-accent">→</span>
+        </Link>
+      )}
 
       {canManage && (
         <form onSubmit={onInvite} className="mt-8 rounded-xl border border-border bg-surface p-5">

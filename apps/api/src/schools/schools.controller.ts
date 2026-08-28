@@ -37,4 +37,14 @@ export class SchoolsController {
   ) {
     return this.schools.inviteAdmin(user, id, dto.email);
   }
+
+  // Divisions are read-only here — they're created automatically as a direct
+  // consequence of the school's chosen type (see SchoolsService.create) and
+  // are never user-created, but a School Admin needs to read them to pick
+  // which one a new class belongs to.
+  @RequirePermissions("academic.view")
+  @Get(":id/divisions")
+  listDivisions(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.schools.listDivisions(user, id);
+  }
 }

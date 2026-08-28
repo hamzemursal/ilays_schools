@@ -38,11 +38,19 @@ export class SchoolsService {
   }
 
   async findOneAccessibleOrThrow(actor: AuthenticatedUser, id: string) {
+    // AND, not spread: accessibleWhere() may itself set `id: { in: [...] }`,
+    // and spreading `{ ...accessibleWhere(actor), id }` would let the plain
+    // `id` key silently overwrite that restriction instead of narrowing it.
     const school = await this.prisma.school.findFirst({
-      where: { ...this.accessibleWhere(actor), id },
+      where: { AND: [this.accessibleWhere(actor), { id }] },
     });
     if (!school) throw new NotFoundException("School not found");
     return school;
+  }
+
+  async listDivisions(actor: AuthenticatedUser, schoolId: string) {
+    await this.findOneAccessibleOrThrow(actor, schoolId);
+    return this.prisma.division.findMany({ where: { schoolId }, orderBy: { type: "asc" } });
   }
 
   async create(actor: AuthenticatedUser, dto: CreateSchoolDto) {

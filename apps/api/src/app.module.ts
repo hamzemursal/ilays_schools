@@ -9,6 +9,7 @@ import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/guards/jwt-auth.guard";
 import { PermissionsGuard } from "./auth/guards/permissions.guard";
 import { SchoolsModule } from "./schools/schools.module";
+import { AcademicModule } from "./academic/academic.module";
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { SchoolsModule } from "./schools/schools.module";
     HealthModule,
     AuthModule,
     SchoolsModule,
+    AcademicModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

@@ -2,14 +2,16 @@ export function Card({
   children,
   className = "",
   padding = "md",
+  onClick,
 }: {
   children: React.ReactNode;
   className?: string;
   padding?: "none" | "sm" | "md" | "lg";
+  onClick?: () => void;
 }) {
   const paddingClasses = { none: "", sm: "p-3", md: "p-5", lg: "p-6" }[padding];
   return (
-    <div className={`rounded-xl border border-border bg-background shadow-sm ${paddingClasses} ${className}`}>
+    <div onClick={onClick} className={`rounded-xl border border-border bg-background shadow-sm ${paddingClasses} ${className}`}>
       {children}
     </div>
   );

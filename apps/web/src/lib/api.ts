@@ -361,6 +361,7 @@ export type TeacherStatus = "ACTIVE" | "ON_LEAVE" | "INACTIVE";
 
 export interface TeacherAssignmentRecord {
   id: string;
+  schoolId: string;
   academicYearId: string;
   subject: { id: string; name: string };
   section: { id: string; name: string; class: { id: string; name: string } };

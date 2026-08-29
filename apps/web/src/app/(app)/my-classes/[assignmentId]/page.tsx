@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import {
   api,
@@ -19,11 +20,12 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards, SkeletonTable } from "@/components/ui/Skeleton";
-import { CalendarClock, ClipboardCheck, GraduationCap, PenLine, Users } from "lucide-react";
+import { ClipboardCheck, PenLine, Users } from "lucide-react";
 
 export default function MyAssignmentPage({ params }: { params: Promise<{ assignmentId: string }> }) {
   const { assignmentId } = use(params);
   const { accessToken, user } = useAuth();
+  const router = useRouter();
 
   const [data, setData] = useState<MyAssignmentStudents | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +69,19 @@ export default function MyAssignmentPage({ params }: { params: Promise<{ assignm
       .map((es) => ({ examName: exam.name, examSubjectId: es.id })),
   );
 
+  // The subject/year shown alongside attendance are display-only context —
+  // attendance itself is recorded per section per day, not per subject.
+  function attendanceUrl(date: string) {
+    const params = new URLSearchParams({
+      date,
+      year: assignment.academicYear.name,
+      class: assignment.section.class.name,
+      section: assignment.section.name,
+      subject: assignment.subject.name,
+    });
+    return `/schools/${assignment.schoolId}/sections/${assignment.section.id}/attendance?${params.toString()}`;
+  }
+
   return (
     <div>
       <PageHeader
@@ -83,7 +98,7 @@ export default function MyAssignmentPage({ params }: { params: Promise<{ assignm
             description={`${students.length} active student(s) in this section.`}
             actions={
               canMarkAttendance && (
-                <Link href={`/schools/${assignment.schoolId}/sections/${assignment.section.id}/attendance?date=${today}`}>
+                <Link href={attendanceUrl(today)}>
                   <Button size="sm" icon={<ClipboardCheck className="size-4" />}>
                     Mark attendance
                   </Button>
@@ -105,7 +120,11 @@ export default function MyAssignmentPage({ params }: { params: Promise<{ assignm
                       <p className="font-medium text-foreground">
                         <span className="text-foreground-muted">#{s.rollNumber}</span> {s.firstName} {s.lastName}
                       </p>
-                      <p className="font-mono text-xs text-foreground-muted">{s.studentNumber}</p>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-foreground-muted">
+                        <span className="font-mono">{s.studentNumber}</span>
+                        <span>{s.sex === "MALE" ? "Male" : "Female"}</span>
+                        {s.studentStatus !== "ACTIVE" && <Badge tone="neutral">{s.studentStatus}</Badge>}
+                      </div>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       <Badge tone="success">{s.attendanceSummary.present} present</Badge>
@@ -177,7 +196,10 @@ export default function MyAssignmentPage({ params }: { params: Promise<{ assignm
         </Card>
 
         <Card padding="none">
-          <CardHeader title="Attendance history" description="Most recent entries first." />
+          <CardHeader
+            title="Attendance history"
+            description={canMarkAttendance ? "Most recent entries first — click a date to review or edit it." : "Most recent entries first."}
+          />
           {!history ? (
             <div className="p-5">
               <SkeletonTable rows={4} cols={3} />
@@ -197,23 +219,37 @@ export default function MyAssignmentPage({ params }: { params: Promise<{ assignm
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {history.slice(0, 100).map((row) => (
-                    <tr key={row.id}>
-                      <td className="px-5 py-3 text-foreground-soft">{new Date(row.date).toLocaleDateString()}</td>
-                      <td className="px-5 py-3 text-foreground">
-                        #{row.enrollment.rollNumber} {row.enrollment.student.firstName} {row.enrollment.student.lastName}
-                      </td>
-                      <td className="px-5 py-3">
-                        <Badge
-                          tone={
-                            row.status === "PRESENT" ? "success" : row.status === "ABSENT" ? "danger" : row.status === "LATE" ? "warning" : "accent"
-                          }
-                        >
-                          {row.status}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))}
+                  {history.slice(0, 100).map((row) => {
+                    const dateStr = row.date.slice(0, 10);
+                    const cells = (
+                      <>
+                        <td className="px-5 py-3 text-foreground-soft">{new Date(row.date).toLocaleDateString()}</td>
+                        <td className="px-5 py-3 text-foreground">
+                          #{row.enrollment.rollNumber} {row.enrollment.student.firstName} {row.enrollment.student.lastName}
+                        </td>
+                        <td className="px-5 py-3">
+                          <Badge
+                            tone={
+                              row.status === "PRESENT" ? "success" : row.status === "ABSENT" ? "danger" : row.status === "LATE" ? "warning" : "accent"
+                            }
+                          >
+                            {row.status}
+                          </Badge>
+                        </td>
+                      </>
+                    );
+                    return canMarkAttendance ? (
+                      <tr
+                        key={row.id}
+                        onClick={() => router.push(attendanceUrl(dateStr))}
+                        className="cursor-pointer hover:bg-surface-hover"
+                      >
+                        {cells}
+                      </tr>
+                    ) : (
+                      <tr key={row.id}>{cells}</tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -238,24 +274,6 @@ export default function MyAssignmentPage({ params }: { params: Promise<{ assignm
                 ))}
               </div>
             )}
-          </div>
-        </Card>
-
-        <Card padding="none">
-          <CardHeader title="Timetable" description="Recurring schedule for this class." />
-          <div className="p-5">
-            <div className="flex flex-wrap gap-2">
-              <Badge tone="accent">
-                <GraduationCap className="size-3.5" /> {assignment.section.class.name} · {assignment.section.name}
-              </Badge>
-              <Badge tone="accent">{assignment.subject.name}</Badge>
-              <Badge tone="neutral">{assignment.academicYear.name}</Badge>
-            </div>
-            <p className="mt-3 flex items-start gap-1.5 text-sm text-foreground-muted">
-              <CalendarClock className="mt-0.5 size-3.5 shrink-0" />
-              Day/time/room scheduling isn&apos;t tracked by this system yet — this is the recurring class/subject
-              assignment on record.
-            </p>
           </div>
         </Card>
       </div>

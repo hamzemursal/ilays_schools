@@ -10,6 +10,7 @@ import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
+import { Input } from "@/components/ui/FormControls";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
@@ -28,6 +29,9 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteResult, setInviteResult] = useState<{ email: string; acceptUrl: string } | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -51,11 +55,19 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
   async function onInvite() {
     if (!accessToken || !teacher) return;
     setInviting(true);
+    setInviteError(null);
+    setInviteResult(null);
     try {
-      const result = await teachersApi.inviteLogin(accessToken, schoolId, teacher.id);
+      const result = await teachersApi.inviteLogin(
+        accessToken,
+        schoolId,
+        teacher.id,
+        teacher.email ? undefined : inviteEmail,
+      );
+      setInviteResult(result);
       show(`Invitation created for ${result.email}.`);
     } catch (err) {
-      show(err instanceof ApiError ? err.message : "Failed to send invite", "danger");
+      setInviteError(err instanceof ApiError ? err.message : "Failed to send invite");
     } finally {
       setInviting(false);
     }
@@ -104,12 +116,41 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
             </div>
             {teacher.qualification && <p className="mt-1 text-sm text-foreground-soft">{teacher.qualification}</p>}
           </div>
+          {canUpdate && !teacher.userId && !teacher.email && (
+            <Input
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              placeholder="Email for login invite"
+              className="w-56"
+            />
+          )}
           {canUpdate && !teacher.userId && (
-            <Button size="sm" variant="outline" icon={<Send className="size-4" />} loading={inviting} onClick={onInvite}>
+            <Button
+              size="sm"
+              variant="outline"
+              icon={<Send className="size-4" />}
+              loading={inviting}
+              disabled={!teacher.email && !inviteEmail}
+              onClick={onInvite}
+            >
               Invite to log in
             </Button>
           )}
         </div>
+        {inviteError && (
+          <Alert tone="danger" className="mt-3">
+            {inviteError}
+          </Alert>
+        )}
+        {inviteResult && (
+          <Alert tone="success" className="mt-3">
+            <p className="font-medium">Invitation created for {inviteResult.email}.</p>
+            <p className="mt-1 break-all font-mono text-xs">{inviteResult.acceptUrl}</p>
+            <p className="mt-1 flex items-center gap-1.5 text-foreground-soft">
+              <Mail className="size-3.5" /> Email delivery isn&apos;t wired up yet — share this link with them directly for now.
+            </p>
+          </Alert>
+        )}
       </Card>
 
       <Card padding="none">

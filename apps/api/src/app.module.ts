@@ -22,6 +22,8 @@ import { StorageModule } from "./storage/storage.module";
 import { DocumentsModule } from "./documents/documents.module";
 import { AuditModule } from "./audit/audit.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
+import { ImportsModule } from "./imports/imports.module";
+import { ExportsModule } from "./exports/exports.module";
 
 @Module({
   imports: [
@@ -45,6 +47,8 @@ import { DashboardModule } from "./dashboard/dashboard.module";
     DocumentsModule,
     AuditModule,
     DashboardModule,
+    ImportsModule,
+    ExportsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

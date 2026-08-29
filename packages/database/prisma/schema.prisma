@@ -62,6 +62,7 @@ model School {
   invitations   Invitation[]
   exams         Exam[]
   feeStructures FeeStructure[]
+  importBatches ImportBatch[]
 
   @@unique([organizationId, name])
   @@map("schools")
@@ -70,7 +71,7 @@ model School {
 model AcademicYear {
   id       String @id @default(uuid())
   schoolId String
-  school   School  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
 
   name      String // e.g. "2026"
   startDate DateTime
@@ -258,10 +259,10 @@ model StudentEnrollment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  transfersOut  Transfer[]        @relation("TransferFrom")
-  transfersIn   Transfer[]        @relation("TransferTo")
-  promotionFrom PromotionItem[]   @relation("PromotionFrom")
-  promotionTo   PromotionItem[]   @relation("PromotionTo")
+  transfersOut  Transfer[]      @relation("TransferFrom")
+  transfersIn   Transfer[]      @relation("TransferTo")
+  promotionFrom PromotionItem[] @relation("PromotionFrom")
+  promotionTo   PromotionItem[] @relation("PromotionTo")
   attendances   Attendance[]
   results       Result[]
   invoices      Invoice[]
@@ -297,7 +298,7 @@ enum GuardianRelationship {
 }
 
 model Guardian {
-  id     String @id @default(uuid())
+  id     String  @id @default(uuid())
   userId String? @unique
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
@@ -340,11 +341,11 @@ enum TeacherStatus {
 }
 
 model Teacher {
-  id       String @id @default(uuid())
+  id       String  @id @default(uuid())
   userId   String? @unique
   user     User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
   schoolId String
-  school   School @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  school   School  @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
   employeeNumber String
   firstName      String
@@ -581,15 +582,15 @@ enum TransferStatus {
 }
 
 model Transfer {
-  id       String  @id @default(uuid())
+  id        String  @id @default(uuid())
   studentId String
   student   Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
 
-  fromEnrollmentId String            @unique
-  fromEnrollment   StudentEnrollment @relation("TransferFrom", fields: [fromEnrollmentId], references: [id], onDelete: Restrict)
+  fromEnrollmentId String             @unique
+  fromEnrollment   StudentEnrollment  @relation("TransferFrom", fields: [fromEnrollmentId], references: [id], onDelete: Restrict)
   fromSchoolId     String
   toSchoolId       String
-  toEnrollmentId   String?           @unique
+  toEnrollmentId   String?            @unique
   toEnrollment     StudentEnrollment? @relation("TransferTo", fields: [toEnrollmentId], references: [id], onDelete: SetNull)
 
   reason            String?
@@ -625,12 +626,12 @@ enum PromotionOutcome {
 }
 
 model PromotionBatch {
-  id                   String   @id @default(uuid())
-  schoolId             String
-  fromAcademicYearId   String
-  toAcademicYearId     String
-  initiatedByUserId    String
-  status               PromotionBatchStatus @default(DRAFT)
+  id                 String               @id @default(uuid())
+  schoolId           String
+  fromAcademicYearId String
+  toAcademicYearId   String
+  initiatedByUserId  String
+  status             PromotionBatchStatus @default(DRAFT)
 
   createdAt   DateTime  @default(now())
   confirmedAt DateTime?
@@ -646,9 +647,9 @@ model PromotionItem {
   batch   PromotionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
   studentId        String
-  fromEnrollmentId String            @unique
-  fromEnrollment   StudentEnrollment @relation("PromotionFrom", fields: [fromEnrollmentId], references: [id], onDelete: Restrict)
-  toEnrollmentId   String?           @unique
+  fromEnrollmentId String             @unique
+  fromEnrollment   StudentEnrollment  @relation("PromotionFrom", fields: [fromEnrollmentId], references: [id], onDelete: Restrict)
+  toEnrollmentId   String?            @unique
   toEnrollment     StudentEnrollment? @relation("PromotionTo", fields: [toEnrollmentId], references: [id], onDelete: SetNull)
 
   outcome PromotionOutcome
@@ -669,7 +670,7 @@ enum UserStatus {
 }
 
 model User {
-  id             String       @id @default(uuid())
+  id             String        @id @default(uuid())
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
@@ -695,7 +696,7 @@ model UserSchool {
   userId   String
   user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   schoolId String
-  school   School  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 
@@ -715,8 +716,8 @@ model Role {
 }
 
 model Permission {
-  id   String @id @default(uuid())
-  key  String @unique // e.g. "students.create"
+  id  String @id @default(uuid())
+  key String @unique // e.g. "students.create"
 
   roles RolePermission[]
 
@@ -823,7 +824,7 @@ model MediaFile {
 // ---------------------------------------------------------------------------
 
 model AuditLog {
-  id             String   @id @default(uuid())
+  id             String  @id @default(uuid())
   organizationId String?
   schoolId       String?
   actorUserId    String?
@@ -840,4 +841,73 @@ model AuditLog {
   @@index([schoolId, createdAt])
   @@index([resource, resourceId])
   @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Bulk import — CSV upload creates one batch with one row per CSV line.
+// Rows that pass validation and have no duplicate concern are created
+// immediately; rows with a possible duplicate stop for a human decision,
+// exactly like the single-student create flow's possibleDuplicates
+// response, just persisted instead of being a one-shot HTTP error. Nothing
+// here bypasses StudentsService.create — every successful row is a real
+// call into it, so duplicate detection, numbering, and audit logging all
+// stay in one place.
+// ---------------------------------------------------------------------------
+
+enum ImportBatchStatus {
+  PROCESSING
+  NEEDS_REVIEW
+  COMPLETED
+}
+
+enum ImportRowStatus {
+  PENDING
+  CREATED
+  DUPLICATE_PENDING
+  ERROR
+  SKIPPED
+}
+
+model ImportBatch {
+  id               String            @id @default(uuid())
+  organizationId   String
+  schoolId         String
+  school           School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  uploadedByUserId String
+  fileName         String
+  status           ImportBatchStatus @default(PROCESSING)
+
+  totalRows    Int @default(0)
+  createdCount Int @default(0)
+  errorCount   Int @default(0)
+  pendingCount Int @default(0)
+  skippedCount Int @default(0)
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  rows ImportRow[]
+
+  @@index([schoolId, createdAt])
+  @@map("import_batches")
+}
+
+model ImportRow {
+  id      String      @id @default(uuid())
+  batchId String
+  batch   ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  rowNumber Int
+  rawData   Json
+  status    ImportRowStatus @default(PENDING)
+
+  studentId           String?
+  errorMessage        String?
+  duplicateCandidates Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([batchId, status])
+  @@map("import_rows")
 }

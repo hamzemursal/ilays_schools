@@ -10,5 +10,6 @@ import { InvoicesService } from "./invoices.service";
   imports: [SchoolsModule, StudentsModule],
   controllers: [FeeStructuresController, InvoicesController],
   providers: [FeeStructuresService, InvoicesService],
+  exports: [InvoicesService],
 })
 export class FinanceModule {}

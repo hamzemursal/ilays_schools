@@ -18,7 +18,8 @@ import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
-import { Plus } from "lucide-react";
+import { useToast } from "@/components/ui/Toast";
+import { Download, Plus } from "lucide-react";
 
 export default function FinancePage({ params }: { params: Promise<{ id: string }> }) {
   const { id: schoolId } = use(params);
@@ -84,7 +85,14 @@ export default function FinancePage({ params }: { params: Promise<{ id: string }
               canManage={canManageFees}
             />
 
-            <InvoicesSection accessToken={accessToken!} invoices={invoices} setInvoices={setInvoices} canRecordPayments={canRecordPayments} />
+            <InvoicesSection
+              schoolId={schoolId}
+              accessToken={accessToken!}
+              invoices={invoices}
+              setInvoices={setInvoices}
+              canRecordPayments={canRecordPayments}
+              canExport={user?.permissions.includes("exports.create") ?? false}
+            />
           </>
         )}
       </div>
@@ -236,21 +244,45 @@ const STATUS_TONE: Record<SchoolInvoice["status"], "danger" | "warning" | "succe
 };
 
 function InvoicesSection({
+  schoolId,
   accessToken,
   invoices,
   setInvoices,
   canRecordPayments,
+  canExport,
 }: {
+  schoolId: string;
   accessToken: string;
   invoices: SchoolInvoice[];
   setInvoices: (fn: (prev: SchoolInvoice[]) => SchoolInvoice[]) => void;
   canRecordPayments: boolean;
+  canExport: boolean;
 }) {
   const [openInvoiceId, setOpenInvoiceId] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const { show } = useToast();
+
+  async function onExport() {
+    setExporting(true);
+    try {
+      await api.exportInvoices(accessToken, schoolId);
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to export invoices", "danger");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <section>
-      <h2 className="mb-3 text-sm font-semibold text-foreground">Invoices</h2>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-foreground">Invoices</h2>
+        {canExport && (
+          <Button size="sm" variant="outline" icon={<Download className="size-4" />} loading={exporting} onClick={onExport}>
+            Export
+          </Button>
+        )}
+      </div>
 
       {invoices.length === 0 ? (
         <EmptyState title="No invoices yet" description="Generate invoices from a fee structure above." />

@@ -33,6 +33,27 @@ async function request<T>(
   return data as T;
 }
 
+// The export endpoints require an Authorization header, which a plain <a
+// href> download link can't attach — so we fetch the file ourselves and
+// trigger the save via a throwaway object URL.
+async function downloadFile(path: string, accessToken: string, filename: string): Promise<void> {
+  const res = await fetch(`${API_URL}${path}`, {
+    credentials: "include",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new ApiError(data?.message ?? `Request failed with status ${res.status}`, res.status, data);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 async function uploadFile<T>(path: string, file: File, fieldName: string, accessToken: string): Promise<T> {
   const formData = new FormData();
   formData.append(fieldName, file);
@@ -360,6 +381,36 @@ export interface Transfer {
   student: { firstName: string; lastName: string };
 }
 
+export type ImportBatchStatus = "PROCESSING" | "NEEDS_REVIEW" | "COMPLETED";
+export type ImportRowStatus = "PENDING" | "CREATED" | "DUPLICATE_PENDING" | "ERROR" | "SKIPPED";
+
+export interface ImportRow {
+  id: string;
+  rowNumber: number;
+  rawData: Record<string, string>;
+  status: ImportRowStatus;
+  studentId: string | null;
+  errorMessage: string | null;
+  duplicateCandidates: { id: string; firstName: string; lastName: string; dateOfBirth: string }[] | null;
+}
+
+export interface ImportBatch {
+  id: string;
+  fileName: string;
+  status: ImportBatchStatus;
+  totalRows: number;
+  createdCount: number;
+  errorCount: number;
+  pendingCount: number;
+  skippedCount: number;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface ImportBatchDetail extends ImportBatch {
+  rows: ImportRow[];
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ accessToken: string }>("/auth/login", { method: "POST", body: { email, password } }),
@@ -572,4 +623,30 @@ export const api = {
     uploadFile<{ id: string }>(`/students/${studentId}/photo`, file, "photo", accessToken),
   getStudentPhotoUrl: (accessToken: string, studentId: string) =>
     request<{ url: string; uploadedAt: string }>(`/students/${studentId}/photo`, { accessToken }),
+
+  uploadStudentsImport: (accessToken: string, schoolId: string, file: File) =>
+    uploadFile<ImportBatchDetail>(`/schools/${schoolId}/imports/students`, file, "file", accessToken),
+  listImportBatches: (accessToken: string, schoolId: string) =>
+    request<ImportBatch[]>(`/schools/${schoolId}/imports/students`, { accessToken }),
+  getImportBatch: (accessToken: string, schoolId: string, batchId: string) =>
+    request<ImportBatchDetail>(`/schools/${schoolId}/imports/students/${batchId}`, { accessToken }),
+  resolveImportRow: (
+    accessToken: string,
+    schoolId: string,
+    batchId: string,
+    rowId: string,
+    action: "confirm" | "skip",
+  ) =>
+    request<ImportBatchDetail>(`/schools/${schoolId}/imports/students/${batchId}/rows/${rowId}/resolve`, {
+      method: "POST",
+      body: { action },
+      accessToken,
+    }),
+
+  exportStudents: (accessToken: string, schoolId: string) =>
+    downloadFile(`/schools/${schoolId}/exports/students`, accessToken, "students.csv"),
+  exportTeachers: (accessToken: string, schoolId: string) =>
+    downloadFile(`/schools/${schoolId}/exports/teachers`, accessToken, "teachers.csv"),
+  exportInvoices: (accessToken: string, schoolId: string) =>
+    downloadFile(`/schools/${schoolId}/exports/invoices`, accessToken, "invoices.csv"),
 };

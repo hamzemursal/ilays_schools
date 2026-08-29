@@ -132,6 +132,19 @@ export interface Subject {
   code: string | null;
 }
 
+export interface ClassSubjectRecord {
+  classId: string;
+  subjectId: string;
+  subject: Subject;
+}
+
+export interface SectionTeacherAssignment {
+  id: string;
+  subjectId: string;
+  subject: Subject;
+  teacher: { id: string; firstName: string; lastName: string };
+}
+
 export type Sex = "MALE" | "FEMALE";
 export type GuardianRelationship = "FATHER" | "MOTHER" | "GUARDIAN" | "OTHER";
 
@@ -164,6 +177,14 @@ export interface GuardianRecord {
   email: string | null;
   relationship: GuardianRelationship;
   isPrimaryContact: boolean;
+}
+
+export interface GuardianSearchResult {
+  id: string;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  email: string | null;
 }
 
 export interface StudentEnrollmentRecord {
@@ -462,6 +483,19 @@ export const api = {
     classId: string,
     body: { name: string; capacity: number },
   ) => request<Section>(`/schools/${schoolId}/classes/${classId}/sections`, { method: "POST", body, accessToken }),
+  listClassSubjects: (accessToken: string, schoolId: string, classId: string) =>
+    request<ClassSubjectRecord[]>(`/schools/${schoolId}/classes/${classId}/subjects`, { accessToken }),
+  listSectionTeacherAssignments: (
+    accessToken: string,
+    schoolId: string,
+    classId: string,
+    sectionId: string,
+    academicYearId: string,
+  ) =>
+    request<SectionTeacherAssignment[]>(
+      `/schools/${schoolId}/classes/${classId}/sections/${sectionId}/teacher-assignments?academicYearId=${academicYearId}`,
+      { accessToken },
+    ),
 
   listSubjects: (accessToken: string, schoolId: string) =>
     request<Subject[]>(`/schools/${schoolId}/subjects`, { accessToken }),
@@ -480,6 +514,11 @@ export const api = {
     request<StudentDetail>(`/students/${studentId}`, { accessToken }),
   addGuardian: (accessToken: string, studentId: string, body: GuardianInput) =>
     request<GuardianRecord>(`/students/${studentId}/guardians`, { method: "POST", body, accessToken }),
+  searchGuardians: (accessToken: string, schoolId: string, search: string) =>
+    request<GuardianSearchResult[]>(
+      `/schools/${schoolId}/guardians?search=${encodeURIComponent(search)}`,
+      { accessToken },
+    ),
 
   listTeachers: (accessToken: string, schoolId: string) =>
     request<Teacher[]>(`/schools/${schoolId}/teachers`, { accessToken }),

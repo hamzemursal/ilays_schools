@@ -106,6 +106,29 @@ export class ClassesService {
     return this.prisma.classSubject.findMany({ where: { classId }, include: { subject: true } });
   }
 
+  // Read-only lookup of who already teaches a section's subjects for a given
+  // year — backs the student wizard's "teachers you'll have" preview, which
+  // is purely informational: a student is never assigned a teacher directly,
+  // only implied through TeacherAssignment (teacher + section + subject).
+  async listSectionTeacherAssignments(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    classId: string,
+    sectionId: string,
+    academicYearId: string,
+  ) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    await this.getClassInSchoolOrThrow(schoolId, classId);
+    const section = await this.prisma.section.findFirst({ where: { id: sectionId, classId } });
+    if (!section) throw new NotFoundException("Section not found in this class");
+
+    return this.prisma.teacherAssignment.findMany({
+      where: { sectionId, academicYearId },
+      include: { subject: true, teacher: { select: { id: true, firstName: true, lastName: true } } },
+      orderBy: { subject: { name: "asc" } },
+    });
+  }
+
   async assignSubject(actor: AuthenticatedUser, schoolId: string, classId: string, dto: AssignSubjectDto) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     await this.getClassInSchoolOrThrow(schoolId, classId);

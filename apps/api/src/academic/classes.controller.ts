@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { ClassesService } from "./classes.service";
 import { CreateClassDto } from "./dto/create-class.dto";
 import { CreateSectionDto } from "./dto/create-section.dto";
@@ -80,6 +80,18 @@ export class ClassesController {
     @Body() dto: AssignSubjectDto,
   ) {
     return this.classes.assignSubject(user, schoolId, classId, dto);
+  }
+
+  @RequirePermissions("academic.view")
+  @Get(":classId/sections/:sectionId/teacher-assignments")
+  listSectionTeacherAssignments(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("classId") classId: string,
+    @Param("sectionId") sectionId: string,
+    @Query("academicYearId") academicYearId: string,
+  ) {
+    return this.classes.listSectionTeacherAssignments(user, schoolId, classId, sectionId, academicYearId);
   }
 
   @RequirePermissions("academic.manage")

@@ -2,7 +2,7 @@
 
 import { use } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { StudentForm } from "@/features/students/forms/StudentForm";
+import { StudentWizard } from "@/features/students/wizard/StudentWizard";
 
 export default function NewStudentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: schoolId } = use(params);
@@ -18,8 +18,8 @@ export default function NewStudentPage({ params }: { params: Promise<{ id: strin
           { label: "Add student" },
         ]}
       />
-      <div className="mx-auto max-w-2xl p-4 sm:p-6">
-        <StudentForm schoolId={schoolId} />
+      <div className="mx-auto max-w-3xl p-4 sm:p-6">
+        <StudentWizard schoolId={schoolId} />
       </div>
     </div>
   );

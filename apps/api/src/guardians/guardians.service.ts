@@ -54,4 +54,29 @@ export class GuardiansService {
     });
     return links.map((l) => ({ ...l.guardian, relationship: l.relationship, isPrimaryContact: l.isPrimaryContact }));
   }
+
+  // Backs the "search for an existing guardian" step in student creation —
+  // scoped to guardians already linked to a student enrolled in this school,
+  // so an admin can find "Ahmed Hassan" (parent of an existing student) and
+  // reuse that exact record instead of retyping his details, which would
+  // otherwise create a second Guardian row despite findOrCreate's phone/email
+  // match (a fresh, correctly-matching phone number was never typed at all).
+  async searchForSchool(organizationId: string, schoolId: string, query: string) {
+    if (query.trim().length < 2) return [];
+    return this.prisma.guardian.findMany({
+      where: {
+        students: {
+          some: { student: { organizationId, enrollments: { some: { schoolId } } } },
+        },
+        OR: [
+          { firstName: { contains: query, mode: "insensitive" } },
+          { lastName: { contains: query, mode: "insensitive" } },
+          { phone: { contains: query } },
+          { email: { contains: query, mode: "insensitive" } },
+        ],
+      },
+      take: 10,
+      orderBy: { lastName: "asc" },
+    });
+  }
 }

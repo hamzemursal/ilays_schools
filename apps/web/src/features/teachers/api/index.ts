@@ -5,9 +5,13 @@ import { api } from "@/lib/api";
 // resolved client-side by filtering the school's teacher list.
 export const teachersApi = {
   list: api.listTeachers,
+  getOne: api.getTeacher,
   create: api.createTeacher,
+  update: api.updateTeacher,
   addAssignment: api.addTeacherAssignment,
   inviteLogin: api.inviteTeacherLogin,
   uploadPhoto: api.uploadTeacherPhoto,
   getPhotoUrl: api.getTeacherPhotoUrl,
+  uploadDocument: api.uploadTeacherDocument,
+  listDocuments: api.listTeacherDocuments,
 };

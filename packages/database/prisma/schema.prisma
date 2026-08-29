@@ -350,10 +350,21 @@ model Teacher {
   employeeNumber String
   firstName      String
   lastName       String
+  sex            Sex?
+  dateOfBirth    DateTime?
   phone          String?
   email          String?
+  address        String?
   qualification  String?
+  specialization String?
+  employmentDate DateTime?
   status         TeacherStatus @default(ACTIVE)
+
+  // Self-service contact fields (see TeachersService.updateMyProfile) — a
+  // teacher may keep these current themselves; everything else on this model
+  // is School Admin controlled.
+  emergencyContactName  String?
+  emergencyContactPhone String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -801,12 +812,22 @@ enum MediaOwnerType {
   TEACHER
 }
 
+// PHOTO is always "the latest one wins" (see DocumentsService.getPhotoUrl).
+// DOCUMENT rows (e.g. a teacher's qualification/certification attachments)
+// are additive — every upload is kept and listed, none are superseded.
+enum MediaKind {
+  PHOTO
+  DOCUMENT
+}
+
 model MediaFile {
   id             String         @id @default(uuid())
   organizationId String
   schoolId       String?
   ownerType      MediaOwnerType
   ownerId        String
+  kind           MediaKind      @default(PHOTO)
+  label          String? // human-readable name for a DOCUMENT, e.g. "Teaching Certificate"
 
   storageKey       String @unique
   mimeType         String
@@ -815,7 +836,7 @@ model MediaFile {
 
   createdAt DateTime @default(now())
 
-  @@index([ownerType, ownerId])
+  @@index([ownerType, ownerId, kind])
   @@map("media_files")
 }
 

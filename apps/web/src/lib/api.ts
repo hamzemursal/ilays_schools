@@ -1,5 +1,13 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
 
+// Builds "?a=x&b=y" from only the defined entries, or "" if none are set —
+// used for optional filter params like attendance history's from/to range.
+function qs(params: Record<string, string | undefined>): string {
+  const entries = Object.entries(params).filter((e): e is [string, string] => e[1] !== undefined);
+  if (entries.length === 0) return "";
+  return `?${entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&")}`;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -54,9 +62,16 @@ async function downloadFile(path: string, accessToken: string, filename: string)
   URL.revokeObjectURL(url);
 }
 
-async function uploadFile<T>(path: string, file: File, fieldName: string, accessToken: string): Promise<T> {
+async function uploadFile<T>(
+  path: string,
+  file: File,
+  fieldName: string,
+  accessToken: string,
+  extraFields?: Record<string, string>,
+): Promise<T> {
   const formData = new FormData();
   formData.append(fieldName, file);
+  for (const [key, value] of Object.entries(extraFields ?? {})) formData.append(key, value);
 
   const res = await fetch(`${API_URL}${path}`, {
     method: "POST",
@@ -81,6 +96,7 @@ export interface Profile {
   permissions: string[];
   schoolIds: string[];
   schools: { id: string; name: string }[];
+  teacherId: string | null;
 }
 
 export type SchoolType = "PRIMARY" | "SECONDARY" | "PRIMARY_AND_SECONDARY";
@@ -347,7 +363,8 @@ export interface TeacherAssignmentRecord {
   id: string;
   academicYearId: string;
   subject: { id: string; name: string };
-  section: { id: string; name: string };
+  section: { id: string; name: string; class: { id: string; name: string } };
+  academicYear: { id: string; name: string };
 }
 
 export interface Teacher {
@@ -356,9 +373,16 @@ export interface Teacher {
   employeeNumber: string;
   firstName: string;
   lastName: string;
+  sex: Sex | null;
+  dateOfBirth: string | null;
   phone: string | null;
   email: string | null;
+  address: string | null;
   qualification: string | null;
+  specialization: string | null;
+  employmentDate: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
   status: TeacherStatus;
   assignments: TeacherAssignmentRecord[];
 }
@@ -371,6 +395,83 @@ export interface CreateTeacherInput {
   email?: string;
   qualification?: string;
   assignments?: { academicYearId: string; sectionId: string; subjectId: string }[];
+}
+
+// Every field optional — School Admin can update as much or as little as
+// they have on file. Excludes employeeNumber/school/assignments, which
+// stay governed by their own dedicated flows.
+export interface UpdateTeacherInput {
+  firstName?: string;
+  lastName?: string;
+  sex?: Sex;
+  dateOfBirth?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  qualification?: string;
+  specialization?: string;
+  employmentDate?: string;
+  status?: TeacherStatus;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+}
+
+// The strict subset a teacher may change about themselves — see
+// UpdateMyTeacherProfileDto on the backend.
+export interface UpdateMyTeacherProfileInput {
+  phone?: string;
+  email?: string;
+  address?: string;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+}
+
+export interface TeacherDocument {
+  id: string;
+  label: string | null;
+  mimeType: string;
+  sizeBytes: number;
+  uploadedAt: string;
+  url: string;
+}
+
+export interface AttendanceSummaryRow {
+  enrollmentId: string;
+  firstName: string;
+  lastName: string;
+  rollNumber: number;
+  present: number;
+  absent: number;
+  late: number;
+  excused: number;
+}
+
+export interface AttendanceHistoryRow {
+  id: string;
+  date: string;
+  status: AttendanceStatus;
+  note: string | null;
+  enrollment: { rollNumber: number; student: { firstName: string; lastName: string } };
+}
+
+export interface MyAssignmentStudent {
+  enrollmentId: string;
+  studentId: string;
+  firstName: string;
+  lastName: string;
+  sex: Sex;
+  dateOfBirth: string;
+  studentStatus: StudentStatus;
+  studentNumber: string;
+  rollNumber: number;
+  photoUrl: string | null;
+  attendanceSummary: { present: number; absent: number; late: number; excused: number };
+  guardians: GuardianRecord[];
+}
+
+export interface MyAssignmentStudents {
+  assignment: MyAssignment;
+  students: MyAssignmentStudent[];
 }
 
 export type PromotionOutcome = "PROMOTED" | "COMPLETED" | "GRADUATED";
@@ -537,6 +638,16 @@ export const api = {
     request<Teacher[]>(`/schools/${schoolId}/teachers`, { accessToken }),
   createTeacher: (accessToken: string, schoolId: string, body: CreateTeacherInput) =>
     request<Teacher>(`/schools/${schoolId}/teachers`, { method: "POST", body, accessToken }),
+  getTeacher: (accessToken: string, schoolId: string, teacherId: string) =>
+    request<Teacher>(`/schools/${schoolId}/teachers/${teacherId}`, { accessToken }),
+  updateTeacher: (accessToken: string, schoolId: string, teacherId: string, body: UpdateTeacherInput) =>
+    request<Teacher>(`/schools/${schoolId}/teachers/${teacherId}`, { method: "PATCH", body, accessToken }),
+  uploadTeacherDocument: (accessToken: string, schoolId: string, teacherId: string, file: File, label?: string) =>
+    uploadFile<TeacherDocument>(`/schools/${schoolId}/teachers/${teacherId}/documents`, file, "file", accessToken, {
+      ...(label ? { label } : {}),
+    }),
+  listTeacherDocuments: (accessToken: string, schoolId: string, teacherId: string) =>
+    request<TeacherDocument[]>(`/schools/${schoolId}/teachers/${teacherId}/documents`, { accessToken }),
   addTeacherAssignment: (
     accessToken: string,
     schoolId: string,
@@ -594,6 +705,21 @@ export const api = {
     request<Transfer>(`/transfers/${transferId}/reject`, { method: "POST", accessToken }),
 
   myAssignments: (accessToken: string) => request<MyAssignment[]>("/teachers/me/assignments", { accessToken }),
+  myAssignmentStudents: (accessToken: string, assignmentId: string) =>
+    request<MyAssignmentStudents>(`/teachers/me/assignments/${assignmentId}/students`, { accessToken }),
+
+  getMyTeacherProfile: (accessToken: string) => request<Teacher | null>("/teachers/me", { accessToken }),
+  updateMyTeacherProfile: (accessToken: string, body: UpdateMyTeacherProfileInput) =>
+    request<Teacher>("/teachers/me", { method: "PATCH", body, accessToken }),
+  uploadMyPhoto: (accessToken: string, file: File) =>
+    uploadFile<{ id: string }>("/teachers/me/photo", file, "photo", accessToken),
+  getMyPhotoUrl: (accessToken: string) =>
+    request<{ url: string; uploadedAt: string }>("/teachers/me/photo", { accessToken }),
+  uploadMyDocument: (accessToken: string, file: File, label?: string) =>
+    uploadFile<TeacherDocument>("/teachers/me/documents", file, "file", accessToken, {
+      ...(label ? { label } : {}),
+    }),
+  listMyDocuments: (accessToken: string) => request<TeacherDocument[]>("/teachers/me/documents", { accessToken }),
 
   getAttendance: (accessToken: string, schoolId: string, sectionId: string, date: string) =>
     request<AttendanceRow[]>(`/schools/${schoolId}/sections/${sectionId}/attendance?date=${date}`, { accessToken }),
@@ -609,6 +735,16 @@ export const api = {
       body: { date, entries },
       accessToken,
     }),
+  getAttendanceHistory: (accessToken: string, schoolId: string, sectionId: string, from?: string, to?: string) =>
+    request<AttendanceHistoryRow[]>(
+      `/schools/${schoolId}/sections/${sectionId}/attendance/history${qs({ from, to })}`,
+      { accessToken },
+    ),
+  getAttendanceSummary: (accessToken: string, schoolId: string, sectionId: string, from?: string, to?: string) =>
+    request<AttendanceSummaryRow[]>(
+      `/schools/${schoolId}/sections/${sectionId}/attendance/summary${qs({ from, to })}`,
+      { accessToken },
+    ),
 
   listExams: (accessToken: string, schoolId: string) => request<Exam[]>(`/schools/${schoolId}/exams`, { accessToken }),
   createExam: (accessToken: string, schoolId: string, body: { academicYearId: string; name: string; type: ExamType }) =>

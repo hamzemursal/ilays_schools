@@ -31,6 +31,27 @@ export class AttendanceService {
     }
   }
 
+  // Mirrors assertCanAccessSection, but for "one student, all their
+  // attendance" rather than "one section" — a teacher may only see a
+  // student's history if that student is currently enrolled in a section
+  // the teacher holds any TeacherAssignment for. Admins (no Teacher
+  // profile) are unrestricted here too, same as the section-level check.
+  private async assertTeacherCanAccessStudent(actor: AuthenticatedUser, studentId: string) {
+    const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id } });
+    if (!teacher) return;
+
+    const enrollment = await this.prisma.studentEnrollment.findFirst({
+      where: {
+        studentId,
+        status: "ACTIVE",
+        section: { teacherAssignments: { some: { teacherId: teacher.id } } },
+      },
+    });
+    if (!enrollment) {
+      throw new ForbiddenException("You are not assigned to this student's section");
+    }
+  }
+
   private async getSectionInSchoolOrThrow(schoolId: string, sectionId: string) {
     const section = await this.prisma.section.findFirst({
       where: { id: sectionId, class: { division: { schoolId } } },
@@ -96,8 +117,63 @@ export class AttendanceService {
     return this.getForSectionAndDate(actor, schoolId, sectionId, dto.date);
   }
 
+  async historyForSection(actor: AuthenticatedUser, schoolId: string, sectionId: string, from?: string, to?: string) {
+    await this.assertCanAccessSection(actor, schoolId, sectionId);
+    await this.getSectionInSchoolOrThrow(schoolId, sectionId);
+
+    return this.prisma.attendance.findMany({
+      where: {
+        enrollment: { sectionId },
+        ...(from || to
+          ? { date: { ...(from ? { gte: new Date(from) } : {}), ...(to ? { lte: new Date(to) } : {}) } }
+          : {}),
+      },
+      include: { enrollment: { select: { rollNumber: true, student: { select: { firstName: true, lastName: true } } } } },
+      orderBy: [{ date: "desc" }],
+    });
+  }
+
+  async summaryForSection(actor: AuthenticatedUser, schoolId: string, sectionId: string, from?: string, to?: string) {
+    await this.assertCanAccessSection(actor, schoolId, sectionId);
+    await this.getSectionInSchoolOrThrow(schoolId, sectionId);
+
+    const enrollments = await this.prisma.studentEnrollment.findMany({
+      where: { sectionId, status: "ACTIVE" },
+      include: { student: true },
+      orderBy: { rollNumber: "asc" },
+    });
+
+    const dateFilter =
+      from || to ? { date: { ...(from ? { gte: new Date(from) } : {}), ...(to ? { lte: new Date(to) } : {}) } } : {};
+
+    const counts = await this.prisma.attendance.groupBy({
+      by: ["enrollmentId", "status"],
+      where: { enrollment: { sectionId }, ...dateFilter },
+      _count: true,
+    });
+
+    const byEnrollment = new Map<string, { present: number; absent: number; late: number; excused: number }>();
+    for (const row of counts) {
+      const bucket = byEnrollment.get(row.enrollmentId) ?? { present: 0, absent: 0, late: 0, excused: 0 };
+      if (row.status === "PRESENT") bucket.present = row._count;
+      else if (row.status === "ABSENT") bucket.absent = row._count;
+      else if (row.status === "LATE") bucket.late = row._count;
+      else if (row.status === "EXCUSED") bucket.excused = row._count;
+      byEnrollment.set(row.enrollmentId, bucket);
+    }
+
+    return enrollments.map((e) => ({
+      enrollmentId: e.id,
+      firstName: e.student.firstName,
+      lastName: e.student.lastName,
+      rollNumber: e.rollNumber,
+      ...(byEnrollment.get(e.id) ?? { present: 0, absent: 0, late: 0, excused: 0 }),
+    }));
+  }
+
   async historyForStudent(actor: AuthenticatedUser, studentId: string) {
     await this.students.assertAccessibleStudent(actor, studentId);
+    await this.assertTeacherCanAccessStudent(actor, studentId);
 
     return this.prisma.attendance.findMany({
       where: {

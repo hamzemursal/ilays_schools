@@ -33,8 +33,32 @@ export class AttendanceController {
   }
 
   @RequirePermissions("attendance.view")
+  @Get("schools/:schoolId/sections/:sectionId/attendance/history")
+  history(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("sectionId") sectionId: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ) {
+    return this.attendance.historyForSection(user, schoolId, sectionId, from, to);
+  }
+
+  @RequirePermissions("attendance.view")
+  @Get("schools/:schoolId/sections/:sectionId/attendance/summary")
+  summary(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("sectionId") sectionId: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ) {
+    return this.attendance.summaryForSection(user, schoolId, sectionId, from, to);
+  }
+
+  @RequirePermissions("attendance.view")
   @Get("students/:id/attendance")
-  history(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+  historyForStudent(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.attendance.historyForStudent(user, id);
   }
 }

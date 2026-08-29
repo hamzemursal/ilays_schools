@@ -140,6 +140,7 @@ export class ClassesService {
       where: { classId_subjectId: { classId, subjectId: dto.subjectId } },
       update: {},
       create: { classId, subjectId: dto.subjectId },
+      include: { subject: true },
     });
   }
 

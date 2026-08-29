@@ -2,7 +2,16 @@
 
 import { use, useEffect, useState, type FormEvent } from "react";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type AcademicYear, type ClassWithSections, type Division, type Exam, type ExamType, type Subject } from "@/lib/api";
+import {
+  api,
+  type AcademicYear,
+  type ClassSubjectRecord,
+  type ClassWithSections,
+  type Division,
+  type Exam,
+  type ExamType,
+  type Subject,
+} from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -96,6 +105,7 @@ export default function AcademicStructurePage({ params }: { params: Promise<{ id
                 divisions={divisions}
                 classes={classes}
                 setClasses={setClasses}
+                subjects={subjects}
                 canManage={canManage}
               />
             )}
@@ -223,6 +233,7 @@ function ClassesSection({
   divisions,
   classes,
   setClasses,
+  subjects,
   canManage,
 }: {
   schoolId: string;
@@ -230,6 +241,7 @@ function ClassesSection({
   divisions: Division[];
   classes: ClassWithSections[];
   setClasses: (fn: (prev: ClassWithSections[]) => ClassWithSections[]) => void;
+  subjects: Subject[];
   canManage: boolean;
 }) {
   const [divisionId, setDivisionId] = useState(divisions[0]?.id ?? "");
@@ -259,7 +271,14 @@ function ClassesSection({
       ) : (
         <div className="space-y-3">
           {classes.map((cls) => (
-            <ClassRow key={cls.id} schoolId={schoolId} accessToken={accessToken} cls={cls} canManage={canManage} />
+            <ClassRow
+              key={cls.id}
+              schoolId={schoolId}
+              accessToken={accessToken}
+              cls={cls}
+              subjects={subjects}
+              canManage={canManage}
+            />
           ))}
         </div>
       )}
@@ -300,11 +319,13 @@ function ClassRow({
   schoolId,
   accessToken,
   cls,
+  subjects,
   canManage,
 }: {
   schoolId: string;
   accessToken: string;
   cls: ClassWithSections;
+  subjects: Subject[];
   canManage: boolean;
 }) {
   const [sections, setSections] = useState(cls.sections);
@@ -312,6 +333,17 @@ function ClassRow({
   const [capacity, setCapacity] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const { show } = useToast();
+
+  const [classSubjects, setClassSubjects] = useState<ClassSubjectRecord[] | null>(null);
+  const [pickSubjectId, setPickSubjectId] = useState("");
+  const [assigning, setAssigning] = useState(false);
+
+  useEffect(() => {
+    api.listClassSubjects(accessToken, schoolId, cls.id).then(setClassSubjects);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const unassignedSubjects = subjects.filter((s) => !classSubjects?.some((cs) => cs.subjectId === s.id));
 
   async function onCreateSection(e: FormEvent) {
     e.preventDefault();
@@ -324,6 +356,30 @@ function ClassRow({
       show(`Section ${section.name} added to ${cls.name}.`);
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Failed to create section");
+    }
+  }
+
+  async function onAssignSubject() {
+    if (!pickSubjectId) return;
+    setAssigning(true);
+    try {
+      const record = await api.assignSubjectToClass(accessToken, schoolId, cls.id, pickSubjectId);
+      setClassSubjects((prev) => [...(prev ?? []), record]);
+      setPickSubjectId("");
+      show("Subject assigned to class.");
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to assign subject", "danger");
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  async function onUnassignSubject(subjectId: string) {
+    try {
+      await api.unassignSubjectFromClass(accessToken, schoolId, cls.id, subjectId);
+      setClassSubjects((prev) => prev?.filter((cs) => cs.subjectId !== subjectId) ?? prev);
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to remove subject", "danger");
     }
   }
 
@@ -360,6 +416,47 @@ function ClassRow({
           {formError && <p className="w-full text-sm text-danger">{formError}</p>}
         </form>
       )}
+
+      <div className="mt-4 border-t border-border pt-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">Subjects taught</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {classSubjects?.map((cs) => (
+            <span
+              key={cs.subjectId}
+              className="inline-flex items-center gap-1 rounded-full bg-surface px-2.5 py-0.5 text-xs font-medium text-foreground-soft"
+            >
+              {cs.subject.name}
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={() => onUnassignSubject(cs.subjectId)}
+                  className="text-foreground-muted hover:text-danger"
+                  aria-label={`Remove ${cs.subject.name}`}
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          ))}
+          {classSubjects?.length === 0 && <span className="text-sm text-foreground-muted">No subjects assigned yet.</span>}
+        </div>
+
+        {canManage && unassignedSubjects.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Select value={pickSubjectId} onChange={(e) => setPickSubjectId(e.target.value)} className="w-auto">
+              <option value="">Select a subject…</option>
+              {unassignedSubjects.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+            <Button type="button" size="sm" variant="outline" loading={assigning} disabled={!pickSubjectId} onClick={onAssignSubject}>
+              Assign
+            </Button>
+          </div>
+        )}
+      </div>
     </Card>
   );
 }

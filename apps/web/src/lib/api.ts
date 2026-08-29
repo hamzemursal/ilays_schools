@@ -485,6 +485,17 @@ export const api = {
   ) => request<Section>(`/schools/${schoolId}/classes/${classId}/sections`, { method: "POST", body, accessToken }),
   listClassSubjects: (accessToken: string, schoolId: string, classId: string) =>
     request<ClassSubjectRecord[]>(`/schools/${schoolId}/classes/${classId}/subjects`, { accessToken }),
+  assignSubjectToClass: (accessToken: string, schoolId: string, classId: string, subjectId: string) =>
+    request<ClassSubjectRecord>(`/schools/${schoolId}/classes/${classId}/subjects`, {
+      method: "POST",
+      body: { subjectId },
+      accessToken,
+    }),
+  unassignSubjectFromClass: (accessToken: string, schoolId: string, classId: string, subjectId: string) =>
+    request<{ success: boolean }>(`/schools/${schoolId}/classes/${classId}/subjects/${subjectId}`, {
+      method: "DELETE",
+      accessToken,
+    }),
   listSectionTeacherAssignments: (
     accessToken: string,
     schoolId: string,

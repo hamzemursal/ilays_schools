@@ -18,6 +18,10 @@ import { TransfersModule } from "./transfers/transfers.module";
 import { AttendanceModule } from "./attendance/attendance.module";
 import { ExamsModule } from "./exams/exams.module";
 import { FinanceModule } from "./finance/finance.module";
+import { StorageModule } from "./storage/storage.module";
+import { DocumentsModule } from "./documents/documents.module";
+import { AuditModule } from "./audit/audit.module";
+import { DashboardModule } from "./dashboard/dashboard.module";
 
 @Module({
   imports: [
@@ -37,6 +41,10 @@ import { FinanceModule } from "./finance/finance.module";
     AttendanceModule,
     ExamsModule,
     FinanceModule,
+    StorageModule,
+    DocumentsModule,
+    AuditModule,
+    DashboardModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

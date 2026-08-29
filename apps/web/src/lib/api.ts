@@ -33,6 +33,25 @@ async function request<T>(
   return data as T;
 }
 
+async function uploadFile<T>(path: string, file: File, fieldName: string, accessToken: string): Promise<T> {
+  const formData = new FormData();
+  formData.append(fieldName, file);
+
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: formData,
+  });
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = Array.isArray(data?.message) ? data.message.join(", ") : data?.message;
+    throw new ApiError(message ?? `Request failed with status ${res.status}`, res.status, data);
+  }
+  return data as T;
+}
+
 export interface Profile {
   id: string;
   email: string;
@@ -217,6 +236,27 @@ export interface Payment {
   paidAt: string;
 }
 
+export interface DashboardSummary {
+  studentCount: number;
+  teacherCount: number;
+  classCount: number;
+  attendanceTodayPercent: number | null;
+  attendanceMarkedCount: number;
+  outstandingFeesTotal: number;
+  outstandingInvoiceCount: number;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  actorEmail: string;
+  action: string;
+  resource: string;
+  resourceId: string | null;
+  before: unknown;
+  after: unknown;
+  createdAt: string;
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ accessToken: string }>("/auth/login", { method: "POST", body: { email, password } }),
@@ -353,4 +393,18 @@ export const api = {
   ) => request<Payment>(`/invoices/${invoiceId}/payments`, { method: "POST", body, accessToken }),
   listPayments: (accessToken: string, invoiceId: string) =>
     request<Payment[]>(`/invoices/${invoiceId}/payments`, { accessToken }),
+
+  getDashboardSummary: (accessToken: string, schoolId: string) =>
+    request<DashboardSummary>(`/schools/${schoolId}/dashboard-summary`, { accessToken }),
+
+  listAuditLogs: (accessToken: string, schoolId: string, action?: string) =>
+    request<AuditLogEntry[]>(
+      `/schools/${schoolId}/audit-logs${action ? `?action=${encodeURIComponent(action)}` : ""}`,
+      { accessToken },
+    ),
+
+  uploadStudentPhoto: (accessToken: string, studentId: string, file: File) =>
+    uploadFile<{ id: string }>(`/students/${studentId}/photo`, file, "photo", accessToken),
+  getStudentPhotoUrl: (accessToken: string, studentId: string) =>
+    request<{ url: string; uploadedAt: string }>(`/students/${studentId}/photo`, { accessToken }),
 };

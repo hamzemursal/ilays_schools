@@ -77,6 +77,11 @@ export default function DashboardPage() {
               <li key={school.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="text-foreground">{school.name}</span>
                 {user.permissions.includes("academic.view") && (
+                  <Link href={`/schools/${school.id}/dashboard`} className="text-sm text-accent hover:underline">
+                    Dashboard
+                  </Link>
+                )}
+                {user.permissions.includes("academic.view") && (
                   <Link href={`/schools/${school.id}/academic`} className="text-sm text-accent hover:underline">
                     Academic
                   </Link>
@@ -89,6 +94,11 @@ export default function DashboardPage() {
                 {(user.permissions.includes("fees.manage") || user.permissions.includes("payments.record")) && (
                   <Link href={`/schools/${school.id}/finance`} className="text-sm text-accent hover:underline">
                     Finance
+                  </Link>
+                )}
+                {user.permissions.includes("audit.view") && (
+                  <Link href={`/schools/${school.id}/audit-log`} className="text-sm text-accent hover:underline">
+                    Audit log
                   </Link>
                 )}
               </li>

@@ -790,6 +790,35 @@ model Invitation {
 }
 
 // ---------------------------------------------------------------------------
+// Media — metadata only. The actual bytes live in object storage (R2/S3, or
+// MinIO in dev); this table never stores file content, only the key needed
+// to fetch it via a short-lived signed URL. See DocumentsService.
+// ---------------------------------------------------------------------------
+
+enum MediaOwnerType {
+  STUDENT
+  TEACHER
+}
+
+model MediaFile {
+  id             String         @id @default(uuid())
+  organizationId String
+  schoolId       String?
+  ownerType      MediaOwnerType
+  ownerId        String
+
+  storageKey       String @unique
+  mimeType         String
+  sizeBytes        Int
+  uploadedByUserId String
+
+  createdAt DateTime @default(now())
+
+  @@index([ownerType, ownerId])
+  @@map("media_files")
+}
+
+// ---------------------------------------------------------------------------
 // Audit log — append-only. No update/delete path is ever exposed for this.
 // ---------------------------------------------------------------------------
 

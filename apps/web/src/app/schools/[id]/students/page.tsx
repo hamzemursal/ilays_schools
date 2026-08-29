@@ -1,10 +1,78 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type StudentListItem } from "@/lib/api";
+
+function PhotoCell({
+  accessToken,
+  studentId,
+  canUpload,
+}: {
+  accessToken: string;
+  studentId: string;
+  canUpload: boolean;
+}) {
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    api
+      .getStudentPhotoUrl(accessToken, studentId)
+      .then((res) => setPhotoUrl(res.url))
+      .catch(() => setPhotoUrl(null));
+  }, [accessToken, studentId]);
+
+  const handleFile = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      await api.uploadStudentPhoto(accessToken, studentId, file);
+      const res = await api.getStudentPhotoUrl(accessToken, studentId);
+      setPhotoUrl(res.url);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      {photoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={photoUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
+      ) : (
+        <div className="h-8 w-8 rounded-full bg-surface-soft" />
+      )}
+      {canUpload && (
+        <>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={uploading}
+            className="text-xs font-medium text-accent hover:underline disabled:opacity-50"
+          >
+            {uploading ? "Uploading…" : photoUrl ? "Replace" : "Upload"}
+          </button>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            onChange={(e) => handleFile(e.target.files?.[0])}
+          />
+        </>
+      )}
+      {error && <span className="text-xs text-danger">{error}</span>}
+    </div>
+  );
+}
 
 export default function StudentsListPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: schoolId } = use(params);
@@ -36,6 +104,7 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
   }
 
   const canCreate = user.permissions.includes("students.create");
+  const canUpdate = user.permissions.includes("students.update");
   const schoolName = user.schools.find((s) => s.id === schoolId)?.name ?? "School";
 
   return (
@@ -59,6 +128,7 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
         <table className="w-full text-left text-sm">
           <thead className="bg-surface text-foreground-soft">
             <tr>
+              <th className="px-4 py-2 font-medium">Photo</th>
               <th className="px-4 py-2 font-medium">Student #</th>
               <th className="px-4 py-2 font-medium">Name</th>
               <th className="px-4 py-2 font-medium">Class</th>
@@ -69,6 +139,11 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
           <tbody>
             {students?.map((s) => (
               <tr key={s.enrollmentId} className="border-t border-border">
+                <td className="px-4 py-2">
+                  {accessToken && (
+                    <PhotoCell accessToken={accessToken} studentId={s.studentId} canUpload={canUpdate} />
+                  )}
+                </td>
                 <td className="px-4 py-2 font-mono text-foreground-soft">{s.studentNumber}</td>
                 <td className="px-4 py-2 text-foreground">
                   {s.firstName} {s.lastName}

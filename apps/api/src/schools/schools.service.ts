@@ -48,6 +48,22 @@ export class SchoolsService {
     return school;
   }
 
+  // Deliberately NOT scoped by accessibleWhere()'s schoolIds restriction —
+  // this exists only so someone with transfers.create (but not schools.view,
+  // e.g. a School Admin) can pick a destination school for a transfer.
+  // Cross-school by nature, so it returns every active school in the same
+  // organization, but only the id/name a picker needs — nothing else.
+  async listDirectory(actor: AuthenticatedUser) {
+    if (!actor.organizationId) {
+      throw new ForbiddenException("This account isn't attached to an organization");
+    }
+    return this.prisma.school.findMany({
+      where: { organizationId: actor.organizationId, status: "ACTIVE" },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    });
+  }
+
   async listDivisions(actor: AuthenticatedUser, schoolId: string) {
     await this.findOneAccessibleOrThrow(actor, schoolId);
     return this.prisma.division.findMany({ where: { schoolId }, orderBy: { type: "asc" } });

@@ -4,10 +4,15 @@
   color-scheme: light;
   --background: #ffffff;
   --surface: #f5f6f9;
+  --surface-soft: #fafbfc;
+  --surface-hover: #eef1f6;
   --border: #dde1e8;
+  --border-strong: #c7cdd8;
   --foreground: #14213d;
   --foreground-soft: #4b5568;
+  --foreground-muted: #8792a3;
   --accent: #2456e5;
+  --accent-hover: #1c45c4;
   --accent-soft: #eaf0fe;
   --success: #1c8754;
   --success-soft: #e6f5ec;
@@ -15,15 +20,24 @@
   --warning-soft: #fbf0dd;
   --danger: #c22e2e;
   --danger-soft: #fbe9e9;
+  --sidebar-bg: #ffffff;
+  --shadow-sm: 0 1px 2px 0 rgb(20 33 61 / 0.05);
+  --shadow-md: 0 4px 16px -4px rgb(20 33 61 / 0.10), 0 1px 3px 0 rgb(20 33 61 / 0.06);
+  --shadow-lg: 0 12px 32px -8px rgb(20 33 61 / 0.16), 0 2px 6px 0 rgb(20 33 61 / 0.06);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-surface: var(--surface);
+  --color-surface-soft: var(--surface-soft);
+  --color-surface-hover: var(--surface-hover);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-foreground: var(--foreground);
   --color-foreground-soft: var(--foreground-soft);
+  --color-foreground-muted: var(--foreground-muted);
   --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
   --color-accent-soft: var(--accent-soft);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
@@ -31,6 +45,7 @@
   --color-warning-soft: var(--warning-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
+  --color-sidebar-bg: var(--sidebar-bg);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -41,4 +56,13 @@
 body {
   background: var(--background);
   color: var(--foreground);
+}
+
+* {
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--accent);
 }

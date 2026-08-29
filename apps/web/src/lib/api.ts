@@ -132,20 +132,62 @@ export interface DuplicateCandidate {
   dateOfBirth: string;
 }
 
+export type StudentStatus = "ACTIVE" | "COMPLETED" | "GRADUATED" | "TRANSFERRED" | "WITHDRAWN" | "ARCHIVED";
+export type EnrollmentStatus = "ACTIVE" | "PROMOTED" | "TRANSFERRED_OUT" | "COMPLETED" | "GRADUATED" | "WITHDRAWN";
+
+export interface GuardianRecord {
+  id: string;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  email: string | null;
+  relationship: GuardianRelationship;
+  isPrimaryContact: boolean;
+}
+
+export interface StudentEnrollmentRecord {
+  id: string;
+  studentNumber: string;
+  rollNumber: number;
+  status: EnrollmentStatus;
+  startDate: string;
+  endDate: string | null;
+  school: { id: string; name: string };
+  academicYear: { id: string; name: string };
+  class: { id: string; name: string };
+  section: { id: string; name: string };
+}
+
+export interface StudentDetail {
+  id: string;
+  organizationId: string;
+  firstName: string;
+  lastName: string;
+  dateOfBirth: string;
+  sex: Sex;
+  legacyStudentNumber: string | null;
+  currentStatus: StudentStatus;
+  enrollments: StudentEnrollmentRecord[];
+  guardians: GuardianRecord[];
+}
+
+export interface GuardianInput {
+  firstName: string;
+  lastName: string;
+  phone?: string;
+  email?: string;
+  relationship: GuardianRelationship;
+  isPrimaryContact?: boolean;
+}
+
 export interface CreateStudentInput {
   firstName: string;
   lastName: string;
   dateOfBirth: string;
   sex: Sex;
-  enrollment: { academicYearId: string; classId: string; sectionId: string };
-  guardians?: {
-    firstName: string;
-    lastName: string;
-    phone?: string;
-    email?: string;
-    relationship: GuardianRelationship;
-    isPrimaryContact?: boolean;
-  }[];
+  legacyStudentNumber?: string;
+  enrollment: { academicYearId: string; classId: string; sectionId: string; studentNumber?: string; rollNumber?: number };
+  guardians?: GuardianInput[];
   confirmDespiteDuplicates?: boolean;
 }
 
@@ -257,6 +299,67 @@ export interface AuditLogEntry {
   createdAt: string;
 }
 
+export type TeacherStatus = "ACTIVE" | "ON_LEAVE" | "INACTIVE";
+
+export interface TeacherAssignmentRecord {
+  id: string;
+  academicYearId: string;
+  subject: { id: string; name: string };
+  section: { id: string; name: string };
+}
+
+export interface Teacher {
+  id: string;
+  userId: string | null;
+  employeeNumber: string;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  email: string | null;
+  qualification: string | null;
+  status: TeacherStatus;
+  assignments: TeacherAssignmentRecord[];
+}
+
+export interface CreateTeacherInput {
+  firstName: string;
+  lastName: string;
+  employeeNumber: string;
+  phone?: string;
+  email?: string;
+  qualification?: string;
+  assignments?: { academicYearId: string; sectionId: string; subjectId: string }[];
+}
+
+export type PromotionOutcome = "PROMOTED" | "COMPLETED" | "GRADUATED";
+
+export interface PromotionPreview {
+  outcome: PromotionOutcome;
+  currentClass: { id: string; name: string };
+  nextClass: { id: string; name: string } | null;
+  targetSections: { id: string; name: string; capacity: number; currentActive: number; available: number }[];
+  students: { studentId: string; enrollmentId: string; firstName: string; lastName: string; rollNumber: number; studentNumber: string }[];
+}
+
+export interface PromotionBatchResult {
+  id: string;
+  outcome: PromotionOutcome;
+  items: { id: string; studentId: string; outcome: PromotionOutcome }[];
+}
+
+export type TransferStatus = "REQUESTED" | "APPROVED" | "REJECTED" | "EXECUTED";
+
+export interface Transfer {
+  id: string;
+  studentId: string;
+  fromSchoolId: string;
+  toSchoolId: string;
+  status: TransferStatus;
+  reason: string | null;
+  createdAt: string;
+  student: { firstName: string; lastName: string };
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ accessToken: string }>("/auth/login", { method: "POST", body: { email, password } }),
@@ -267,6 +370,8 @@ export const api = {
   me: (accessToken: string) => request<Profile>("/auth/me", { accessToken }),
 
   listSchools: (accessToken: string) => request<School[]>("/schools", { accessToken }),
+  listSchoolDirectory: (accessToken: string) =>
+    request<{ id: string; name: string }[]>("/schools/directory", { accessToken }),
   getSchool: (accessToken: string, id: string) => request<School>(`/schools/${id}`, { accessToken }),
   createSchool: (
     accessToken: string,
@@ -320,6 +425,66 @@ export const api = {
       body,
       accessToken,
     }),
+  getStudent: (accessToken: string, studentId: string) =>
+    request<StudentDetail>(`/students/${studentId}`, { accessToken }),
+  addGuardian: (accessToken: string, studentId: string, body: GuardianInput) =>
+    request<GuardianRecord>(`/students/${studentId}/guardians`, { method: "POST", body, accessToken }),
+
+  listTeachers: (accessToken: string, schoolId: string) =>
+    request<Teacher[]>(`/schools/${schoolId}/teachers`, { accessToken }),
+  createTeacher: (accessToken: string, schoolId: string, body: CreateTeacherInput) =>
+    request<Teacher>(`/schools/${schoolId}/teachers`, { method: "POST", body, accessToken }),
+  addTeacherAssignment: (
+    accessToken: string,
+    schoolId: string,
+    teacherId: string,
+    body: { academicYearId: string; sectionId: string; subjectId: string },
+  ) =>
+    request<TeacherAssignmentRecord>(`/schools/${schoolId}/teachers/${teacherId}/assignments`, {
+      method: "POST",
+      body,
+      accessToken,
+    }),
+  inviteTeacherLogin: (accessToken: string, schoolId: string, teacherId: string, email?: string) =>
+    request<{ email: string; acceptUrl: string }>(`/schools/${schoolId}/teachers/${teacherId}/invite-login`, {
+      method: "POST",
+      body: { email },
+      accessToken,
+    }),
+
+  previewPromotion: (
+    accessToken: string,
+    schoolId: string,
+    sectionId: string,
+    fromAcademicYearId: string,
+  ) =>
+    request<PromotionPreview>(
+      `/schools/${schoolId}/sections/${sectionId}/promotion/preview?fromAcademicYearId=${fromAcademicYearId}`,
+      { accessToken },
+    ),
+  confirmPromotion: (
+    accessToken: string,
+    schoolId: string,
+    sectionId: string,
+    body: { fromAcademicYearId: string; toAcademicYearId: string; targetSectionId?: string },
+  ) =>
+    request<PromotionBatchResult>(`/schools/${schoolId}/sections/${sectionId}/promotion/confirm`, {
+      method: "POST",
+      body,
+      accessToken,
+    }),
+
+  requestTransfer: (accessToken: string, studentId: string, body: { toSchoolId: string; reason?: string }) =>
+    request<Transfer>(`/students/${studentId}/transfers`, { method: "POST", body, accessToken }),
+  listTransfers: (accessToken: string, schoolId: string) =>
+    request<Transfer[]>(`/schools/${schoolId}/transfers`, { accessToken }),
+  approveTransfer: (
+    accessToken: string,
+    transferId: string,
+    body: { academicYearId: string; classId: string; sectionId: string; studentNumber?: string; rollNumber?: number },
+  ) => request<Transfer>(`/transfers/${transferId}/approve`, { method: "POST", body, accessToken }),
+  rejectTransfer: (accessToken: string, transferId: string) =>
+    request<Transfer>(`/transfers/${transferId}/reject`, { method: "POST", accessToken }),
 
   myAssignments: (accessToken: string) => request<MyAssignment[]>("/teachers/me/assignments", { accessToken }),
 

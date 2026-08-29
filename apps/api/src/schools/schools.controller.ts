@@ -22,6 +22,13 @@ export class SchoolsController {
     return this.schools.create(user, dto);
   }
 
+  // Must come before ":id" — otherwise Nest would match "directory" as an id.
+  @RequirePermissions("transfers.create")
+  @Get("directory")
+  directory(@CurrentUser() user: AuthenticatedUser) {
+    return this.schools.listDirectory(user);
+  }
+
   @RequirePermissions("schools.view")
   @Get(":id")
   get(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {

@@ -10,10 +10,12 @@ import { Card } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
 import { FieldGroup, FormField, Input, Select } from "@/components/ui/FormControls";
 import { GuardianFieldSet, emptyGuardian } from "@/features/guardians/components/GuardianFieldSet";
+import { useToast } from "@/components/ui/Toast";
 
 export function StudentForm({ schoolId }: { schoolId: string }) {
   const router = useRouter();
   const { accessToken } = useAuth();
+  const { show } = useToast();
 
   const [classes, setClasses] = useState<ClassWithSections[]>([]);
   const [years, setYears] = useState<AcademicYear[]>([]);
@@ -71,6 +73,7 @@ export function StudentForm({ schoolId }: { schoolId: string }) {
         guardians: guardians.length > 0 ? guardians : undefined,
         confirmDespiteDuplicates,
       });
+      show(`${firstName} ${lastName} created.`);
       router.push(`/schools/${schoolId}/students/${created.student.id}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409 && (err.body as { possibleDuplicates?: DuplicateCandidate[] })?.possibleDuplicates) {

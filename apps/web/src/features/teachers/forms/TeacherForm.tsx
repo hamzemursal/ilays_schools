@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
 import { FieldGroup, FormField, Input, Select } from "@/components/ui/FormControls";
+import { useToast } from "@/components/ui/Toast";
 
 interface AssignmentRow {
   academicYearId: string;
@@ -21,6 +22,7 @@ interface AssignmentRow {
 export function TeacherForm({ schoolId, onCreated }: { schoolId: string; onCreated?: () => void }) {
   const router = useRouter();
   const { accessToken } = useAuth();
+  const { show } = useToast();
 
   const [years, setYears] = useState<AcademicYear[]>([]);
   const [classes, setClasses] = useState<ClassWithSections[]>([]);
@@ -88,6 +90,7 @@ export function TeacherForm({ schoolId, onCreated }: { schoolId: string; onCreat
           ? assignments.map((a) => ({ academicYearId: a.academicYearId, sectionId: a.sectionId, subjectId: a.subjectId }))
           : undefined,
       });
+      show(`${firstName} ${lastName} added.`);
       if (onCreated) onCreated();
       else router.push(`/schools/${schoolId}/teachers`);
     } catch (err) {

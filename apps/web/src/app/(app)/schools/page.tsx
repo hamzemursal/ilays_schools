@@ -12,6 +12,7 @@ import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { SkeletonTable } from "@/components/ui/Skeleton";
+import { useToast } from "@/components/ui/Toast";
 import { Building2, ChevronRight, Plus } from "lucide-react";
 
 const SCHOOL_TYPES: { value: SchoolType; label: string }[] = [
@@ -31,6 +32,7 @@ export default function SchoolsPage() {
   const [address, setAddress] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const { show } = useToast();
 
   useEffect(() => {
     if (!accessToken) return;
@@ -51,6 +53,7 @@ export default function SchoolsPage() {
       setName("");
       setAddress("");
       setShowForm(false);
+      show(`${school.name} created.`);
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Failed to create school");
     } finally {

@@ -126,6 +126,7 @@ function FeeStructuresSection({
   const [formError, setFormError] = useState<string | null>(null);
   const [generating, setGenerating] = useState<string | null>(null);
   const [generateResult, setGenerateResult] = useState<Record<string, string>>({});
+  const { show } = useToast();
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -140,6 +141,7 @@ function FeeStructuresSection({
       setFeeStructures((prev) => [fee, ...prev]);
       setName("");
       setAmount("");
+      show(`${fee.name} added.`);
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Failed to create fee");
     }
@@ -343,6 +345,7 @@ function RecordPaymentForm({
   const [reference, setReference] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const { show } = useToast();
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -353,6 +356,7 @@ function RecordPaymentForm({
       const paid = invoice.paid + Number(amount);
       const balance = invoice.amount - paid;
       onRecorded({ paid, balance, status: balance <= 0 ? "PAID" : "PARTIALLY_PAID" });
+      show("Payment recorded.");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to record payment");
     } finally {

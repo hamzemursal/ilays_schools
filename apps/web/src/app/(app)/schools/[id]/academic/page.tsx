@@ -11,6 +11,7 @@ import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
+import { useToast } from "@/components/ui/Toast";
 import { Plus } from "lucide-react";
 
 const TABS = ["Years", "Classes & sections", "Subjects", "Exams"] as const;
@@ -137,6 +138,7 @@ function AcademicYearsSection({
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const { show } = useToast();
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -147,6 +149,7 @@ function AcademicYearsSection({
       setName("");
       setStartDate("");
       setEndDate("");
+      show("Academic year added.");
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Failed to create academic year");
     }
@@ -155,6 +158,7 @@ function AcademicYearsSection({
   async function onSetCurrent(id: string) {
     const updated = await api.setCurrentAcademicYear(accessToken, schoolId, id);
     setYears((prev) => prev.map((y) => (y.id === id ? updated : { ...y, isCurrent: false })));
+    show(`${updated.name} set as the current academic year.`);
   }
 
   return (
@@ -232,6 +236,7 @@ function ClassesSection({
   const [name, setName] = useState("");
   const [level, setLevel] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const { show } = useToast();
 
   async function onCreateClass(e: FormEvent) {
     e.preventDefault();
@@ -241,6 +246,7 @@ function ClassesSection({
       setClasses((prev) => [...prev, created]);
       setName("");
       setLevel("");
+      show(`${created.name} added.`);
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Failed to create class");
     }
@@ -305,6 +311,7 @@ function ClassRow({
   const [name, setName] = useState("");
   const [capacity, setCapacity] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const { show } = useToast();
 
   async function onCreateSection(e: FormEvent) {
     e.preventDefault();
@@ -314,6 +321,7 @@ function ClassRow({
       setSections((prev) => [...prev, section]);
       setName("");
       setCapacity("");
+      show(`Section ${section.name} added to ${cls.name}.`);
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Failed to create section");
     }
@@ -371,6 +379,7 @@ function SubjectsSection({
 }) {
   const [name, setName] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const { show } = useToast();
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -379,6 +388,7 @@ function SubjectsSection({
       const subject = await api.createSubject(accessToken, schoolId, { name });
       setSubjects((prev) => [...prev, subject]);
       setName("");
+      show(`${subject.name} added.`);
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Failed to create subject");
     }
@@ -434,6 +444,7 @@ function ExamsSection({
   const [type, setType] = useState<ExamType>("MIDTERM");
   const [academicYearId, setAcademicYearId] = useState(years[0]?.id ?? "");
   const [formError, setFormError] = useState<string | null>(null);
+  const { show } = useToast();
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -442,6 +453,7 @@ function ExamsSection({
       const exam = await api.createExam(accessToken, schoolId, { name, type, academicYearId });
       setExams((prev) => [{ ...exam, examSubjects: [] }, ...prev]);
       setName("");
+      show(`${exam.name} created.`);
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Failed to create exam");
     }
@@ -525,6 +537,7 @@ function ExamRow({
   const [subjectId, setSubjectId] = useState(subjects[0]?.id ?? "");
   const [maxMarks, setMaxMarks] = useState("100");
   const [formError, setFormError] = useState<string | null>(null);
+  const { show } = useToast();
 
   async function onAddSubject(e: FormEvent) {
     e.preventDefault();
@@ -532,6 +545,7 @@ function ExamRow({
     try {
       const examSubject = await api.createExamSubject(accessToken, schoolId, exam.id, { classId, subjectId, maxMarks: Number(maxMarks) });
       setExams((prev) => prev.map((ex) => (ex.id === exam.id ? { ...ex, examSubjects: [...ex.examSubjects, examSubject] } : ex)));
+      show("Subject scheduled for this exam.");
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Failed to add subject");
     }

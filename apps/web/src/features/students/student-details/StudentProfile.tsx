@@ -143,7 +143,7 @@ export function StudentProfile({ studentId }: { studentId: string }) {
 
       <Card padding="none">
         <CardHeader
-          title="Guardians"
+          title="Parent / guardian"
           actions={
             canManageGuardians &&
             !addingGuardian && (

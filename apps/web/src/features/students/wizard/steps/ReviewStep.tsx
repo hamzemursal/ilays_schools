@@ -30,7 +30,7 @@ export function ReviewStep({
       <div>
         <h2 className="text-sm font-semibold text-foreground">Review &amp; confirm</h2>
         <p className="mt-0.5 text-sm text-foreground-soft">
-          Student number and roll number are generated automatically once you create this student.
+          Student Code and Roll Number are generated automatically once you create this student.
         </p>
       </div>
 
@@ -72,7 +72,7 @@ export function ReviewStep({
         </div>
         <div className="flex items-center gap-2 border-t border-border px-5 py-3 text-sm text-foreground-soft">
           <GraduationCap className="size-4" />
-          Student number and roll number will be assigned automatically on creation.
+          Student Code and Roll Number will be assigned automatically on creation.
         </div>
       </Card>
 

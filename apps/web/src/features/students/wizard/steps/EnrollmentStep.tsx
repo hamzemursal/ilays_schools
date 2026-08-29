@@ -34,7 +34,7 @@ export function EnrollmentStep({
       <div>
         <h2 className="text-sm font-semibold text-foreground">Academic enrollment</h2>
         <p className="mt-0.5 text-sm text-foreground-soft">
-          Where this student is placed. Student number and roll number are assigned automatically.
+          Where this student is placed. Student Code and Roll Number are assigned automatically.
         </p>
       </div>
 

@@ -113,7 +113,9 @@ export class StudentsService {
       throw new BadRequestException(`Section ${section.name} is at capacity (${section.capacity})`);
     }
 
-    const studentNumber = dto.enrollment.studentNumber ?? (await this.generateStudentNumber(schoolId));
+    const studentNumber =
+      dto.enrollment.studentNumber ??
+      (await this.generateStudentNumber(schoolId, academicYear.id, academicYear.name));
     const rollNumber = dto.enrollment.rollNumber ?? (await this.generateRollNumber(section.id));
 
     try {
@@ -171,9 +173,22 @@ export class StudentsService {
     }
   }
 
-  private async generateStudentNumber(schoolId: string): Promise<string> {
-    const count = await this.prisma.studentEnrollment.count({ where: { schoolId } });
-    return String(count + 1).padStart(5, "0");
+  // Format: STU-{admitting academic year}-{sequence within that year}, e.g.
+  // "STU-2027-00013". The sequence resets per (school, academic year) —
+  // matching the composite unique constraint on StudentEnrollment, which is
+  // already scoped the same way — rather than counting across the school's
+  // whole history. Once assigned this never changes: a promoted student's
+  // later-year enrollment rows carry the same studentNumber forward by
+  // design (see PromotionsService), so the code always reflects the year the
+  // student was originally admitted, not their current year.
+  private async generateStudentNumber(
+    schoolId: string,
+    academicYearId: string,
+    academicYearName: string,
+  ): Promise<string> {
+    const count = await this.prisma.studentEnrollment.count({ where: { schoolId, academicYearId } });
+    const sequence = String(count + 1).padStart(5, "0");
+    return `STU-${academicYearName}-${sequence}`;
   }
 
   private async generateRollNumber(sectionId: string): Promise<number> {

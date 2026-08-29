@@ -90,7 +90,8 @@ export class TransfersService {
       throw new BadRequestException(`Section ${section.name} is at capacity (${section.capacity})`);
     }
 
-    const studentNumber = dto.studentNumber ?? (await this.generateStudentNumber(transfer.toSchoolId));
+    const studentNumber =
+      dto.studentNumber ?? (await this.generateStudentNumber(transfer.toSchoolId, dto.academicYearId, academicYear.name));
     const rollNumber = dto.rollNumber ?? (await this.generateRollNumber(section.id));
 
     return this.prisma.$transaction(async (tx) => {
@@ -174,9 +175,18 @@ export class TransfersService {
     });
   }
 
-  private async generateStudentNumber(schoolId: string): Promise<string> {
-    const count = await this.prisma.studentEnrollment.count({ where: { schoolId } });
-    return String(count + 1).padStart(5, "0");
+  // Same "STU-{year}-{sequence}" format and per-(school, year) scope as
+  // StudentsService.generateStudentNumber — a transferred student is a new
+  // admission at the destination school, so it gets a fresh code the same
+  // way a directly-enrolled student would.
+  private async generateStudentNumber(
+    schoolId: string,
+    academicYearId: string,
+    academicYearName: string,
+  ): Promise<string> {
+    const count = await this.prisma.studentEnrollment.count({ where: { schoolId, academicYearId } });
+    const sequence = String(count + 1).padStart(5, "0");
+    return `STU-${academicYearName}-${sequence}`;
   }
 
   private async generateRollNumber(sectionId: string): Promise<number> {

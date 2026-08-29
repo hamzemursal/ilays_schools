@@ -131,7 +131,7 @@ export function StudentWizard({ schoolId }: { schoolId: string }) {
         </p>
         <div className="mx-auto mt-5 grid max-w-xs grid-cols-2 gap-3 text-left">
           <div className="rounded-lg border border-border bg-surface-soft px-3 py-2">
-            <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">Student number</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">Student code</p>
             <p className="mt-0.5 font-mono text-sm text-foreground">{created.studentNumber}</p>
           </div>
           <div className="rounded-lg border border-border bg-surface-soft px-3 py-2">

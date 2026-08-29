@@ -16,7 +16,7 @@ export class ExportsService {
   async exportStudents(actor: AuthenticatedUser, schoolId: string): Promise<string> {
     const rows = await this.students.listForSchool(actor, schoolId);
     return toCsv(rows, [
-      { header: "Student Number", value: (r) => r.studentNumber },
+      { header: "Student Code", value: (r) => r.studentNumber },
       { header: "First Name", value: (r) => r.firstName },
       { header: "Last Name", value: (r) => r.lastName },
       { header: "Class", value: (r) => r.className },

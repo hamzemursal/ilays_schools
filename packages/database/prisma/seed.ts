@@ -114,6 +114,8 @@ async function main() {
     "results.enter",
     "results.approve",
     "results.view",
+    "fees.manage",
+    "payments.record",
   ];
   const schoolAdminPermissions = await prisma.permission.findMany({
     where: { key: { in: schoolAdminPermissionKeys } },
@@ -135,6 +137,19 @@ async function main() {
     data: teacherPermissions.map((p) => ({ roleId: teacherRole.id, permissionId: p.id })),
     skipDuplicates: true,
   });
+
+  // FINANCE_STAFF and ACCOUNTANT exist specifically for this — fee setup and
+  // payment recording are their whole job, so both get the full pair.
+  const financeRoles = await prisma.role.findMany({ where: { name: { in: ["FINANCE_STAFF", "ACCOUNTANT"] } } });
+  const financePermissions = await prisma.permission.findMany({
+    where: { key: { in: ["fees.manage", "payments.record"] } },
+  });
+  for (const role of financeRoles) {
+    await prisma.rolePermission.createMany({
+      data: financePermissions.map((p) => ({ roleId: role.id, permissionId: p.id })),
+      skipDuplicates: true,
+    });
+  }
 
   // eslint-disable-next-line no-console
   console.log("Seed complete: organization, roles, permissions.");

@@ -17,6 +17,7 @@ import { PromotionsModule } from "./promotions/promotions.module";
 import { TransfersModule } from "./transfers/transfers.module";
 import { AttendanceModule } from "./attendance/attendance.module";
 import { ExamsModule } from "./exams/exams.module";
+import { FinanceModule } from "./finance/finance.module";
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { ExamsModule } from "./exams/exams.module";
     TransfersModule,
     AttendanceModule,
     ExamsModule,
+    FinanceModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

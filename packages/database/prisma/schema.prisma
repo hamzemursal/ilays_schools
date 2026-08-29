@@ -61,6 +61,7 @@ model School {
   teachers      Teacher[]
   invitations   Invitation[]
   exams         Exam[]
+  feeStructures FeeStructure[]
 
   @@unique([organizationId, name])
   @@map("schools")
@@ -79,9 +80,10 @@ model AcademicYear {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  enrollments StudentEnrollment[]
-  assignments TeacherAssignment[]
-  exams       Exam[]
+  enrollments   StudentEnrollment[]
+  assignments   TeacherAssignment[]
+  exams         Exam[]
+  feeStructures FeeStructure[]
 
   @@unique([schoolId, name])
   @@map("academic_years")
@@ -127,6 +129,7 @@ model Class {
   classSubjects ClassSubject[]
   enrollments   StudentEnrollment[]
   examSubjects  ExamSubject[]
+  feeStructures FeeStructure[]
 
   @@unique([divisionId, level])
   @@map("classes")
@@ -261,6 +264,7 @@ model StudentEnrollment {
   promotionTo   PromotionItem[]   @relation("PromotionTo")
   attendances   Attendance[]
   results       Result[]
+  invoices      Invoice[]
 
   // Roll number is unique per school+year+class+section — but only among
   // rows sharing the same `status`. Including status in the tuple (rather
@@ -482,6 +486,87 @@ model Result {
 
   @@unique([examSubjectId, enrollmentId])
   @@map("results")
+}
+
+// ---------------------------------------------------------------------------
+// Finance — a FeeStructure is the school's own definition of a charge
+// (e.g. "Term 1 Tuition — Class 7"); Invoices are generated from it against
+// specific enrollments, and Payments are recorded against an invoice.
+// Invoice.amount is a snapshot taken at generation time, deliberately
+// decoupled from FeeStructure.amount so a later fee-structure edit never
+// silently changes an already-issued invoice.
+// ---------------------------------------------------------------------------
+
+model FeeStructure {
+  id             String       @id @default(uuid())
+  schoolId       String
+  school         School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicYearId String
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  classId        String? // null = applies across the whole school, not one class
+  class          Class?       @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  name   String
+  amount Decimal @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoices Invoice[]
+
+  @@unique([schoolId, academicYearId, classId, name])
+  @@map("fee_structures")
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+}
+
+model Invoice {
+  id             String            @id @default(uuid())
+  enrollmentId   String
+  enrollment     StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  feeStructureId String
+  feeStructure   FeeStructure      @relation(fields: [feeStructureId], references: [id], onDelete: Restrict)
+
+  amount  Decimal       @db.Decimal(10, 2)
+  dueDate DateTime?     @db.Date
+  status  InvoiceStatus @default(UNPAID)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments Payment[]
+
+  // One invoice per fee per enrollment — generating twice must not double-bill.
+  @@unique([enrollmentId, feeStructureId])
+  @@map("invoices")
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  MOBILE_MONEY
+  CARD
+  OTHER
+}
+
+model Payment {
+  id        String  @id @default(uuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  amount           Decimal       @db.Decimal(10, 2)
+  method           PaymentMethod @default(CASH)
+  reference        String?
+  recordedByUserId String
+  paidAt           DateTime      @default(now())
+
+  createdAt DateTime @default(now())
+
+  @@map("payments")
 }
 
 // ---------------------------------------------------------------------------

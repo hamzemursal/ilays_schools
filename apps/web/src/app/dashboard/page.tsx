@@ -86,6 +86,11 @@ export default function DashboardPage() {
                     Students
                   </Link>
                 )}
+                {(user.permissions.includes("fees.manage") || user.permissions.includes("payments.record")) && (
+                  <Link href={`/schools/${school.id}/finance`} className="text-sm text-accent hover:underline">
+                    Finance
+                  </Link>
+                )}
               </li>
             ))}
           </ul>

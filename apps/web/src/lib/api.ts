@@ -181,6 +181,42 @@ export interface ResultsForSection {
   students: ResultRow[];
 }
 
+export interface FeeStructure {
+  id: string;
+  name: string;
+  amount: string;
+  classId: string | null;
+  class: { id: string; name: string } | null;
+  academicYear: { id: string; name: string };
+}
+
+export type InvoiceStatus = "UNPAID" | "PARTIALLY_PAID" | "PAID";
+export type PaymentMethod = "CASH" | "BANK_TRANSFER" | "MOBILE_MONEY" | "CARD" | "OTHER";
+
+export interface Invoice {
+  id: string;
+  amount: number;
+  status: InvoiceStatus;
+  dueDate: string | null;
+  paid: number;
+  balance: number;
+  feeStructure: { id: string; name: string };
+}
+
+export interface SchoolInvoice extends Invoice {
+  studentId: string;
+  firstName: string;
+  lastName: string;
+}
+
+export interface Payment {
+  id: string;
+  amount: string;
+  method: PaymentMethod;
+  reference: string | null;
+  paidAt: string;
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ accessToken: string }>("/auth/login", { method: "POST", body: { email, password } }),
@@ -292,4 +328,29 @@ export const api = {
       `/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/results`,
       { method: "POST", body: { entries }, accessToken },
     ),
+
+  listFeeStructures: (accessToken: string, schoolId: string) =>
+    request<FeeStructure[]>(`/schools/${schoolId}/fee-structures`, { accessToken }),
+  createFeeStructure: (
+    accessToken: string,
+    schoolId: string,
+    body: { academicYearId: string; classId?: string; name: string; amount: number },
+  ) => request<FeeStructure>(`/schools/${schoolId}/fee-structures`, { method: "POST", body, accessToken }),
+  generateInvoices: (accessToken: string, schoolId: string, feeStructureId: string) =>
+    request<{ createdCount: number; eligibleEnrollments: number }>(
+      `/schools/${schoolId}/fee-structures/${feeStructureId}/generate-invoices`,
+      { method: "POST", accessToken },
+    ),
+
+  listSchoolInvoices: (accessToken: string, schoolId: string, status?: InvoiceStatus) =>
+    request<SchoolInvoice[]>(`/schools/${schoolId}/invoices${status ? `?status=${status}` : ""}`, { accessToken }),
+  listStudentInvoices: (accessToken: string, studentId: string) =>
+    request<Invoice[]>(`/students/${studentId}/invoices`, { accessToken }),
+  recordPayment: (
+    accessToken: string,
+    invoiceId: string,
+    body: { amount: number; method?: PaymentMethod; reference?: string },
+  ) => request<Payment>(`/invoices/${invoiceId}/payments`, { method: "POST", body, accessToken }),
+  listPayments: (accessToken: string, invoiceId: string) =>
+    request<Payment[]>(`/invoices/${invoiceId}/payments`, { accessToken }),
 };

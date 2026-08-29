@@ -17,7 +17,12 @@ export default function DashboardPage() {
     return <p className="p-8 text-foreground-soft">Loading…</p>;
   }
 
-  const isTeacher = user.permissions.includes("attendance.mark") || user.permissions.includes("results.enter");
+  // Checking the TEACHER role specifically, not the attendance.mark /
+  // results.enter permissions — School Admin holds those too (so they can
+  // act on any class in their school), but "My classes" means "the classes
+  // I'm personally assigned to teach," which only applies to an actual
+  // Teacher profile.
+  const isTeacher = user.roles.includes("TEACHER");
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-10 sm:px-6 sm:py-16">

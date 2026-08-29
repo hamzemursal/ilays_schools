@@ -659,6 +659,11 @@ export const api = {
       body,
       accessToken,
     }),
+  removeTeacherAssignment: (accessToken: string, schoolId: string, teacherId: string, assignmentId: string) =>
+    request<{ success: boolean }>(`/schools/${schoolId}/teachers/${teacherId}/assignments/${assignmentId}`, {
+      method: "DELETE",
+      accessToken,
+    }),
   inviteTeacherLogin: (accessToken: string, schoolId: string, teacherId: string, email?: string) =>
     request<{ email: string; acceptUrl: string }>(`/schools/${schoolId}/teachers/${teacherId}/invite-login`, {
       method: "POST",

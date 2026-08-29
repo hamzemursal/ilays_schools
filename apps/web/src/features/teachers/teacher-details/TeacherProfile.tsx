@@ -1,19 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BookUser, Cake, MapPin, Pencil, Phone, Send, ShieldAlert, User } from "lucide-react";
+import { Cake, MapPin, Pencil, Phone, Send, ShieldAlert, User } from "lucide-react";
 import { ApiError, useAuth } from "@/lib/auth-context";
 import type { Teacher } from "@/lib/api";
 import { teachersApi } from "../api";
 import { PhotoUpload } from "../components/PhotoUpload";
 import { DocumentsCard } from "../components/DocumentsCard";
 import { EditTeacherForm } from "./EditTeacherForm";
-import { Card, CardHeader } from "@/components/ui/Card";
+import { AssignmentsManager } from "./AssignmentsManager";
+import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { Input } from "@/components/ui/FormControls";
-import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 
@@ -73,11 +73,6 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
   if (!teacher || !accessToken) return <SkeletonCards count={3} />;
 
   const canUpdate = user?.permissions.includes("teachers.update") ?? false;
-
-  const assignmentsByYear = teacher.assignments.reduce<Record<string, typeof teacher.assignments>>((acc, a) => {
-    (acc[a.academicYear.name] ??= []).push(a);
-    return acc;
-  }, {});
 
   return (
     <div className="space-y-5">
@@ -187,27 +182,13 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
         />
       )}
 
-      <Card padding="none">
-        <CardHeader title="Classes & subjects" description="Every assignment this teacher currently holds, by academic year." />
-        <div className="space-y-4 p-5">
-          {teacher.assignments.length === 0 ? (
-            <EmptyState icon={BookUser} title="No assignments yet" description="Assign this teacher to a class and subject." />
-          ) : (
-            Object.entries(assignmentsByYear).map(([yearName, assignments]) => (
-              <div key={yearName}>
-                <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">{yearName}</p>
-                <div className="mt-1.5 flex flex-wrap gap-2">
-                  {assignments.map((a) => (
-                    <Badge key={a.id} tone="accent">
-                      {a.section.class.name} · {a.section.name} — {a.subject.name}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </Card>
+      <AssignmentsManager
+        accessToken={accessToken}
+        schoolId={schoolId}
+        teacher={teacher}
+        canManage={canUpdate}
+        onChange={setTeacher}
+      />
 
       <DocumentsCard
         canUpload={canUpdate}

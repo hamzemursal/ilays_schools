@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { TeachersService } from "./teachers.service";
 import { DocumentsService } from "../documents/documents.service";
@@ -63,6 +63,17 @@ export class TeachersController {
     @Body() dto: CreateTeacherAssignmentInputDto,
   ) {
     return this.teachers.addAssignment(user, schoolId, teacherId, dto);
+  }
+
+  @RequirePermissions("teachers.update")
+  @Delete(":teacherId/assignments/:assignmentId")
+  removeAssignment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("teacherId") teacherId: string,
+    @Param("assignmentId") assignmentId: string,
+  ) {
+    return this.teachers.removeAssignment(user, schoolId, teacherId, assignmentId);
   }
 
   @RequirePermissions("teachers.update")

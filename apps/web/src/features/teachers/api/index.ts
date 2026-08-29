@@ -9,6 +9,7 @@ export const teachersApi = {
   create: api.createTeacher,
   update: api.updateTeacher,
   addAssignment: api.addTeacherAssignment,
+  removeAssignment: api.removeTeacherAssignment,
   inviteLogin: api.inviteTeacherLogin,
   uploadPhoto: api.uploadTeacherPhoto,
   getPhotoUrl: api.getTeacherPhotoUrl,

@@ -276,6 +276,18 @@ export class TeachersService {
     }
   }
 
+  async removeAssignment(actor: AuthenticatedUser, schoolId: string, teacherId: string, assignmentId: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    const teacher = await this.prisma.teacher.findFirst({ where: { id: teacherId, schoolId } });
+    if (!teacher) throw new NotFoundException("Teacher not found in this school");
+
+    const assignment = await this.prisma.teacherAssignment.findFirst({ where: { id: assignmentId, teacherId } });
+    if (!assignment) throw new NotFoundException("Assignment not found for this teacher");
+
+    await this.prisma.teacherAssignment.delete({ where: { id: assignmentId } });
+    return { success: true };
+  }
+
   // Grants an existing Teacher profile a login — deferred from Phase 4,
   // needed now so a teacher can actually authenticate to mark attendance
   // and enter marks scoped to their own TeacherAssignments.

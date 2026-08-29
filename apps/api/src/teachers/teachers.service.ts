@@ -54,6 +54,8 @@ export class TeachersService {
       await this.assertAssignmentBelongsToSchool(schoolId, a);
     }
 
+    const employeeNumber = dto.employeeNumber ?? (await this.generateEmployeeNumber(schoolId));
+
     try {
       return await this.prisma.$transaction(async (tx) => {
         const teacher = await tx.teacher.create({
@@ -61,7 +63,7 @@ export class TeachersService {
             schoolId,
             firstName: dto.firstName,
             lastName: dto.lastName,
-            employeeNumber: dto.employeeNumber,
+            employeeNumber,
             phone: dto.phone,
             email: dto.email,
             qualification: dto.qualification,
@@ -206,6 +208,14 @@ export class TeachersService {
 
     const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3010";
     return { email: result.email, acceptUrl: `${webOrigin}/accept-invite?token=${rawToken}` };
+  }
+
+  // Format: EMP-{sequence within this school}, e.g. "EMP-00006". Scoped per
+  // school, same padding convention as StudentsService.generateStudentNumber.
+  private async generateEmployeeNumber(schoolId: string): Promise<string> {
+    const count = await this.prisma.teacher.count({ where: { schoolId } });
+    const sequence = String(count + 1).padStart(5, "0");
+    return `EMP-${sequence}`;
   }
 
   private async assertAssignmentBelongsToSchool(schoolId: string, a: CreateTeacherAssignmentInputDto) {

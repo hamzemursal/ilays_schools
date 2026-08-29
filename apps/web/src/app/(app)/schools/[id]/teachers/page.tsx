@@ -1,16 +1,15 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
-import { Download, UserPlus, X } from "lucide-react";
+import Link from "next/link";
+import { Download, UserPlus } from "lucide-react";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type Teacher } from "@/lib/api";
 import { teachersApi } from "@/features/teachers/api";
 import { TeachersTable } from "@/features/teachers/tables/TeachersTable";
-import { TeacherForm } from "@/features/teachers/forms/TeacherForm";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
-import { Card } from "@/components/ui/Card";
 import { useToast } from "@/components/ui/Toast";
 
 export default function TeachersListPage({ params }: { params: Promise<{ id: string }> }) {
@@ -20,7 +19,6 @@ export default function TeachersListPage({ params }: { params: Promise<{ id: str
 
   const [teachers, setTeachers] = useState<Teacher[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
@@ -61,29 +59,14 @@ export default function TeachersListPage({ params }: { params: Promise<{ id: str
               </Button>
             )}
             {canCreate && (
-              <Button
-                icon={showForm ? <X className="size-4" /> : <UserPlus className="size-4" />}
-                variant={showForm ? "outline" : "primary"}
-                onClick={() => setShowForm((v) => !v)}
-              >
-                {showForm ? "Cancel" : "Add teacher"}
-              </Button>
+              <Link href={`/schools/${schoolId}/teachers/new`}>
+                <Button icon={<UserPlus className="size-4" />}>Add teacher</Button>
+              </Link>
             )}
           </>
         }
       />
       <div className="space-y-5 p-4 sm:p-6">
-        {showForm && (
-          <Card>
-            <TeacherForm
-              schoolId={schoolId}
-              onCreated={() => {
-                setShowForm(false);
-                if (accessToken) teachersApi.list(accessToken, schoolId).then(setTeachers);
-              }}
-            />
-          </Card>
-        )}
         {error ? <Alert tone="danger">{error}</Alert> : <TeachersTable schoolId={schoolId} teachers={teachers} />}
       </div>
     </div>

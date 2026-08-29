@@ -11,9 +11,11 @@ export class CreateTeacherDto {
   @MinLength(1)
   lastName!: string;
 
+  // Omit to auto-generate per the school's sequential numbering policy —
+  // same convention as EnrollmentInputDto.studentNumber.
+  @IsOptional()
   @IsString()
-  @MinLength(1)
-  employeeNumber!: string;
+  employeeNumber?: string;
 
   @IsOptional()
   @IsString()

@@ -366,7 +366,7 @@ export interface Teacher {
 export interface CreateTeacherInput {
   firstName: string;
   lastName: string;
-  employeeNumber: string;
+  employeeNumber?: string;
   phone?: string;
   email?: string;
   qualification?: string;

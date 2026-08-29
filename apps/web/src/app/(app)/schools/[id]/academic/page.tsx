@@ -402,14 +402,20 @@ function SubjectsSection({
         ) : (
           <div className="flex flex-wrap gap-2">
             {subjects.map((s) => (
-              <Badge key={s.id}>{s.name}</Badge>
+              <Badge key={s.id}>
+                {s.name}
+                {s.code && <span className="ml-1 font-mono text-foreground-muted">· {s.code}</span>}
+              </Badge>
             ))}
           </div>
         )}
 
         {canManage && (
           <form onSubmit={onCreate} className="mt-4 flex flex-wrap items-end gap-2 border-t border-border pt-4">
-            <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Mathematics" />
+            <div>
+              <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Mathematics" />
+              <p className="mt-1 text-xs text-foreground-muted">A subject code is generated automatically.</p>
+            </div>
             <Button type="submit" size="sm" icon={<Plus className="size-4" />}>
               Add subject
             </Button>

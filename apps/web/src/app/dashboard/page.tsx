@@ -17,25 +17,37 @@ export default function DashboardPage() {
     return <p className="p-8 text-foreground-soft">Loading…</p>;
   }
 
+  const isTeacher = user.permissions.includes("attendance.mark") || user.permissions.includes("results.enter");
+
   return (
-    <div className="mx-auto w-full max-w-2xl px-6 py-16">
-      <div className="flex items-start justify-between">
-        <div>
+    <div className="mx-auto w-full max-w-2xl px-4 py-10 sm:px-6 sm:py-16">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <span className="text-sm font-semibold uppercase tracking-wide text-accent">Dashboard</span>
-          <h1 className="mt-1 text-2xl font-semibold text-foreground">{user.email}</h1>
+          <h1 className="mt-1 break-words text-2xl font-semibold text-foreground">{user.email}</h1>
         </div>
         <button
           onClick={async () => {
             await logout();
             router.push("/login");
           }}
-          className="rounded-lg border border-border px-3 py-1.5 text-sm text-foreground-soft hover:text-foreground"
+          className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground-soft hover:text-foreground"
         >
           Sign out
         </button>
       </div>
 
-      <div className="mt-8 rounded-xl border border-border bg-surface p-5">
+      {isTeacher && (
+        <Link
+          href="/my-classes"
+          className="mt-6 flex items-center justify-between rounded-xl border border-border bg-surface p-5 hover:border-accent"
+        >
+          <span className="font-medium text-foreground">My classes</span>
+          <span className="text-accent">→</span>
+        </Link>
+      )}
+
+      <div className="mt-4 rounded-xl border border-border bg-surface p-5">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground-soft">Roles</h2>
         <div className="mt-2 flex flex-wrap gap-2">
           {user.roles.map((role) => (
@@ -57,7 +69,7 @@ export default function DashboardPage() {
         ) : (
           <ul className="mt-2 space-y-2">
             {user.schools.map((school) => (
-              <li key={school.id} className="flex items-center gap-3">
+              <li key={school.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="text-foreground">{school.name}</span>
                 {user.permissions.includes("academic.view") && (
                   <Link href={`/schools/${school.id}/academic`} className="text-sm text-accent hover:underline">

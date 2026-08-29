@@ -20,6 +20,24 @@ export class TeachersService {
     private readonly schools: SchoolsService,
   ) {}
 
+  // "My own classes" — no permission gate beyond authentication, same as
+  // /auth/me: this is a teacher looking at their own assignments, not a
+  // school-scoped admin action.
+  async myAssignments(actor: AuthenticatedUser) {
+    const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id } });
+    if (!teacher) return [];
+
+    return this.prisma.teacherAssignment.findMany({
+      where: { teacherId: teacher.id },
+      include: {
+        section: { include: { class: true } },
+        subject: true,
+        academicYear: true,
+      },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
   async listForSchool(actor: AuthenticatedUser, schoolId: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     return this.prisma.teacher.findMany({

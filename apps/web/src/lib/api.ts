@@ -130,6 +130,57 @@ export interface CreateStudentInput {
   confirmDespiteDuplicates?: boolean;
 }
 
+export type AttendanceStatus = "PRESENT" | "ABSENT" | "LATE" | "EXCUSED";
+
+export interface MyAssignment {
+  id: string;
+  schoolId: string;
+  section: { id: string; name: string; class: { id: string; name: string } };
+  subject: { id: string; name: string };
+  academicYear: { id: string; name: string };
+}
+
+export interface AttendanceRow {
+  enrollmentId: string;
+  studentId: string;
+  firstName: string;
+  lastName: string;
+  rollNumber: number;
+  status: AttendanceStatus | null;
+  note: string | null;
+}
+
+export type ExamType = "QUIZ" | "MIDTERM" | "FINAL" | "ASSIGNMENT" | "OTHER";
+
+export interface Exam {
+  id: string;
+  name: string;
+  type: ExamType;
+  academicYearId: string;
+  examSubjects: {
+    id: string;
+    classId: string;
+    subjectId: string;
+    maxMarks: number;
+    class: { id: string; name: string };
+    subject: { id: string; name: string };
+  }[];
+}
+
+export interface ResultRow {
+  enrollmentId: string;
+  firstName: string;
+  lastName: string;
+  rollNumber: number;
+  marksObtained: string | null;
+  status: "ENTERED" | "APPROVED" | null;
+}
+
+export interface ResultsForSection {
+  maxMarks: number;
+  students: ResultRow[];
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ accessToken: string }>("/auth/login", { method: "POST", body: { email, password } }),
@@ -193,4 +244,52 @@ export const api = {
       body,
       accessToken,
     }),
+
+  myAssignments: (accessToken: string) => request<MyAssignment[]>("/teachers/me/assignments", { accessToken }),
+
+  getAttendance: (accessToken: string, schoolId: string, sectionId: string, date: string) =>
+    request<AttendanceRow[]>(`/schools/${schoolId}/sections/${sectionId}/attendance?date=${date}`, { accessToken }),
+  markAttendance: (
+    accessToken: string,
+    schoolId: string,
+    sectionId: string,
+    date: string,
+    entries: { enrollmentId: string; status: AttendanceStatus }[],
+  ) =>
+    request<AttendanceRow[]>(`/schools/${schoolId}/sections/${sectionId}/attendance`, {
+      method: "POST",
+      body: { date, entries },
+      accessToken,
+    }),
+
+  listExams: (accessToken: string, schoolId: string) => request<Exam[]>(`/schools/${schoolId}/exams`, { accessToken }),
+  createExam: (accessToken: string, schoolId: string, body: { academicYearId: string; name: string; type: ExamType }) =>
+    request<Exam>(`/schools/${schoolId}/exams`, { method: "POST", body, accessToken }),
+  createExamSubject: (
+    accessToken: string,
+    schoolId: string,
+    examId: string,
+    body: { classId: string; subjectId: string; maxMarks?: number },
+  ) =>
+    request<Exam["examSubjects"][number]>(`/schools/${schoolId}/exams/${examId}/subjects`, {
+      method: "POST",
+      body,
+      accessToken,
+    }),
+  getResults: (accessToken: string, schoolId: string, examSubjectId: string, sectionId: string) =>
+    request<ResultsForSection>(
+      `/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/results`,
+      { accessToken },
+    ),
+  enterMarks: (
+    accessToken: string,
+    schoolId: string,
+    examSubjectId: string,
+    sectionId: string,
+    entries: { enrollmentId: string; marksObtained: number }[],
+  ) =>
+    request<ResultsForSection>(
+      `/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/results`,
+      { method: "POST", body: { entries }, accessToken },
+    ),
 };

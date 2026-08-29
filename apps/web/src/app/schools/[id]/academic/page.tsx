@@ -3,7 +3,7 @@
 import { use, useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type AcademicYear, type ClassWithSections, type Division, type Subject } from "@/lib/api";
+import { api, type AcademicYear, type ClassWithSections, type Division, type Exam, type ExamType, type Subject } from "@/lib/api";
 
 export default function AcademicStructurePage({ params }: { params: Promise<{ id: string }> }) {
   const { id: schoolId } = use(params);
@@ -14,6 +14,7 @@ export default function AcademicStructurePage({ params }: { params: Promise<{ id
   const [years, setYears] = useState<AcademicYear[]>([]);
   const [classes, setClasses] = useState<ClassWithSections[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [exams, setExams] = useState<Exam[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -31,12 +32,14 @@ export default function AcademicStructurePage({ params }: { params: Promise<{ id
       api.listAcademicYears(accessToken, schoolId),
       api.listClasses(accessToken, schoolId),
       api.listSubjects(accessToken, schoolId),
+      api.listExams(accessToken, schoolId),
     ])
-      .then(([d, y, c, subj]) => {
+      .then(([d, y, c, subj, ex]) => {
         setDivisions(d);
         setYears(y);
         setClasses(c);
         setSubjects(subj);
+        setExams(ex);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load academic structure"));
   }, [accessToken, schoolId]);
@@ -55,7 +58,7 @@ export default function AcademicStructurePage({ params }: { params: Promise<{ id
   const schoolName = user.schools.find((s) => s.id === schoolId)?.name ?? "School";
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-16">
+    <div className="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6 sm:py-16">
       <span className="text-sm font-semibold uppercase tracking-wide text-accent">Academic structure</span>
       <h1 className="mt-1 text-2xl font-semibold text-foreground">{schoolName}</h1>
 
@@ -82,6 +85,17 @@ export default function AcademicStructurePage({ params }: { params: Promise<{ id
         subjects={subjects}
         setSubjects={setSubjects}
         canManage={canManage}
+      />
+
+      <ExamsSection
+        schoolId={schoolId}
+        accessToken={accessToken!}
+        years={years}
+        classes={classes}
+        subjects={subjects}
+        exams={exams}
+        setExams={setExams}
+        canManage={user.permissions.includes("results.approve")}
       />
     </div>
   );
@@ -414,7 +428,7 @@ function SubjectsSection({
       </div>
 
       {canManage && (
-        <form onSubmit={onCreate} className="mt-3 flex items-end gap-2">
+        <form onSubmit={onCreate} className="mt-3 flex flex-wrap items-end gap-2">
           <input
             required
             value={name}
@@ -425,9 +439,211 @@ function SubjectsSection({
           <button type="submit" className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90">
             Add subject
           </button>
-          {formError && <p className="text-sm text-danger">{formError}</p>}
+          {formError && <p className="w-full text-sm text-danger">{formError}</p>}
         </form>
       )}
     </section>
+  );
+}
+
+function ExamsSection({
+  schoolId,
+  accessToken,
+  years,
+  classes,
+  subjects,
+  exams,
+  setExams,
+  canManage,
+}: {
+  schoolId: string;
+  accessToken: string;
+  years: AcademicYear[];
+  classes: ClassWithSections[];
+  subjects: Subject[];
+  exams: Exam[];
+  setExams: (fn: (prev: Exam[]) => Exam[]) => void;
+  canManage: boolean;
+}) {
+  const [name, setName] = useState("");
+  const [type, setType] = useState<ExamType>("MIDTERM");
+  const [academicYearId, setAcademicYearId] = useState(years[0]?.id ?? "");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  async function onCreate(e: FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+    try {
+      const exam = await api.createExam(accessToken, schoolId, { name, type, academicYearId });
+      setExams((prev) => [{ ...exam, examSubjects: [] }, ...prev]);
+      setName("");
+    } catch (err) {
+      setFormError(err instanceof ApiError ? err.message : "Failed to create exam");
+    }
+  }
+
+  return (
+    <section className="mt-8">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground-soft">Exams</h2>
+
+      <div className="mt-2 space-y-3">
+        {exams.map((exam) => (
+          <ExamRow
+            key={exam.id}
+            schoolId={schoolId}
+            accessToken={accessToken}
+            exam={exam}
+            classes={classes}
+            subjects={subjects}
+            setExams={setExams}
+            canManage={canManage}
+          />
+        ))}
+        {exams.length === 0 && <p className="text-sm text-foreground-soft">No exams yet.</p>}
+      </div>
+
+      {canManage && years.length > 0 && (
+        <form onSubmit={onCreate} className="mt-3 flex flex-wrap items-end gap-2 rounded-xl border border-border bg-surface p-4">
+          <div>
+            <label className="block text-xs font-medium text-foreground-soft">Year</label>
+            <select
+              value={academicYearId}
+              onChange={(e) => setAcademicYearId(e.target.value)}
+              className="mt-1 rounded-lg border border-border bg-background px-2 py-1.5 text-foreground outline-none focus:border-accent"
+            >
+              {years.map((y) => (
+                <option key={y.id} value={y.id}>
+                  {y.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-foreground-soft">Name</label>
+            <input
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Midterm 2027"
+              className="mt-1 w-40 rounded-lg border border-border bg-background px-2 py-1.5 text-foreground outline-none focus:border-accent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-foreground-soft">Type</label>
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value as ExamType)}
+              className="mt-1 rounded-lg border border-border bg-background px-2 py-1.5 text-foreground outline-none focus:border-accent"
+            >
+              <option value="QUIZ">Quiz</option>
+              <option value="MIDTERM">Midterm</option>
+              <option value="FINAL">Final</option>
+              <option value="ASSIGNMENT">Assignment</option>
+              <option value="OTHER">Other</option>
+            </select>
+          </div>
+          <button type="submit" className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90">
+            Add exam
+          </button>
+          {formError && <p className="w-full text-sm text-danger">{formError}</p>}
+        </form>
+      )}
+    </section>
+  );
+}
+
+function ExamRow({
+  schoolId,
+  accessToken,
+  exam,
+  classes,
+  subjects,
+  setExams,
+  canManage,
+}: {
+  schoolId: string;
+  accessToken: string;
+  exam: Exam;
+  classes: ClassWithSections[];
+  subjects: Subject[];
+  setExams: (fn: (prev: Exam[]) => Exam[]) => void;
+  canManage: boolean;
+}) {
+  const [classId, setClassId] = useState(classes[0]?.id ?? "");
+  const [subjectId, setSubjectId] = useState(subjects[0]?.id ?? "");
+  const [maxMarks, setMaxMarks] = useState("100");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  async function onAddSubject(e: FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+    try {
+      const examSubject = await api.createExamSubject(accessToken, schoolId, exam.id, {
+        classId,
+        subjectId,
+        maxMarks: Number(maxMarks),
+      });
+      setExams((prev) =>
+        prev.map((ex) => (ex.id === exam.id ? { ...ex, examSubjects: [...ex.examSubjects, examSubject] } : ex)),
+      );
+    } catch (err) {
+      setFormError(err instanceof ApiError ? err.message : "Failed to add subject");
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-surface p-4">
+      <p className="font-medium text-foreground">
+        {exam.name} <span className="text-sm font-normal text-foreground-soft">· {exam.type}</span>
+      </p>
+
+      <div className="mt-2 flex flex-wrap gap-2">
+        {exam.examSubjects.map((es) => (
+          <span key={es.id} className="rounded-full bg-accent-soft px-3 py-1 text-sm text-accent">
+            {es.class.name} · {es.subject.name} · /{es.maxMarks}
+          </span>
+        ))}
+        {exam.examSubjects.length === 0 && <span className="text-sm text-foreground-soft">No subjects scheduled yet.</span>}
+      </div>
+
+      {canManage && classes.length > 0 && subjects.length > 0 && (
+        <form onSubmit={onAddSubject} className="mt-3 flex flex-wrap items-end gap-2">
+          <select
+            value={classId}
+            onChange={(e) => setClassId(e.target.value)}
+            className="rounded-lg border border-border bg-background px-2 py-1 text-sm text-foreground outline-none focus:border-accent"
+          >
+            {classes.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={subjectId}
+            onChange={(e) => setSubjectId(e.target.value)}
+            className="rounded-lg border border-border bg-background px-2 py-1 text-sm text-foreground outline-none focus:border-accent"
+          >
+            {subjects.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            min={1}
+            value={maxMarks}
+            onChange={(e) => setMaxMarks(e.target.value)}
+            placeholder="Max marks"
+            className="w-24 rounded-lg border border-border bg-background px-2 py-1 text-sm text-foreground outline-none focus:border-accent"
+          />
+          <button type="submit" className="rounded-lg border border-border px-3 py-1 text-sm text-foreground hover:border-accent">
+            Add subject
+          </button>
+          {formError && <p className="w-full text-sm text-danger">{formError}</p>}
+        </form>
+      )}
+    </div>
   );
 }

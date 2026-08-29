@@ -475,6 +475,8 @@ export const api = {
 
   listClasses: (accessToken: string, schoolId: string) =>
     request<ClassWithSections[]>(`/schools/${schoolId}/classes`, { accessToken }),
+  listSections: (accessToken: string, schoolId: string, classId: string) =>
+    request<Section[]>(`/schools/${schoolId}/classes/${classId}/sections`, { accessToken }),
   createClass: (accessToken: string, schoolId: string, body: { divisionId: string; name: string; level: number }) =>
     request<ClassWithSections>(`/schools/${schoolId}/classes`, { method: "POST", body, accessToken }),
   createSection: (

@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import {
   api,
@@ -385,9 +386,14 @@ function ClassRow({
 
   return (
     <Card>
-      <p className="font-medium text-foreground">
-        {cls.name} <span className="text-sm font-normal text-foreground-soft">· {cls.division.type}</span>
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="font-medium text-foreground">
+          {cls.name} <span className="text-sm font-normal text-foreground-soft">· {cls.division.type}</span>
+        </p>
+        <Link href={`/schools/${schoolId}/academic/classes/${cls.id}`} className="text-sm text-accent hover:underline">
+          View details
+        </Link>
+      </div>
 
       <div className="mt-2 flex flex-wrap gap-2">
         {sections.map((s) => (
@@ -499,10 +505,12 @@ function SubjectsSection({
         ) : (
           <div className="flex flex-wrap gap-2">
             {subjects.map((s) => (
-              <Badge key={s.id}>
-                {s.name}
-                {s.code && <span className="ml-1 font-mono text-foreground-muted">· {s.code}</span>}
-              </Badge>
+              <Link key={s.id} href={`/schools/${schoolId}/academic/subjects/${s.id}`}>
+                <Badge>
+                  {s.name}
+                  {s.code && <span className="ml-1 font-mono text-foreground-muted">· {s.code}</span>}
+                </Badge>
+              </Link>
             ))}
           </div>
         )}

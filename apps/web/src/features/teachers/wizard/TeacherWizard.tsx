@@ -47,6 +47,13 @@ export function TeacherWizard({ schoolId }: { schoolId: string }) {
       .catch((err) => setLoadError(err instanceof ApiError ? err.message : "Failed to load form data"));
   }, [accessToken, schoolId]);
 
+  useEffect(() => {
+    return () => {
+      if (state.photoPreviewUrl) URL.revokeObjectURL(state.photoPreviewUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function patch(p: Partial<TeacherWizardState>) {
     setState((prev) => ({ ...prev, ...p }));
   }
@@ -72,6 +79,13 @@ export function TeacherWizard({ schoolId }: { schoolId: string }) {
             }))
           : undefined,
       });
+
+      if (state.photoFile) {
+        await api.uploadTeacherPhoto(accessToken, schoolId, teacher.id, state.photoFile).catch(() => {
+          show("Teacher created, but the photo failed to upload. You can add it from the profile.", "danger");
+        });
+      }
+
       setCreated(teacher);
       show(`${state.firstName} ${state.lastName} created.`);
     } catch (err) {

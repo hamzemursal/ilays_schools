@@ -552,6 +552,10 @@ export const api = {
       body: { email },
       accessToken,
     }),
+  uploadTeacherPhoto: (accessToken: string, schoolId: string, teacherId: string, file: File) =>
+    uploadFile<{ id: string }>(`/schools/${schoolId}/teachers/${teacherId}/photo`, file, "photo", accessToken),
+  getTeacherPhotoUrl: (accessToken: string, schoolId: string, teacherId: string) =>
+    request<{ url: string; uploadedAt: string }>(`/schools/${schoolId}/teachers/${teacherId}/photo`, { accessToken }),
 
   previewPromotion: (
     accessToken: string,

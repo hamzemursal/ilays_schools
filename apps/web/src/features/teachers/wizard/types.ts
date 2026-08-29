@@ -6,6 +6,8 @@ export interface WizardAssignment {
 }
 
 export interface TeacherWizardState {
+  photoFile: File | null;
+  photoPreviewUrl: string | null;
   firstName: string;
   lastName: string;
   qualification: string;
@@ -16,6 +18,8 @@ export interface TeacherWizardState {
 
 export function emptyTeacherWizardState(): TeacherWizardState {
   return {
+    photoFile: null,
+    photoPreviewUrl: null,
     firstName: "",
     lastName: "",
     qualification: "",

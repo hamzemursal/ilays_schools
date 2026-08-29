@@ -1,5 +1,7 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { TeachersService } from "./teachers.service";
+import { DocumentsService } from "../documents/documents.service";
 import { CreateTeacherDto } from "./dto/create-teacher.dto";
 import { CreateTeacherAssignmentInputDto } from "./dto/create-teacher-assignment-input.dto";
 import { InviteTeacherLoginDto } from "./dto/invite-teacher-login.dto";
@@ -9,7 +11,10 @@ import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 
 @Controller("schools/:schoolId/teachers")
 export class TeachersController {
-  constructor(private readonly teachers: TeachersService) {}
+  constructor(
+    private readonly teachers: TeachersService,
+    private readonly documents: DocumentsService,
+  ) {}
 
   @RequirePermissions("teachers.view")
   @Get()
@@ -47,5 +52,27 @@ export class TeachersController {
     @Body() dto: InviteTeacherLoginDto,
   ) {
     return this.teachers.inviteLogin(user, schoolId, teacherId, dto.email);
+  }
+
+  @RequirePermissions("teachers.update")
+  @Post(":teacherId/photo")
+  @UseInterceptors(FileInterceptor("photo", { limits: { fileSize: 5 * 1024 * 1024 } }))
+  uploadPhoto(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("teacherId") teacherId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.documents.uploadTeacherPhoto(user, schoolId, teacherId, file);
+  }
+
+  @RequirePermissions("teachers.view")
+  @Get(":teacherId/photo")
+  getPhotoUrl(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("teacherId") teacherId: string,
+  ) {
+    return this.documents.getTeacherPhotoUrl(user, schoolId, teacherId);
   }
 }

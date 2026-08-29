@@ -8,4 +8,6 @@ export const teachersApi = {
   create: api.createTeacher,
   addAssignment: api.addTeacherAssignment,
   inviteLogin: api.inviteTeacherLogin,
+  uploadPhoto: api.uploadTeacherPhoto,
+  getPhotoUrl: api.getTeacherPhotoUrl,
 };

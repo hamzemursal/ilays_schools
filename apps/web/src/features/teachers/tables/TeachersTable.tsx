@@ -3,8 +3,8 @@
 import { useRouter } from "next/navigation";
 import type { Teacher } from "@/lib/api";
 import { DataTable, type Column } from "@/components/ui/DataTable";
-import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
+import { TeacherAvatar } from "../components/TeacherAvatar";
 
 const STATUS_TONE: Record<Teacher["status"], "success" | "warning" | "neutral"> = {
   ACTIVE: "success",
@@ -14,10 +14,12 @@ const STATUS_TONE: Record<Teacher["status"], "success" | "warning" | "neutral"> 
 
 export function TeachersTable({
   schoolId,
+  accessToken,
   teachers,
   loading,
 }: {
   schoolId: string;
+  accessToken: string;
   teachers: Teacher[] | null;
   loading?: boolean;
 }) {
@@ -30,7 +32,7 @@ export function TeachersTable({
       sortValue: (t) => `${t.lastName} ${t.firstName}`,
       render: (t) => (
         <div className="flex items-center gap-3">
-          <Avatar name={`${t.firstName} ${t.lastName}`} size="sm" />
+          <TeacherAvatar accessToken={accessToken} schoolId={schoolId} teacherId={t.id} name={`${t.firstName} ${t.lastName}`} />
           <div className="min-w-0">
             <p className="truncate font-medium text-foreground">
               {t.firstName} {t.lastName}

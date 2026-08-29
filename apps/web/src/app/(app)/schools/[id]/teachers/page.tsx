@@ -67,7 +67,11 @@ export default function TeachersListPage({ params }: { params: Promise<{ id: str
         }
       />
       <div className="space-y-5 p-4 sm:p-6">
-        {error ? <Alert tone="danger">{error}</Alert> : <TeachersTable schoolId={schoolId} teachers={teachers} />}
+        {error ? (
+          <Alert tone="danger">{error}</Alert>
+        ) : (
+          accessToken && <TeachersTable schoolId={schoolId} accessToken={accessToken} teachers={teachers} />
+        )}
       </div>
     </div>
   );

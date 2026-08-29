@@ -4,6 +4,7 @@ import { Mail, Phone } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
+import { Avatar } from "@/components/ui/Avatar";
 import type { AcademicYear, ClassWithSections, Subject } from "@/lib/api";
 import type { TeacherWizardState } from "../types";
 
@@ -27,23 +28,26 @@ export function ReviewStep({
 
       <Card padding="none">
         <CardHeader title="Teacher" />
-        <div className="p-5">
-          <p className="font-medium text-foreground">
-            {state.firstName} {state.lastName}
-          </p>
-          {state.qualification && <p className="mt-1 text-sm text-foreground-soft">{state.qualification}</p>}
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-foreground-soft">
-            {state.phone && (
-              <span className="inline-flex items-center gap-1.5">
-                <Phone className="size-3.5" /> {state.phone}
-              </span>
-            )}
-            {state.email && (
-              <span className="inline-flex items-center gap-1.5">
-                <Mail className="size-3.5" /> {state.email}
-              </span>
-            )}
-            {!state.phone && !state.email && <span className="text-foreground-muted">No contact on file</span>}
+        <div className="flex items-center gap-4 p-5">
+          <Avatar name={`${state.firstName} ${state.lastName}`} photoUrl={state.photoPreviewUrl} size="lg" />
+          <div>
+            <p className="font-medium text-foreground">
+              {state.firstName} {state.lastName}
+            </p>
+            {state.qualification && <p className="mt-1 text-sm text-foreground-soft">{state.qualification}</p>}
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-foreground-soft">
+              {state.phone && (
+                <span className="inline-flex items-center gap-1.5">
+                  <Phone className="size-3.5" /> {state.phone}
+                </span>
+              )}
+              {state.email && (
+                <span className="inline-flex items-center gap-1.5">
+                  <Mail className="size-3.5" /> {state.email}
+                </span>
+              )}
+              {!state.phone && !state.email && <span className="text-foreground-muted">No contact on file</span>}
+            </div>
           </div>
         </div>
       </Card>

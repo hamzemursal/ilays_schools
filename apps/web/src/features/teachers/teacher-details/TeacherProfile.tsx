@@ -5,9 +5,9 @@ import { BookUser, Mail, Phone, Send } from "lucide-react";
 import { ApiError, useAuth } from "@/lib/auth-context";
 import type { Teacher } from "@/lib/api";
 import { teachersApi } from "../api";
+import { PhotoUpload } from "../components/PhotoUpload";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -25,6 +25,7 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
   const { show } = useToast();
 
   const [teacher, setTeacher] = useState<Teacher | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
 
@@ -41,6 +42,10 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
         }
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load teacher"));
+    teachersApi
+      .getPhotoUrl(accessToken, schoolId, teacherId)
+      .then((res) => setPhotoUrl(res.url))
+      .catch(() => setPhotoUrl(null));
   }, [accessToken, schoolId, teacherId]);
 
   async function onInvite() {
@@ -65,7 +70,18 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
     <div className="space-y-5">
       <Card>
         <div className="flex flex-wrap items-center gap-4">
-          <Avatar name={`${teacher.firstName} ${teacher.lastName}`} size="lg" />
+          {accessToken && (
+            <PhotoUpload
+              accessToken={accessToken}
+              schoolId={schoolId}
+              teacherId={teacher.id}
+              name={`${teacher.firstName} ${teacher.lastName}`}
+              canUpload={canUpdate}
+              size="lg"
+              photoUrl={photoUrl}
+              onUploaded={setPhotoUrl}
+            />
+          )}
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-lg font-semibold text-foreground">

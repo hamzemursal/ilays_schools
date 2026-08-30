@@ -3,7 +3,7 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type AcademicYear, type ClassWithSections, type Division, type Subject } from "@/lib/api";
+import { api, type AcademicYear, type ClassWithSections, type Division, type DivisionType, type Subject } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -11,6 +11,13 @@ import { Alert } from "@/components/ui/Alert";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { CheckCircle2, Plus, X } from "lucide-react";
+
+// Level is what a School Admin actually thinks of as "Form 1..4" /
+// "Class 1..8" — a fixed, named range per division, not a free-typed
+// number that can silently collide with (or contradict) another class's
+// name. Matches the range already documented on Class.level in the schema.
+const LEVEL_RANGE: Record<DivisionType, number> = { PRIMARY: 8, SECONDARY: 4 };
+const levelLabel = (type: DivisionType, level: number) => (type === "PRIMARY" ? `Class ${level}` : `Form ${level}`);
 
 // One workflow: Academic Year + Class + every Section + every Subject,
 // saved together in a single request (ClassesService.create wraps it all
@@ -23,15 +30,22 @@ export default function CreateClassPage({ params }: { params: Promise<{ id: stri
   const [divisions, setDivisions] = useState<Division[] | null>(null);
   const [years, setYears] = useState<AcademicYear[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [classes, setClasses] = useState<ClassWithSections[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!accessToken) return;
-    Promise.all([api.listDivisions(accessToken, schoolId), api.listAcademicYears(accessToken, schoolId), api.listSubjects(accessToken, schoolId)])
-      .then(([d, y, s]) => {
+    Promise.all([
+      api.listDivisions(accessToken, schoolId),
+      api.listAcademicYears(accessToken, schoolId),
+      api.listSubjects(accessToken, schoolId),
+      api.listClasses(accessToken, schoolId),
+    ])
+      .then(([d, y, s, c]) => {
         setDivisions(d);
         setYears(y);
         setSubjects(s);
+        setClasses(c);
       })
       .catch((err) => setLoadError(err instanceof ApiError ? err.message : "Failed to load academic structure"));
   }, [accessToken, schoolId]);
@@ -54,6 +68,8 @@ export default function CreateClassPage({ params }: { params: Promise<{ id: stri
       onYearsChange={setYears}
       subjects={subjects}
       onSubjectsChange={setSubjects}
+      classes={classes}
+      onClassesChange={setClasses}
     />
   );
 }
@@ -66,6 +82,8 @@ function ClassWizard({
   onYearsChange,
   subjects,
   onSubjectsChange,
+  classes,
+  onClassesChange,
 }: {
   schoolId: string;
   accessToken: string;
@@ -74,6 +92,8 @@ function ClassWizard({
   onYearsChange: (years: AcademicYear[]) => void;
   subjects: Subject[];
   onSubjectsChange: (subjects: Subject[]) => void;
+  classes: ClassWithSections[];
+  onClassesChange: (classes: ClassWithSections[]) => void;
 }) {
   const currentYear = years.find((y) => y.isCurrent) ?? years[0];
 
@@ -86,8 +106,17 @@ function ClassWizard({
   const [savingYear, setSavingYear] = useState(false);
 
   const [divisionId, setDivisionId] = useState(divisions[0]?.id ?? "");
-  const [className, setClassName] = useState("");
-  const [level, setLevel] = useState("");
+  const selectedDivision = divisions.find((d) => d.id === divisionId) ?? null;
+
+  // Only levels not already used by an existing class in this division —
+  // the exact "Class 7 already exists" collision is now impossible to hit
+  // because it's simply never offered as a choice.
+  const usedLevels = new Set(classes.filter((c) => c.division.id === divisionId).map((c) => c.level));
+  const levelOptions = selectedDivision
+    ? Array.from({ length: LEVEL_RANGE[selectedDivision.type] }, (_, i) => i + 1).filter((lvl) => !usedLevels.has(lvl))
+    : [];
+
+  const [level, setLevel] = useState<number | null>(levelOptions[0] ?? null);
   const [sectionNames, setSectionNames] = useState<string[]>([""]);
   const [selectedSubjectIds, setSelectedSubjectIds] = useState<Set<string>>(new Set());
   const [newSubjectName, setNewSubjectName] = useState("");
@@ -99,6 +128,17 @@ function ClassWizard({
   const [created, setCreated] = useState<ClassWithSections | null>(null);
 
   const selectedYear = years.find((y) => y.id === academicYearId) ?? null;
+  const className = selectedDivision && level ? levelLabel(selectedDivision.type, level) : "";
+
+  function onDivisionChange(newDivisionId: string) {
+    setDivisionId(newDivisionId);
+    const division = divisions.find((d) => d.id === newDivisionId);
+    const used = new Set(classes.filter((c) => c.division.id === newDivisionId).map((c) => c.level));
+    const options = division
+      ? Array.from({ length: LEVEL_RANGE[division.type] }, (_, i) => i + 1).filter((lvl) => !used.has(lvl))
+      : [];
+    setLevel(options[0] ?? null);
+  }
 
   async function onCreateYear() {
     setYearError(null);
@@ -158,9 +198,14 @@ function ClassWizard({
     setSectionNames((prev) => prev.filter((_, i) => i !== index));
   }
 
-  function resetForNextClass() {
-    setClassName("");
-    setLevel("");
+  function resetForNextClass(updatedClasses: ClassWithSections[]) {
+    // Recompute the next available level for the same division so a second
+    // "Form 5" (or whatever comes next) is offered automatically.
+    const used = new Set(updatedClasses.filter((c) => c.division.id === divisionId).map((c) => c.level));
+    const options = selectedDivision
+      ? Array.from({ length: LEVEL_RANGE[selectedDivision.type] }, (_, i) => i + 1).filter((lvl) => !used.has(lvl))
+      : [];
+    setLevel(options[0] ?? null);
     setSectionNames([""]);
     setSelectedSubjectIds(new Set());
     setErrors([]);
@@ -173,26 +218,26 @@ function ClassWizard({
     const problems: string[] = [];
     if (!academicYearId) problems.push("Select an academic year.");
     if (!divisionId) problems.push("Select a division.");
-    if (!className.trim()) problems.push("Class name is required.");
-    if (!level || Number(level) < 1) problems.push("Level must be a positive number.");
+    if (!level) problems.push("Select a level.");
     if (cleanedSections.length === 0) problems.push("Add at least one section.");
     const dupeSection = cleanedSections.find((n, i) => cleanedSections.findIndex((n2) => n2.toLowerCase() === n.toLowerCase()) !== i);
     if (dupeSection) problems.push(`Duplicate section name: ${dupeSection}`);
     if (selectedSubjectIds.size === 0) problems.push("Select at least one subject.");
 
     setErrors(problems);
-    if (problems.length > 0) return;
+    if (problems.length > 0 || !level) return;
 
     setSaving(true);
     setSaveError(null);
     try {
       const cls = await api.createClass(accessToken, schoolId, {
         divisionId,
-        name: className.trim(),
-        level: Number(level),
+        name: className,
+        level,
         sections: cleanedSections.map((name) => ({ name })),
         subjectIds: Array.from(selectedSubjectIds),
       });
+      onClassesChange([...classes, cls]);
       setCreated(cls);
     } catch (err) {
       setSaveError(err instanceof ApiError ? err.message : "Failed to create class");
@@ -222,7 +267,7 @@ function ClassWizard({
               {created._count.classSubjects === 1 ? "" : "s"}
             </p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
-              <Button icon={<Plus className="size-4" />} onClick={resetForNextClass}>
+              <Button icon={<Plus className="size-4" />} onClick={() => resetForNextClass(classes)}>
                 Create another class
               </Button>
               <Link href={`/schools/${schoolId}/academic`}>
@@ -301,13 +346,10 @@ function ClassWizard({
         </Card>
 
         <Card padding="none">
-          <CardHeader title="Class details" />
+          <CardHeader title="Class details" description="Pick the division, then the level — the class name follows automatically." />
           <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2">
-            <FormField label="Class Name" required>
-              <Input value={className} onChange={(e) => setClassName(e.target.value)} placeholder="Form 1" />
-            </FormField>
             <FormField label="Division" required>
-              <Select value={divisionId} onChange={(e) => setDivisionId(e.target.value)}>
+              <Select value={divisionId} onChange={(e) => onDivisionChange(e.target.value)}>
                 {divisions.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.type}
@@ -315,9 +357,26 @@ function ClassWizard({
                 ))}
               </Select>
             </FormField>
-            <FormField label="Level" hint="Used for ordering and promotions." required>
-              <Input type="number" min={1} value={level} onChange={(e) => setLevel(e.target.value)} placeholder="7" />
+            <FormField label="Level" required hint="Determines the class name and its order for promotions.">
+              {levelOptions.length === 0 ? (
+                <p className="flex h-10 items-center text-sm text-foreground-muted">
+                  Every level for this division already has a class.
+                </p>
+              ) : (
+                <Select value={level ?? ""} onChange={(e) => setLevel(Number(e.target.value))}>
+                  {levelOptions.map((lvl) => (
+                    <option key={lvl} value={lvl}>
+                      {selectedDivision && levelLabel(selectedDivision.type, lvl)}
+                    </option>
+                  ))}
+                </Select>
+              )}
             </FormField>
+            {className && (
+              <p className="text-sm text-foreground-soft sm:col-span-2">
+                This will be created as <span className="font-medium text-foreground">{className}</span>.
+              </p>
+            )}
           </div>
         </Card>
 

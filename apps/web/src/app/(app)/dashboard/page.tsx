@@ -92,15 +92,15 @@ export default function DashboardPage() {
               <SkeletonCards count={5} />
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-                <StatCard icon={Users} label="Students" value={summary.studentCount} />
-                <StatCard icon={BookUser} label="Teachers" value={summary.teacherCount} />
-                <StatCard icon={GraduationCap} label="Classes" value={summary.classCount} />
+                <StatCard icon={Users} label="Students" value={summary.counts.students} />
+                <StatCard icon={BookUser} label="Teachers" value={summary.counts.teachers} />
+                <StatCard icon={GraduationCap} label="Classes" value={summary.counts.classes} />
                 <StatCard
                   icon={ShieldCheck}
                   label="Attendance today"
-                  value={summary.attendanceTodayPercent === null ? "—" : `${summary.attendanceTodayPercent}%`}
-                  hint={summary.attendanceMarkedCount === 0 ? "Not marked yet" : `${summary.attendanceMarkedCount} marked`}
-                  tone={summary.attendanceTodayPercent !== null && summary.attendanceTodayPercent < 80 ? "warning" : "success"}
+                  value={summary.attendanceToday.percent === null ? "—" : `${summary.attendanceToday.percent}%`}
+                  hint={summary.attendanceToday.marked === 0 ? "Not marked yet" : `${summary.attendanceToday.marked} marked`}
+                  tone={summary.attendanceToday.percent !== null && summary.attendanceToday.percent < 80 ? "warning" : "success"}
                 />
                 <StatCard
                   icon={Wallet}

@@ -24,6 +24,7 @@ import { AuditModule } from "./audit/audit.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
 import { ImportsModule } from "./imports/imports.module";
 import { ExportsModule } from "./exports/exports.module";
+import { ReportsModule } from "./reports/reports.module";
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { ExportsModule } from "./exports/exports.module";
     DashboardModule,
     ImportsModule,
     ExportsModule,
+    ReportsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

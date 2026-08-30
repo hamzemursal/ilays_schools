@@ -119,6 +119,7 @@ async function main() {
     "audit.view",
     "imports.create",
     "exports.create",
+    "reports.view",
   ];
   const schoolAdminPermissions = await prisma.permission.findMany({
     where: { key: { in: schoolAdminPermissionKeys } },

@@ -131,7 +131,8 @@ export interface ClassWithSections {
   name: string;
   level: number;
   division: Division;
-  sections: { id: string; name: string; capacity: number }[];
+  sections: { id: string; name: string; capacity: number; _count: { enrollments: number } }[];
+  _count: { classSubjects: number };
 }
 
 export interface AcademicYear {
@@ -336,14 +337,44 @@ export interface Payment {
   paidAt: string;
 }
 
+export interface DashboardSetup {
+  academicYear: boolean;
+  classes: boolean;
+  sections: boolean;
+  subjects: boolean;
+  teacherAssignments: boolean;
+  studentEnrollment: boolean;
+  progressPercent: number;
+}
+
 export interface DashboardSummary {
-  studentCount: number;
-  teacherCount: number;
-  classCount: number;
-  attendanceTodayPercent: number | null;
-  attendanceMarkedCount: number;
+  academicYear: { id: string; name: string } | null;
+  academicYears: { id: string; name: string; isCurrent: boolean }[];
+  counts: { students: number; teachers: number; classes: number; sections: number; subjects: number };
+  enrollment: { total: number; male: number; female: number };
+  teachers: { active: number; inactive: number };
+  attendanceToday: { marked: number; present: number; absent: number; late: number; excused: number; percent: number | null };
   outstandingFeesTotal: number;
   outstandingInvoiceCount: number;
+  setup: DashboardSetup;
+}
+
+export interface EnrollmentReportRow {
+  classId: string;
+  className: string;
+  sections: { sectionId: string; sectionName: string; enrolled: number }[];
+  totalEnrolled: number;
+}
+
+export interface AttendanceReportRow {
+  sectionId: string;
+  sectionName: string;
+  className: string;
+  total: number;
+  present: number;
+  absent: number;
+  late: number;
+  excused: number;
 }
 
 export interface AuditLogEntry {
@@ -808,8 +839,15 @@ export const api = {
   listPayments: (accessToken: string, invoiceId: string) =>
     request<Payment[]>(`/invoices/${invoiceId}/payments`, { accessToken }),
 
-  getDashboardSummary: (accessToken: string, schoolId: string) =>
-    request<DashboardSummary>(`/schools/${schoolId}/dashboard-summary`, { accessToken }),
+  getDashboardSummary: (accessToken: string, schoolId: string, academicYearId?: string) =>
+    request<DashboardSummary>(`/schools/${schoolId}/dashboard-summary${qs({ academicYearId })}`, { accessToken }),
+
+  getEnrollmentReport: (accessToken: string, schoolId: string, academicYearId: string) =>
+    request<EnrollmentReportRow[]>(`/schools/${schoolId}/reports/enrollment${qs({ academicYearId })}`, { accessToken }),
+  getAttendanceReport: (accessToken: string, schoolId: string, academicYearId: string, from?: string, to?: string) =>
+    request<AttendanceReportRow[]>(`/schools/${schoolId}/reports/attendance${qs({ academicYearId, from, to })}`, {
+      accessToken,
+    }),
 
   listAuditLogs: (accessToken: string, schoolId: string, action?: string) =>
     request<AuditLogEntry[]>(

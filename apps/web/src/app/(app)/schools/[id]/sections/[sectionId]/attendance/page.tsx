@@ -13,7 +13,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonTable } from "@/components/ui/Skeleton";
 import { FormField, Input } from "@/components/ui/FormControls";
 import { useToast } from "@/components/ui/Toast";
-import { CheckCircle2, ClipboardCheck } from "lucide-react";
+import { CheckCircle2, CheckCheck, ClipboardCheck } from "lucide-react";
 
 const STATUSES: { value: AttendanceStatus; label: string; on: string }[] = [
   { value: "PRESENT", label: "Present", on: "bg-success text-white" },
@@ -35,6 +35,8 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
   const className = searchParams.get("class");
   const sectionName = searchParams.get("section");
   const subjectName = searchParams.get("subject");
+  const backHref = searchParams.get("backHref") ?? "/my-classes";
+  const backLabel = searchParams.get("backLabel") ?? "My classes";
 
   const [date, setDate] = useState(searchParams.get("date") ?? new Date().toISOString().slice(0, 10));
   const [rows, setRows] = useState<AttendanceRow[] | null>(null);
@@ -83,7 +85,7 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
         eyebrow="Attendance"
         title={title}
         description={yearName ?? undefined}
-        breadcrumbs={[{ label: "My classes", href: "/my-classes" }, { label: "Attendance" }]}
+        breadcrumbs={[{ label: backLabel, href: backHref }, { label: "Attendance" }]}
       />
 
       <div className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
@@ -118,6 +120,20 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
           <EmptyState icon={ClipboardCheck} title="No active students" description="This section has no active students to mark." />
         ) : (
           <div className="space-y-2">
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                icon={<CheckCheck className="size-4" />}
+                onClick={() => {
+                  setPending(Object.fromEntries(rows.map((r) => [r.enrollmentId, "PRESENT" as AttendanceStatus])));
+                  setSaved(false);
+                }}
+              >
+                Mark all Present
+              </Button>
+            </div>
             {rows.map((r) => (
               <Card key={r.enrollmentId} padding="sm">
                 <div className="flex flex-col gap-2 p-2 sm:flex-row sm:items-center sm:justify-between">

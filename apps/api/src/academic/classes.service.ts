@@ -19,7 +19,11 @@ export class ClassesService {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     return this.prisma.class.findMany({
       where: { division: { schoolId } },
-      include: { division: true, sections: true },
+      include: {
+        division: true,
+        sections: { include: { _count: { select: { enrollments: { where: { status: "ACTIVE" } } } } } },
+        _count: { select: { classSubjects: true } },
+      },
       orderBy: [{ division: { type: "asc" } }, { level: "asc" }],
     });
   }
@@ -33,7 +37,11 @@ export class ClassesService {
     try {
       return await this.prisma.class.create({
         data: { divisionId: dto.divisionId, name: dto.name, level: dto.level },
-        include: { division: true, sections: true },
+        include: {
+          division: true,
+          sections: { include: { _count: { select: { enrollments: { where: { status: "ACTIVE" } } } } } },
+          _count: { select: { classSubjects: true } },
+        },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {

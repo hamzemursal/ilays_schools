@@ -384,12 +384,20 @@ function ClassRow({
     }
   }
 
+  const totalStudents = sections.reduce((sum, s) => sum + s._count.enrollments, 0);
+
   return (
     <Card>
       <div className="flex items-center justify-between">
-        <p className="font-medium text-foreground">
-          {cls.name} <span className="text-sm font-normal text-foreground-soft">· {cls.division.type}</span>
-        </p>
+        <div>
+          <p className="font-medium text-foreground">
+            {cls.name} <span className="text-sm font-normal text-foreground-soft">· {cls.division.type}</span>
+          </p>
+          <p className="mt-0.5 text-xs text-foreground-muted">
+            {sections.length} section{sections.length === 1 ? "" : "s"} · {totalStudents} student
+            {totalStudents === 1 ? "" : "s"} · {cls._count.classSubjects} subject{cls._count.classSubjects === 1 ? "" : "s"}
+          </p>
+        </div>
         <Link href={`/schools/${schoolId}/academic/classes/${cls.id}`} className="text-sm text-accent hover:underline">
           View details
         </Link>
@@ -398,7 +406,7 @@ function ClassRow({
       <div className="mt-2 flex flex-wrap gap-2">
         {sections.map((s) => (
           <Badge key={s.id} tone="accent">
-            {s.name} · capacity {s.capacity}
+            {s.name} · {s._count.enrollments} student{s._count.enrollments === 1 ? "" : "s"}
           </Badge>
         ))}
         {sections.length === 0 && <span className="text-sm text-foreground-muted">No sections yet.</span>}

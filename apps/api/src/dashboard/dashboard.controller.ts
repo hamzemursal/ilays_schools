@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from "@nestjs/common";
+import { Controller, Get, Param, Query } from "@nestjs/common";
 import { DashboardService } from "./dashboard.service";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { RequirePermissions } from "../auth/decorators/require-permissions.decorator";
@@ -14,7 +14,11 @@ export class DashboardController {
   // correctly excludes Teachers from seeing school-wide financial totals.
   @RequirePermissions("academic.view")
   @Get()
-  getSummary(@CurrentUser() user: AuthenticatedUser, @Param("schoolId") schoolId: string) {
-    return this.dashboard.getSummary(user, schoolId);
+  getSummary(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Query("academicYearId") academicYearId?: string,
+  ) {
+    return this.dashboard.getSummary(user, schoolId, academicYearId);
   }
 }

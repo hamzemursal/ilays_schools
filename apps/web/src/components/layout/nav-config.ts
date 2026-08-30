@@ -10,6 +10,8 @@ import {
   ScrollText,
   Building2,
   BookUser,
+  ClipboardCheck,
+  BarChart3,
 } from "lucide-react";
 import type { Profile } from "@/lib/api";
 
@@ -41,6 +43,12 @@ export function schoolNavItems(user: Profile, schoolId: string): NavItem[] {
   if (user.roles.includes("TEACHER")) {
     items.push({ label: "My classes", href: `/my-classes`, icon: BookUser });
   }
+  // A teacher already reaches attendance through "My classes" (scoped to
+  // their own assignments) — this admin entry point browses every section
+  // in the school, so it's only shown to non-teachers.
+  if ((has("attendance.mark") || has("attendance.view")) && !user.roles.includes("TEACHER")) {
+    items.push({ label: "Attendance", href: `/schools/${schoolId}/attendance`, icon: ClipboardCheck });
+  }
   if (has("fees.manage") || has("payments.record")) {
     items.push({ label: "Finance", href: `/schools/${schoolId}/finance`, icon: Wallet });
   }
@@ -49,6 +57,9 @@ export function schoolNavItems(user: Profile, schoolId: string): NavItem[] {
   }
   if (has("transfers.create") || has("transfers.approve")) {
     items.push({ label: "Transfers", href: `/schools/${schoolId}/transfers`, icon: ArrowLeftRight });
+  }
+  if (has("reports.view")) {
+    items.push({ label: "Reports", href: `/schools/${schoolId}/reports`, icon: BarChart3 });
   }
   if (has("audit.view")) {
     items.push({ label: "Audit log", href: `/schools/${schoolId}/audit-log`, icon: ScrollText });

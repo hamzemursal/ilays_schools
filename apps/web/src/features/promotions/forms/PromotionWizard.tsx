@@ -195,8 +195,12 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
                     <FormField label="Target section" required>
                       <Select required value={targetSectionId} onChange={(e) => setTargetSectionId(e.target.value)}>
                         {preview.targetSections.map((s) => (
-                          <option key={s.id} value={s.id} disabled={s.available < preview.students.length}>
-                            {s.name} — {s.available}/{s.capacity} available
+                          <option
+                            key={s.id}
+                            value={s.id}
+                            disabled={s.available !== null && s.available < preview.students.length}
+                          >
+                            {s.name} — {s.available === null ? "Unlimited" : `${s.available}/${s.capacity} available`}
                           </option>
                         ))}
                       </Select>

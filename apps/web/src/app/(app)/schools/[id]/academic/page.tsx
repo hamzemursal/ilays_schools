@@ -6,7 +6,6 @@ import { useAuth, ApiError } from "@/lib/auth-context";
 import {
   api,
   type AcademicYear,
-  type ClassSubjectRecord,
   type ClassWithSections,
   type Division,
   type Exam,
@@ -103,10 +102,9 @@ export default function AcademicStructurePage({ params }: { params: Promise<{ id
               <ClassesSection
                 schoolId={schoolId}
                 accessToken={accessToken!}
-                divisions={divisions}
                 classes={classes}
                 setClasses={setClasses}
-                subjects={subjects}
+                years={years}
                 canManage={canManage}
               />
             )}
@@ -231,245 +229,97 @@ function AcademicYearsSection({
 function ClassesSection({
   schoolId,
   accessToken,
-  divisions,
   classes,
   setClasses,
-  subjects,
+  years,
   canManage,
 }: {
   schoolId: string;
   accessToken: string;
-  divisions: Division[];
   classes: ClassWithSections[];
   setClasses: (fn: (prev: ClassWithSections[]) => ClassWithSections[]) => void;
-  subjects: Subject[];
+  years: AcademicYear[];
   canManage: boolean;
 }) {
-  const [divisionId, setDivisionId] = useState(divisions[0]?.id ?? "");
-  const [name, setName] = useState("");
-  const [level, setLevel] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
-  const { show } = useToast();
+  const currentYear = years.find((y) => y.isCurrent) ?? years[0];
+  const [yearId, setYearId] = useState(currentYear?.id ?? "");
 
-  async function onCreateClass(e: FormEvent) {
-    e.preventDefault();
-    setFormError(null);
-    try {
-      const created = await api.createClass(accessToken, schoolId, { divisionId, name, level: Number(level) });
-      setClasses((prev) => [...prev, created]);
-      setName("");
-      setLevel("");
-      show(`${created.name} added.`);
-    } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Failed to create class");
-    }
-  }
+  // Class/Section are permanent structures reused every year — the year
+  // selector doesn't filter which classes exist, only which year's roster
+  // the enrolled-count badges reflect.
+  useEffect(() => {
+    if (!accessToken || !yearId) return;
+    api.listClasses(accessToken, schoolId, yearId).then((list) => setClasses(() => list));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken, schoolId, yearId]);
 
   return (
     <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {years.length > 0 && (
+          <FormField label="Academic Year" className="w-auto">
+            <Select value={yearId} onChange={(e) => setYearId(e.target.value)} className="w-auto">
+              {years.map((y) => (
+                <option key={y.id} value={y.id}>
+                  {y.name}
+                  {y.isCurrent ? " (current)" : ""}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        )}
+        {canManage && (
+          <Link href={`/schools/${schoolId}/academic/classes/new`} className="ml-auto">
+            <Button icon={<Plus className="size-4" />}>Create class</Button>
+          </Link>
+        )}
+      </div>
+
       {classes.length === 0 ? (
-        <EmptyState title="No classes yet" description="Add your first class to start building the structure." />
+        <EmptyState title="No classes yet" description="Create your first class to start building the structure." />
       ) : (
         <div className="space-y-3">
           {classes.map((cls) => (
-            <ClassRow
-              key={cls.id}
-              schoolId={schoolId}
-              accessToken={accessToken}
-              cls={cls}
-              subjects={subjects}
-              canManage={canManage}
-            />
+            <ClassRow key={cls.id} schoolId={schoolId} cls={cls} />
           ))}
         </div>
-      )}
-
-      {canManage && divisions.length > 0 && (
-        <Card>
-          <h3 className="text-sm font-semibold text-foreground">Add class</h3>
-          <form onSubmit={onCreateClass} className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
-            <FormField label="Division">
-              <Select value={divisionId} onChange={(e) => setDivisionId(e.target.value)}>
-                {divisions.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.type}
-                  </option>
-                ))}
-              </Select>
-            </FormField>
-            <FormField label="Name">
-              <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Class 7" />
-            </FormField>
-            <FormField label="Level">
-              <Input required type="number" min={1} value={level} onChange={(e) => setLevel(e.target.value)} placeholder="7" />
-            </FormField>
-            <div className="flex items-end">
-              <Button type="submit" className="w-full">
-                Add class
-              </Button>
-            </div>
-            {formError && <Alert tone="danger" className="sm:col-span-4">{formError}</Alert>}
-          </form>
-        </Card>
       )}
     </div>
   );
 }
 
-function ClassRow({
-  schoolId,
-  accessToken,
-  cls,
-  subjects,
-  canManage,
-}: {
-  schoolId: string;
-  accessToken: string;
-  cls: ClassWithSections;
-  subjects: Subject[];
-  canManage: boolean;
-}) {
-  const [sections, setSections] = useState(cls.sections);
-  const [name, setName] = useState("");
-  const [capacity, setCapacity] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
-  const { show } = useToast();
-
-  const [classSubjects, setClassSubjects] = useState<ClassSubjectRecord[] | null>(null);
-  const [pickSubjectId, setPickSubjectId] = useState("");
-  const [assigning, setAssigning] = useState(false);
-
-  useEffect(() => {
-    api.listClassSubjects(accessToken, schoolId, cls.id).then(setClassSubjects);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const unassignedSubjects = subjects.filter((s) => !classSubjects?.some((cs) => cs.subjectId === s.id));
-
-  async function onCreateSection(e: FormEvent) {
-    e.preventDefault();
-    setFormError(null);
-    try {
-      const section = await api.createSection(accessToken, schoolId, cls.id, { name, capacity: Number(capacity) });
-      setSections((prev) => [...prev, section]);
-      setName("");
-      setCapacity("");
-      show(`Section ${section.name} added to ${cls.name}.`);
-    } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Failed to create section");
-    }
-  }
-
-  async function onAssignSubject() {
-    if (!pickSubjectId) return;
-    setAssigning(true);
-    try {
-      const record = await api.assignSubjectToClass(accessToken, schoolId, cls.id, pickSubjectId);
-      setClassSubjects((prev) => [...(prev ?? []), record]);
-      setPickSubjectId("");
-      show("Subject assigned to class.");
-    } catch (err) {
-      show(err instanceof ApiError ? err.message : "Failed to assign subject", "danger");
-    } finally {
-      setAssigning(false);
-    }
-  }
-
-  async function onUnassignSubject(subjectId: string) {
-    try {
-      await api.unassignSubjectFromClass(accessToken, schoolId, cls.id, subjectId);
-      setClassSubjects((prev) => prev?.filter((cs) => cs.subjectId !== subjectId) ?? prev);
-    } catch (err) {
-      show(err instanceof ApiError ? err.message : "Failed to remove subject", "danger");
-    }
-  }
-
-  const totalStudents = sections.reduce((sum, s) => sum + s._count.enrollments, 0);
+function ClassRow({ schoolId, cls }: { schoolId: string; cls: ClassWithSections }) {
+  const totalStudents = cls.sections.reduce((sum, s) => sum + s._count.enrollments, 0);
+  const allUnlimited = cls.sections.every((s) => s.capacity === null);
 
   return (
     <Card>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="font-medium text-foreground">
             {cls.name} <span className="text-sm font-normal text-foreground-soft">· {cls.division.type}</span>
           </p>
-          <p className="mt-0.5 text-xs text-foreground-muted">
-            {sections.length} section{sections.length === 1 ? "" : "s"} · {totalStudents} student
-            {totalStudents === 1 ? "" : "s"} · {cls._count.classSubjects} subject{cls._count.classSubjects === 1 ? "" : "s"}
+          <p className="mt-0.5 text-sm text-foreground-soft">
+            {cls.sections.length} Section{cls.sections.length === 1 ? "" : "s"} ·{" "}
+            {allUnlimited ? "Unlimited Capacity" : `${totalStudents} student${totalStudents === 1 ? "" : "s"}`} ·{" "}
+            {cls._count.classSubjects} Subject{cls._count.classSubjects === 1 ? "" : "s"}
+          </p>
+          <p className="mt-1.5 text-sm text-foreground-muted">
+            {cls.sections.length === 0 ? "No sections yet." : cls.sections.map((s) => s.name).join(" · ")}
           </p>
         </div>
-        <Link href={`/schools/${schoolId}/academic/classes/${cls.id}`} className="text-sm text-accent hover:underline">
-          View details
-        </Link>
-      </div>
-
-      <div className="mt-2 flex flex-wrap gap-2">
-        {sections.map((s) => (
-          <Badge key={s.id} tone="accent">
-            {s.name} · {s._count.enrollments} student{s._count.enrollments === 1 ? "" : "s"}
-          </Badge>
-        ))}
-        {sections.length === 0 && <span className="text-sm text-foreground-muted">No sections yet.</span>}
-      </div>
-
-      {canManage && (
-        <form onSubmit={onCreateSection} className="mt-3 flex flex-wrap items-end gap-2">
-          <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="A" className="w-20" />
-          <Input
-            required
-            type="number"
-            min={1}
-            value={capacity}
-            onChange={(e) => setCapacity(e.target.value)}
-            placeholder="Capacity"
-            className="w-28"
-          />
-          <Button type="submit" size="sm" variant="outline" icon={<Plus className="size-4" />}>
-            Add section
-          </Button>
-          {formError && <p className="w-full text-sm text-danger">{formError}</p>}
-        </form>
-      )}
-
-      <div className="mt-4 border-t border-border pt-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">Subjects taught</p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {classSubjects?.map((cs) => (
-            <span
-              key={cs.subjectId}
-              className="inline-flex items-center gap-1 rounded-full bg-surface px-2.5 py-0.5 text-xs font-medium text-foreground-soft"
-            >
-              {cs.subject.name}
-              {canManage && (
-                <button
-                  type="button"
-                  onClick={() => onUnassignSubject(cs.subjectId)}
-                  className="text-foreground-muted hover:text-danger"
-                  aria-label={`Remove ${cs.subject.name}`}
-                >
-                  ×
-                </button>
-              )}
-            </span>
-          ))}
-          {classSubjects?.length === 0 && <span className="text-sm text-foreground-muted">No subjects assigned yet.</span>}
-        </div>
-
-        {canManage && unassignedSubjects.length > 0 && (
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Select value={pickSubjectId} onChange={(e) => setPickSubjectId(e.target.value)} className="w-auto">
-              <option value="">Select a subject…</option>
-              {unassignedSubjects.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
-            <Button type="button" size="sm" variant="outline" loading={assigning} disabled={!pickSubjectId} onClick={onAssignSubject}>
-              Assign
+        <div className="flex shrink-0 gap-2">
+          <Link href={`/schools/${schoolId}/academic/classes/${cls.id}`}>
+            <Button size="sm" variant="outline">
+              View
             </Button>
-          </div>
-        )}
+          </Link>
+          <Link href={`/schools/${schoolId}/academic/classes/${cls.id}`}>
+            <Button size="sm" variant="ghost">
+              Edit
+            </Button>
+          </Link>
+        </div>
       </div>
     </Card>
   );

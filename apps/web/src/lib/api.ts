@@ -119,10 +119,11 @@ export interface Division {
   type: DivisionType;
 }
 
+// capacity: null means unlimited — no maximum enrollment enforced.
 export interface Section {
   id: string;
   name: string;
-  capacity: number;
+  capacity: number | null;
   _count: { enrollments: number };
 }
 
@@ -131,7 +132,7 @@ export interface ClassWithSections {
   name: string;
   level: number;
   division: Division;
-  sections: { id: string; name: string; capacity: number; _count: { enrollments: number } }[];
+  sections: { id: string; name: string; capacity: number | null; _count: { enrollments: number } }[];
   _count: { classSubjects: number };
 }
 
@@ -512,7 +513,7 @@ export interface PromotionPreview {
   outcome: PromotionOutcome;
   currentClass: { id: string; name: string };
   nextClass: { id: string; name: string } | null;
-  targetSections: { id: string; name: string; capacity: number; currentActive: number; available: number }[];
+  targetSections: { id: string; name: string; capacity: number | null; currentActive: number; available: number | null }[];
   students: { studentId: string; enrollmentId: string; firstName: string; lastName: string; rollNumber: number; studentNumber: string }[];
 }
 
@@ -606,18 +607,39 @@ export const api = {
       accessToken,
     }),
 
-  listClasses: (accessToken: string, schoolId: string) =>
-    request<ClassWithSections[]>(`/schools/${schoolId}/classes`, { accessToken }),
-  listSections: (accessToken: string, schoolId: string, classId: string) =>
-    request<Section[]>(`/schools/${schoolId}/classes/${classId}/sections`, { accessToken }),
-  createClass: (accessToken: string, schoolId: string, body: { divisionId: string; name: string; level: number }) =>
-    request<ClassWithSections>(`/schools/${schoolId}/classes`, { method: "POST", body, accessToken }),
+  listClasses: (accessToken: string, schoolId: string, academicYearId?: string) =>
+    request<ClassWithSections[]>(`/schools/${schoolId}/classes${qs({ academicYearId })}`, { accessToken }),
+  listSections: (accessToken: string, schoolId: string, classId: string, academicYearId?: string) =>
+    request<Section[]>(`/schools/${schoolId}/classes/${classId}/sections${qs({ academicYearId })}`, { accessToken }),
+  createClass: (
+    accessToken: string,
+    schoolId: string,
+    body: {
+      divisionId: string;
+      name: string;
+      level: number;
+      sections?: { name: string; capacity?: number | null }[];
+      subjectIds?: string[];
+    },
+  ) => request<ClassWithSections>(`/schools/${schoolId}/classes`, { method: "POST", body, accessToken }),
   createSection: (
     accessToken: string,
     schoolId: string,
     classId: string,
-    body: { name: string; capacity: number },
+    body: { name: string; capacity?: number | null },
   ) => request<Section>(`/schools/${schoolId}/classes/${classId}/sections`, { method: "POST", body, accessToken }),
+  updateSectionCapacity: (
+    accessToken: string,
+    schoolId: string,
+    classId: string,
+    sectionId: string,
+    capacity: number | null,
+  ) =>
+    request<Section>(`/schools/${schoolId}/classes/${classId}/sections/${sectionId}`, {
+      method: "PATCH",
+      body: { capacity },
+      accessToken,
+    }),
   listClassSubjects: (accessToken: string, schoolId: string, classId: string) =>
     request<ClassSubjectRecord[]>(`/schools/${schoolId}/classes/${classId}/subjects`, { accessToken }),
   assignSubjectToClass: (accessToken: string, schoolId: string, classId: string, subjectId: string) =>

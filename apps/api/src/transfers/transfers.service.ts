@@ -83,11 +83,13 @@ export class TransfersService {
     });
     if (!academicYear) throw new BadRequestException("That academic year does not belong to the destination school");
 
-    const activeCount = await this.prisma.studentEnrollment.count({
-      where: { sectionId: section.id, status: "ACTIVE" },
-    });
-    if (activeCount >= section.capacity) {
-      throw new BadRequestException(`Section ${section.name} is at capacity (${section.capacity})`);
+    if (section.capacity !== null) {
+      const activeCount = await this.prisma.studentEnrollment.count({
+        where: { sectionId: section.id, status: "ACTIVE" },
+      });
+      if (activeCount >= section.capacity) {
+        throw new BadRequestException(`Section ${section.name} is at capacity (${section.capacity})`);
+      }
     }
 
     const studentNumber =

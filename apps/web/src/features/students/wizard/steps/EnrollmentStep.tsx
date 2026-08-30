@@ -81,7 +81,7 @@ export function EnrollmentStep({
             <option value="">Select…</option>
             {selectedClass?.sections.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.name} (capacity {s.capacity})
+                {s.name} {s.capacity === null ? "(unlimited)" : `(capacity ${s.capacity})`}
               </option>
             ))}
           </Select>

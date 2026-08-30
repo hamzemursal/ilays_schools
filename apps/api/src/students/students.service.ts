@@ -106,11 +106,14 @@ export class StudentsService {
       }
     }
 
-    const activeCount = await this.prisma.studentEnrollment.count({
-      where: { sectionId: section.id, status: "ACTIVE" },
-    });
-    if (activeCount >= section.capacity) {
-      throw new BadRequestException(`Section ${section.name} is at capacity (${section.capacity})`);
+    // A null capacity means the section is unlimited — see Section.capacity.
+    if (section.capacity !== null) {
+      const activeCount = await this.prisma.studentEnrollment.count({
+        where: { sectionId: section.id, status: "ACTIVE" },
+      });
+      if (activeCount >= section.capacity) {
+        throw new BadRequestException(`Section ${section.name} is at capacity (${section.capacity})`);
+      }
     }
 
     const studentNumber =

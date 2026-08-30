@@ -141,8 +141,11 @@ model Section {
   classId String
   class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
 
-  name     String // "A", "B", ...
-  capacity Int
+  name String // "A", "B", ...
+  // Null means unlimited — no maximum enrollment is enforced for this
+  // section. A number preserves the original fixed-capacity behavior for
+  // sections created before this became optional.
+  capacity Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

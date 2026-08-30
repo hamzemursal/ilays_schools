@@ -43,7 +43,13 @@ export class PromotionsService {
       orderBy: { rollNumber: "asc" },
     });
 
-    let targetSections: { id: string; name: string; capacity: number; currentActive: number; available: number }[] = [];
+    let targetSections: {
+      id: string;
+      name: string;
+      capacity: number | null;
+      currentActive: number;
+      available: number | null;
+    }[] = [];
     if (outcome === "PROMOTED" && nextClass) {
       const sections = await this.prisma.section.findMany({ where: { classId: nextClass.id } });
       targetSections = await Promise.all(
@@ -51,7 +57,14 @@ export class PromotionsService {
           const currentActive = await this.prisma.studentEnrollment.count({
             where: { sectionId: s.id, status: "ACTIVE" },
           });
-          return { id: s.id, name: s.name, capacity: s.capacity, currentActive, available: s.capacity - currentActive };
+          // null capacity means unlimited — available has no ceiling either.
+          return {
+            id: s.id,
+            name: s.name,
+            capacity: s.capacity,
+            currentActive,
+            available: s.capacity === null ? null : s.capacity - currentActive,
+          };
         }),
       );
     }
@@ -88,7 +101,7 @@ export class PromotionsService {
       throw new BadRequestException("No active students in this section for that academic year");
     }
 
-    let targetSection: { id: string; name: string; capacity: number } | null = null;
+    let targetSection: { id: string; name: string; capacity: number | null } | null = null;
     if (outcome === "PROMOTED") {
       if (!dto.targetSectionId) {
         throw new BadRequestException("targetSectionId is required when promoting to a next class");
@@ -98,14 +111,16 @@ export class PromotionsService {
       });
       if (!targetSection) throw new BadRequestException("That section does not belong to the target class");
 
-      const activeCount = await this.prisma.studentEnrollment.count({
-        where: { sectionId: targetSection.id, status: "ACTIVE" },
-      });
-      if (activeCount + enrollments.length > targetSection.capacity) {
-        throw new BadRequestException(
-          `Target section ${targetSection.name} doesn't have room for ${enrollments.length} more student(s) ` +
-            `(capacity ${targetSection.capacity}, currently ${activeCount})`,
-        );
+      if (targetSection.capacity !== null) {
+        const activeCount = await this.prisma.studentEnrollment.count({
+          where: { sectionId: targetSection.id, status: "ACTIVE" },
+        });
+        if (activeCount + enrollments.length > targetSection.capacity) {
+          throw new BadRequestException(
+            `Target section ${targetSection.name} doesn't have room for ${enrollments.length} more student(s) ` +
+              `(capacity ${targetSection.capacity}, currently ${activeCount})`,
+          );
+        }
       }
     }
 

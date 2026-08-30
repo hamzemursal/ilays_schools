@@ -15,33 +15,74 @@ export class ClassesService {
     private readonly schools: SchoolsService,
   ) {}
 
-  async list(actor: AuthenticatedUser, schoolId: string) {
+  // Class/Section are permanent structures reused every year (see schema
+  // comments) — academicYearId here only narrows the *enrollment count*
+  // shown per section to one year's roster, never which classes/sections
+  // exist at all.
+  async list(actor: AuthenticatedUser, schoolId: string, academicYearId?: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     return this.prisma.class.findMany({
       where: { division: { schoolId } },
       include: {
         division: true,
-        sections: { include: { _count: { select: { enrollments: { where: { status: "ACTIVE" } } } } } },
+        sections: {
+          include: {
+            _count: { select: { enrollments: { where: { status: "ACTIVE", ...(academicYearId ? { academicYearId } : {}) } } } },
+          },
+        },
         _count: { select: { classSubjects: true } },
       },
       orderBy: [{ division: { type: "asc" } }, { level: "asc" }],
     });
   }
 
+  // Creates a class, optionally in one shot with its sections and subject
+  // links — the Create Class wizard's "one workflow" — all inside a single
+  // transaction so a partial failure never leaves an orphaned class with no
+  // sections/subjects. Sections/subjectIds are optional so the existing
+  // bare "just create a class" callers keep working unchanged.
   async create(actor: AuthenticatedUser, schoolId: string, dto: CreateClassDto) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
 
     const division = await this.prisma.division.findFirst({ where: { id: dto.divisionId, schoolId } });
     if (!division) throw new BadRequestException("That division does not belong to this school");
 
+    const sectionNames = new Set<string>();
+    for (const s of dto.sections ?? []) {
+      const key = s.name.trim().toLowerCase();
+      if (sectionNames.has(key)) throw new BadRequestException(`Duplicate section name: ${s.name}`);
+      sectionNames.add(key);
+    }
+
+    if (dto.subjectIds && dto.subjectIds.length > 0) {
+      const validSubjects = await this.prisma.subject.count({ where: { id: { in: dto.subjectIds }, schoolId } });
+      if (validSubjects !== dto.subjectIds.length) {
+        throw new BadRequestException("One or more selected subjects do not belong to this school");
+      }
+    }
+
     try {
-      return await this.prisma.class.create({
-        data: { divisionId: dto.divisionId, name: dto.name, level: dto.level },
-        include: {
-          division: true,
-          sections: { include: { _count: { select: { enrollments: { where: { status: "ACTIVE" } } } } } },
-          _count: { select: { classSubjects: true } },
-        },
+      return await this.prisma.$transaction(async (tx) => {
+        const cls = await tx.class.create({
+          data: { divisionId: dto.divisionId, name: dto.name, level: dto.level },
+        });
+
+        for (const s of dto.sections ?? []) {
+          await tx.section.create({ data: { classId: cls.id, name: s.name, capacity: s.capacity ?? null } });
+        }
+
+        for (const subjectId of dto.subjectIds ?? []) {
+          await tx.classSubject.create({ data: { classId: cls.id, subjectId } });
+        }
+
+        return tx.class.findUniqueOrThrow({
+          where: { id: cls.id },
+          include: {
+            division: true,
+            sections: { include: { _count: { select: { enrollments: { where: { status: "ACTIVE" } } } } } },
+            _count: { select: { classSubjects: true } },
+          },
+        });
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -57,12 +98,14 @@ export class ClassesService {
     return cls;
   }
 
-  async listSections(actor: AuthenticatedUser, schoolId: string, classId: string) {
+  async listSections(actor: AuthenticatedUser, schoolId: string, classId: string, academicYearId?: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     await this.getClassInSchoolOrThrow(schoolId, classId);
     return this.prisma.section.findMany({
       where: { classId },
-      include: { _count: { select: { enrollments: { where: { status: "ACTIVE" } } } } },
+      include: {
+        _count: { select: { enrollments: { where: { status: "ACTIVE", ...(academicYearId ? { academicYearId } : {}) } } } },
+      },
       orderBy: { name: "asc" },
     });
   }
@@ -73,7 +116,7 @@ export class ClassesService {
 
     try {
       return await this.prisma.section.create({
-        data: { classId, name: dto.name, capacity: dto.capacity },
+        data: { classId, name: dto.name, capacity: dto.capacity ?? null },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -96,13 +139,17 @@ export class ClassesService {
     const section = await this.prisma.section.findFirst({ where: { id: sectionId, classId } });
     if (!section) throw new NotFoundException("Section not found in this class");
 
-    const activeCount = await this.prisma.studentEnrollment.count({
-      where: { sectionId, status: "ACTIVE" },
-    });
-    if (dto.capacity < activeCount) {
-      throw new BadRequestException(
-        `Capacity can't be set below the ${activeCount} student(s) currently enrolled`,
-      );
+    // null (unlimited) never conflicts with the current roster, so the
+    // below-active-count guard only applies when setting a real number.
+    if (dto.capacity !== null && dto.capacity !== undefined) {
+      const activeCount = await this.prisma.studentEnrollment.count({
+        where: { sectionId, status: "ACTIVE" },
+      });
+      if (dto.capacity < activeCount) {
+        throw new BadRequestException(
+          `Capacity can't be set below the ${activeCount} student(s) currently enrolled`,
+        );
+      }
     }
 
     return this.prisma.section.update({ where: { id: sectionId }, data: { capacity: dto.capacity } });

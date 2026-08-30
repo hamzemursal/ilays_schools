@@ -14,8 +14,12 @@ export class ClassesController {
 
   @RequirePermissions("academic.view")
   @Get()
-  list(@CurrentUser() user: AuthenticatedUser, @Param("schoolId") schoolId: string) {
-    return this.classes.list(user, schoolId);
+  list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Query("academicYearId") academicYearId?: string,
+  ) {
+    return this.classes.list(user, schoolId, academicYearId);
   }
 
   @RequirePermissions("academic.manage")
@@ -34,8 +38,9 @@ export class ClassesController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("schoolId") schoolId: string,
     @Param("classId") classId: string,
+    @Query("academicYearId") academicYearId?: string,
   ) {
-    return this.classes.listSections(user, schoolId, classId);
+    return this.classes.listSections(user, schoolId, classId, academicYearId);
   }
 
   @RequirePermissions("academic.manage")

@@ -117,6 +117,7 @@ export class ClassesService {
     try {
       return await this.prisma.section.create({
         data: { classId, name: dto.name, capacity: dto.capacity ?? null },
+        include: { _count: { select: { enrollments: { where: { status: "ACTIVE" } } } } },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -152,7 +153,11 @@ export class ClassesService {
       }
     }
 
-    return this.prisma.section.update({ where: { id: sectionId }, data: { capacity: dto.capacity } });
+    return this.prisma.section.update({
+      where: { id: sectionId },
+      data: { capacity: dto.capacity },
+      include: { _count: { select: { enrollments: { where: { status: "ACTIVE" } } } } },
+    });
   }
 
   async listSubjects(actor: AuthenticatedUser, schoolId: string, classId: string) {

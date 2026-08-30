@@ -63,6 +63,7 @@ model School {
   exams         Exam[]
   feeStructures FeeStructure[]
   importBatches ImportBatch[]
+  announcements Announcement[]
 
   @@unique([organizationId, name])
   @@map("schools")
@@ -300,23 +301,41 @@ enum GuardianRelationship {
   OTHER
 }
 
+enum GuardianStatus {
+  ACTIVE
+  ARCHIVED
+}
+
 model Guardian {
   id     String  @id @default(uuid())
   userId String? @unique
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
+  // System-generated, mirroring Student.legacyStudentNumber/Teacher.employeeNumber
+  // — never typed by the admin. Nullable only because guardians created before
+  // this field existed have none; every new guardian gets one.
+  guardianCode String? @unique
+
   firstName String
   lastName  String
   phone     String?
   email     String?
+  address   String?
+  status    GuardianStatus @default(ACTIVE)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  students StudentGuardian[]
+  students      StudentGuardian[]
+  notifications Notification[]
 
   @@index([phone])
   @@map("guardians")
+}
+
+enum StudentGuardianStatus {
+  ACTIVE
+  INACTIVE
 }
 
 model StudentGuardian {
@@ -326,10 +345,64 @@ model StudentGuardian {
   guardian   Guardian @relation(fields: [guardianId], references: [id], onDelete: Cascade)
 
   relationship     GuardianRelationship
-  isPrimaryContact Boolean              @default(false)
+  isPrimaryContact Boolean               @default(false)
+  // INACTIVE means "no longer an active relationship" (e.g. admin removed it)
+  // without losing the historical record of who was linked to this student —
+  // same non-destructive intent as Guardian.status.
+  status           StudentGuardianStatus @default(ACTIVE)
 
   @@id([studentId, guardianId])
   @@map("student_guardians")
+}
+
+// ---------------------------------------------------------------------------
+// Announcements & Notifications — minimal, additive: announcements are
+// school-authored broadcasts; notifications are the per-guardian inbox rows
+// derived from them. Nothing else in the system produces notifications yet,
+// so this stays scoped to what the Parent Portal actually needs today rather
+// than a general-purpose event bus.
+// ---------------------------------------------------------------------------
+
+enum AnnouncementAudience {
+  ALL
+  PARENTS
+  TEACHERS
+}
+
+model Announcement {
+  id       String @id @default(uuid())
+  schoolId String
+  school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  title           String
+  body            String
+  audience        AnnouncementAudience @default(ALL)
+  createdByUserId String
+
+  createdAt DateTime @default(now())
+
+  notifications Notification[]
+
+  @@index([schoolId, createdAt])
+  @@map("announcements")
+}
+
+model Notification {
+  id         String   @id @default(uuid())
+  guardianId String
+  guardian   Guardian @relation(fields: [guardianId], references: [id], onDelete: Cascade)
+
+  announcementId String?
+  announcement   Announcement? @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+
+  title  String
+  body   String
+  isRead Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([guardianId, createdAt])
+  @@map("notifications")
 }
 
 // ---------------------------------------------------------------------------

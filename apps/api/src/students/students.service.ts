@@ -3,8 +3,13 @@ import { Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import { GuardiansService } from "../guardians/guardians.service";
+import { StorageService } from "../storage/storage.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateStudentDto } from "./dto/create-student.dto";
+import { UpdateStudentDto } from "./dto/update-student.dto";
+import { EnrollmentInputDto } from "./dto/enrollment-input.dto";
+
+type Tx = Prisma.TransactionClient;
 
 @Injectable()
 export class StudentsService {
@@ -12,6 +17,7 @@ export class StudentsService {
     private readonly prisma: PrismaService,
     private readonly schools: SchoolsService,
     private readonly guardians: GuardiansService,
+    private readonly storage: StorageService,
   ) {}
 
   // A student is visible to an actor if either they're org-wide (no
@@ -31,6 +37,206 @@ export class StudentsService {
       if (!hasAccess) throw new NotFoundException("Student not found");
     }
     return student;
+  }
+
+  async update(actor: AuthenticatedUser, studentId: string, dto: UpdateStudentDto) {
+    await this.assertAccessibleStudent(actor, studentId);
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.student.update({
+          where: { id: studentId },
+          data: {
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
+            sex: dto.sex,
+            legacyStudentNumber: dto.legacyStudentNumber,
+          },
+        });
+
+        if (dto.enrollment) {
+          await this.updateActiveEnrollment(tx, actor, studentId, dto.enrollment);
+        }
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictException("That roll number is already in use in the selected class, section, and year");
+      }
+      throw error;
+    }
+
+    return this.getFullDetail(actor, studentId);
+  }
+
+  // Corrects the CURRENT active enrollment row in place (class/section/year/
+  // roll number) — deliberately distinct from Promotion/Transfer, which end
+  // the old enrollment and create a new one to record a real academic
+  // transition. This is just fixing a data-entry mistake, so the existing
+  // row (and its startDate, studentNumber, and enrollment id used by
+  // attendance/results) is preserved; only these four fields change. No-ops
+  // if nothing actually changed, and never touches any other enrollment row,
+  // so enrollment history stays intact either way.
+  private async updateActiveEnrollment(tx: Tx, actor: AuthenticatedUser, studentId: string, input: EnrollmentInputDto) {
+    const active = await tx.studentEnrollment.findFirst({ where: { studentId, status: "ACTIVE" } });
+    if (!active) {
+      throw new BadRequestException("This student has no active enrollment to update");
+    }
+
+    const rollNumber = input.rollNumber ?? active.rollNumber;
+    const unchanged =
+      active.academicYearId === input.academicYearId &&
+      active.classId === input.classId &&
+      active.sectionId === input.sectionId &&
+      active.rollNumber === rollNumber;
+    if (unchanged) return;
+
+    const section = await tx.section.findFirst({
+      where: { id: input.sectionId, classId: input.classId, class: { division: { schoolId: active.schoolId } } },
+    });
+    if (!section) throw new BadRequestException("That section does not belong to the specified class in this school");
+
+    const academicYear = await tx.academicYear.findFirst({
+      where: { id: input.academicYearId, schoolId: active.schoolId },
+    });
+    if (!academicYear) throw new BadRequestException("That academic year does not belong to this school");
+
+    // Only re-check capacity when actually moving into a different
+    // section/year — staying put (e.g. just fixing the roll number) never
+    // needs it, since this enrollment already counts against that section.
+    const movingSection = input.sectionId !== active.sectionId || input.academicYearId !== active.academicYearId;
+    if (movingSection && section.capacity !== null) {
+      const activeCount = await tx.studentEnrollment.count({
+        where: { sectionId: section.id, academicYearId: input.academicYearId, status: "ACTIVE" },
+      });
+      if (activeCount >= section.capacity) {
+        throw new BadRequestException(`Section ${section.name} is at capacity (${section.capacity})`);
+      }
+    }
+
+    await tx.studentEnrollment.update({
+      where: { id: active.id },
+      data: {
+        academicYearId: input.academicYearId,
+        classId: input.classId,
+        sectionId: input.sectionId,
+        rollNumber,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        organizationId: actor.organizationId,
+        schoolId: active.schoolId,
+        actorUserId: actor.id,
+        action: "student.enrollment.update",
+        resource: "StudentEnrollment",
+        resourceId: active.id,
+        before: {
+          academicYearId: active.academicYearId,
+          classId: active.classId,
+          sectionId: active.sectionId,
+          rollNumber: active.rollNumber,
+        },
+        after: { academicYearId: input.academicYearId, classId: input.classId, sectionId: input.sectionId, rollNumber },
+      },
+    });
+  }
+
+  // Archiving never deletes the student — it withdraws the active enrollment
+  // (preserving attendance/marks history tied to it) and marks the student
+  // record itself as archived, so it drops out of active rosters everywhere.
+  async archive(actor: AuthenticatedUser, studentId: string) {
+    const student = await this.assertAccessibleStudent(actor, studentId);
+
+    if (student.currentStatus === "ARCHIVED") {
+      throw new BadRequestException("This student is already archived");
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const activeEnrollment = await tx.studentEnrollment.findFirst({
+        where: { studentId, status: "ACTIVE" },
+      });
+
+      if (activeEnrollment) {
+        await tx.studentEnrollment.update({
+          where: { id: activeEnrollment.id },
+          data: { status: "WITHDRAWN", endDate: new Date() },
+        });
+      }
+
+      await tx.student.update({
+        where: { id: studentId },
+        data: { currentStatus: "ARCHIVED" },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          organizationId: actor.organizationId,
+          schoolId: activeEnrollment?.schoolId,
+          actorUserId: actor.id,
+          action: "student.archive",
+          resource: "Student",
+          resourceId: studentId,
+          before: { currentStatus: student.currentStatus },
+          after: { currentStatus: "ARCHIVED" },
+        },
+      });
+    });
+
+    return this.getFullDetail(actor, studentId);
+  }
+
+  // Genuine permanent deletion — the student row and every dependent record
+  // that only ever existed because of this student (enrollment history,
+  // attendance, results, invoices/payments, transfers, promotion items,
+  // guardian links, photos/documents) are removed for good. Unlike archive(),
+  // there is no surviving row afterward. Only Restrict-guarded relations need
+  // explicit cleanup here — Cascade relations (StudentGuardian, Attendance,
+  // Result) are handled by Postgres itself once their parent row is deleted.
+  async remove(actor: AuthenticatedUser, studentId: string) {
+    const student = await this.assertAccessibleStudent(actor, studentId);
+
+    const mediaFiles = await this.prisma.$transaction(async (tx) => {
+      const enrollments = await tx.studentEnrollment.findMany({ where: { studentId } });
+
+      await tx.transfer.deleteMany({ where: { studentId } });
+
+      for (const enrollment of enrollments) {
+        const invoices = await tx.invoice.findMany({ where: { enrollmentId: enrollment.id }, select: { id: true } });
+        const invoiceIds = invoices.map((i) => i.id);
+        if (invoiceIds.length > 0) {
+          await tx.payment.deleteMany({ where: { invoiceId: { in: invoiceIds } } });
+          await tx.invoice.deleteMany({ where: { id: { in: invoiceIds } } });
+        }
+        await tx.promotionItem.deleteMany({ where: { fromEnrollmentId: enrollment.id } });
+      }
+
+      await tx.studentEnrollment.deleteMany({ where: { studentId } });
+
+      const files = await tx.mediaFile.findMany({ where: { ownerType: "STUDENT", ownerId: studentId } });
+      await tx.mediaFile.deleteMany({ where: { ownerType: "STUDENT", ownerId: studentId } });
+
+      await tx.student.delete({ where: { id: studentId } });
+
+      await tx.auditLog.create({
+        data: {
+          organizationId: actor.organizationId,
+          schoolId: enrollments[0]?.schoolId,
+          actorUserId: actor.id,
+          action: "student.delete",
+          resource: "Student",
+          resourceId: studentId,
+          before: { firstName: student.firstName, lastName: student.lastName, currentStatus: student.currentStatus },
+        },
+      });
+
+      return files;
+    });
+
+    await Promise.all(mediaFiles.map((f) => this.storage.delete(f.storageKey).catch(() => undefined)));
+
+    return { success: true };
   }
 
   async listForSchool(actor: AuthenticatedUser, schoolId: string) {
@@ -55,7 +261,15 @@ export class StudentsService {
   }
 
   async getOne(actor: AuthenticatedUser, studentId: string) {
-    const student = await this.assertAccessibleStudent(actor, studentId);
+    await this.assertAccessibleStudent(actor, studentId);
+    return this.getFullDetail(actor, studentId);
+  }
+
+  // Shared by getOne/update/archive so every mutation hands back the same
+  // enrollments+guardians shape the frontend's StudentDetail expects, instead
+  // of the bare Student row a plain prisma.student.update() would return.
+  private async getFullDetail(actor: AuthenticatedUser, studentId: string) {
+    const student = await this.prisma.student.findUniqueOrThrow({ where: { id: studentId } });
 
     const enrollments = await this.prisma.studentEnrollment.findMany({
       where: {
@@ -119,7 +333,7 @@ export class StudentsService {
     const studentNumber =
       dto.enrollment.studentNumber ??
       (await this.generateStudentNumber(schoolId, academicYear.id, academicYear.name));
-    const rollNumber = dto.enrollment.rollNumber ?? (await this.generateRollNumber(section.id));
+    const rollNumber = dto.enrollment.rollNumber ?? (await this.generateRollNumber(section.id, academicYear.id));
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -194,9 +408,14 @@ export class StudentsService {
     return `STU-${academicYearName}-${sequence}`;
   }
 
-  private async generateRollNumber(sectionId: string): Promise<number> {
+  // Scoped by academicYearId to match the roll number's actual uniqueness
+  // rule (schoolId+academicYearId+classId+sectionId+rollNumber+status) and
+  // the same "resets per year" behavior generateStudentNumber uses — without
+  // this, a section reused across years would keep climbing instead of
+  // restarting at 1 each year.
+  private async generateRollNumber(sectionId: string, academicYearId: string): Promise<number> {
     const result = await this.prisma.studentEnrollment.aggregate({
-      where: { sectionId, status: "ACTIVE" },
+      where: { sectionId, academicYearId, status: "ACTIVE" },
       _max: { rollNumber: true },
     });
     return (result._max.rollNumber ?? 0) + 1;

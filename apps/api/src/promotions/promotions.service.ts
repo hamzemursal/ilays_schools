@@ -138,8 +138,11 @@ export class PromotionsService {
 
       let nextRoll = 0;
       if (targetSection) {
+        // Scoped by toAcademicYearId — a section reused across years resets
+        // its roll numbering each year rather than carrying it forward (see
+        // StudentsService.generateRollNumber for the same rule).
         const maxRoll = await tx.studentEnrollment.aggregate({
-          where: { sectionId: targetSection.id, status: "ACTIVE" },
+          where: { sectionId: targetSection.id, academicYearId: dto.toAcademicYearId, status: "ACTIVE" },
           _max: { rollNumber: true },
         });
         nextRoll = (maxRoll._max.rollNumber ?? 0) + 1;

@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { ClassesService } from "./classes.service";
 import { CreateClassDto } from "./dto/create-class.dto";
+import { UpdateClassDto } from "./dto/update-class.dto";
 import { CreateSectionDto } from "./dto/create-section.dto";
 import { UpdateSectionDto } from "./dto/update-section.dto";
 import { AssignSubjectDto } from "./dto/assign-subject.dto";
@@ -30,6 +31,27 @@ export class ClassesController {
     @Body() dto: CreateClassDto,
   ) {
     return this.classes.create(user, schoolId, dto);
+  }
+
+  @RequirePermissions("academic.manage")
+  @Patch(":classId")
+  update(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("classId") classId: string,
+    @Body() dto: UpdateClassDto,
+  ) {
+    return this.classes.update(user, schoolId, classId, dto);
+  }
+
+  @RequirePermissions("academic.manage")
+  @Delete(":classId")
+  remove(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("classId") classId: string,
+  ) {
+    return this.classes.remove(user, schoolId, classId);
   }
 
   @RequirePermissions("academic.view")
@@ -63,7 +85,18 @@ export class ClassesController {
     @Param("sectionId") sectionId: string,
     @Body() dto: UpdateSectionDto,
   ) {
-    return this.classes.updateSectionCapacity(user, schoolId, classId, sectionId, dto);
+    return this.classes.updateSection(user, schoolId, classId, sectionId, dto);
+  }
+
+  @RequirePermissions("academic.manage")
+  @Delete(":classId/sections/:sectionId")
+  removeSection(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("classId") classId: string,
+    @Param("sectionId") sectionId: string,
+  ) {
+    return this.classes.removeSection(user, schoolId, classId, sectionId);
   }
 
   @RequirePermissions("academic.view")

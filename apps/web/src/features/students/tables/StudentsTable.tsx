@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import type { StudentListItem } from "@/lib/api";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTable, type Column, type TableSelection } from "@/components/ui/DataTable";
 import { StudentAvatar } from "../components/StudentAvatar";
 
 export function StudentsTable({
@@ -10,11 +10,13 @@ export function StudentsTable({
   accessToken,
   students,
   loading,
+  selection,
 }: {
   schoolId: string;
   accessToken: string;
   students: StudentListItem[] | null;
   loading?: boolean;
+  selection?: TableSelection;
 }) {
   const router = useRouter();
 
@@ -45,7 +47,7 @@ export function StudentsTable({
       data={students}
       loading={loading}
       columns={columns}
-      rowKey={(s) => s.enrollmentId}
+      rowKey={(s) => s.studentId}
       onRowClick={(s) => router.push(`/schools/${schoolId}/students/${s.studentId}`)}
       searchPlaceholder="Search students by name or number…"
       searchFilter={(s, q) =>
@@ -53,6 +55,7 @@ export function StudentsTable({
       }
       emptyTitle="No students enrolled yet"
       emptyDescription="Add your first student to get started."
+      selection={selection}
     />
   );
 }

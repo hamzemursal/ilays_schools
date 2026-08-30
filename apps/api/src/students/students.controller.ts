@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
 import { StudentsService } from "./students.service";
 import { CreateStudentDto } from "./dto/create-student.dto";
+import { UpdateStudentDto } from "./dto/update-student.dto";
 import { GuardianInputDto } from "../guardians/dto/guardian-input.dto";
 import { GuardiansService } from "../guardians/guardians.service";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
@@ -36,6 +37,24 @@ export class StudentsController {
   @Get("students/:id")
   getOne(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.students.getOne(user, id);
+  }
+
+  @RequirePermissions("students.update")
+  @Patch("students/:id")
+  update(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Body() dto: UpdateStudentDto) {
+    return this.students.update(user, id, dto);
+  }
+
+  @RequirePermissions("students.archive")
+  @Post("students/:id/archive")
+  archive(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.students.archive(user, id);
+  }
+
+  @RequirePermissions("students.archive")
+  @Delete("students/:id")
+  remove(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.students.remove(user, id);
   }
 
   @RequirePermissions("guardians.manage")

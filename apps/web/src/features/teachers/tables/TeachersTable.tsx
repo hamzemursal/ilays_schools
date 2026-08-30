@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import type { Teacher } from "@/lib/api";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTable, type Column, type TableSelection } from "@/components/ui/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { TeacherAvatar } from "../components/TeacherAvatar";
 
@@ -17,11 +17,13 @@ export function TeachersTable({
   accessToken,
   teachers,
   loading,
+  selection,
 }: {
   schoolId: string;
   accessToken: string;
   teachers: Teacher[] | null;
   loading?: boolean;
+  selection?: TableSelection;
 }) {
   const router = useRouter();
 
@@ -81,6 +83,7 @@ export function TeachersTable({
       searchFilter={(t, q) => `${t.firstName} ${t.lastName} ${t.employeeNumber}`.toLowerCase().includes(q)}
       emptyTitle="No teachers yet"
       emptyDescription="Add your first teacher to get started."
+      selection={selection}
     />
   );
 }

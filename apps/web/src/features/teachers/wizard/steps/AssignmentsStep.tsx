@@ -1,11 +1,34 @@
 "use client";
 
-import { BookUser, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, BookUser, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/FormControls";
 import { EmptyState } from "@/components/ui/EmptyState";
 import type { AcademicYear, ClassWithSections, Subject } from "@/lib/api";
 import type { TeacherWizardState, WizardAssignment } from "../types";
+
+// A teacher can only hold one assignment per (year, section, subject) — the
+// backend enforces this with a unique constraint, but surfacing it here
+// keeps the admin from filling out the whole wizard only to have "Create
+// teacher" fail on a confusing duplicate-key error at the very end.
+function duplicateKey(a: WizardAssignment) {
+  return `${a.academicYearId}|${a.sectionId}|${a.subjectId}`;
+}
+
+export function findDuplicateAssignmentIndexes(assignments: WizardAssignment[]): Set<number> {
+  const seen = new Map<string, number>();
+  const duplicates = new Set<number>();
+  assignments.forEach((a, i) => {
+    const key = duplicateKey(a);
+    if (seen.has(key)) {
+      duplicates.add(i);
+      duplicates.add(seen.get(key)!);
+    } else {
+      seen.set(key, i);
+    }
+  });
+  return duplicates;
+}
 
 export function AssignmentsStep({
   state,
@@ -41,6 +64,7 @@ export function AssignmentsStep({
   }
 
   const canAssign = years.length > 0 && classes.length > 0 && subjects.length > 0;
+  const duplicateIndexes = findDuplicateAssignmentIndexes(state.assignments);
 
   return (
     <div className="space-y-5">
@@ -63,11 +87,14 @@ export function AssignmentsStep({
           <div className="space-y-3">
             {state.assignments.map((row, i) => {
               const cls = classes.find((c) => c.id === row.classId);
+              const isDuplicate = duplicateIndexes.has(i);
               return (
-                <div
-                  key={i}
-                  className="relative grid grid-cols-2 gap-2 rounded-xl border border-border bg-surface-soft p-3 sm:grid-cols-4"
-                >
+                <div key={i}>
+                  <div
+                    className={`relative grid grid-cols-2 gap-2 rounded-xl border p-3 sm:grid-cols-4 ${
+                      isDuplicate ? "border-danger bg-danger-soft" : "border-border bg-surface-soft"
+                    }`}
+                  >
                   <Select value={row.academicYearId} onChange={(e) => updateRow(i, { academicYearId: e.target.value })}>
                     {years.map((y) => (
                       <option key={y.id} value={y.id}>
@@ -112,6 +139,12 @@ export function AssignmentsStep({
                       <Trash2 className="size-4" />
                     </button>
                   </div>
+                  </div>
+                  {isDuplicate && (
+                    <p className="mt-1 flex items-center gap-1 text-xs text-danger">
+                      <AlertTriangle className="size-3.5" /> This subject is already assigned to this class/section for this year.
+                    </p>
+                  )}
                 </div>
               );
             })}

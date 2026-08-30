@@ -8,6 +8,7 @@ export const teachersApi = {
   getOne: api.getTeacher,
   create: api.createTeacher,
   update: api.updateTeacher,
+  remove: api.deleteTeacher,
   addAssignment: api.addTeacherAssignment,
   removeAssignment: api.removeTeacherAssignment,
   inviteLogin: api.inviteTeacherLogin,

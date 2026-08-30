@@ -56,14 +56,15 @@ export class AuthController {
 
   @Get("me")
   async me(@CurrentUser() user: AuthenticatedUser) {
-    const [schools, teacher] = await Promise.all([
+    const [schools, teacher, guardian] = await Promise.all([
       this.prisma.school.findMany({
         where: { id: { in: user.schoolIds } },
         select: { id: true, name: true },
       }),
       this.prisma.teacher.findFirst({ where: { userId: user.id }, select: { id: true } }),
+      this.prisma.guardian.findFirst({ where: { userId: user.id }, select: { id: true } }),
     ]);
-    return { ...user, schools, teacherId: teacher?.id ?? null };
+    return { ...user, schools, teacherId: teacher?.id ?? null, guardianId: guardian?.id ?? null };
   }
 
   private setRefreshCookie(res: Response, tokens: TokenPair) {

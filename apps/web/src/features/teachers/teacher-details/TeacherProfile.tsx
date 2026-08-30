@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Cake, MapPin, Pencil, Phone, Send, ShieldAlert, User } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Cake, MapPin, Pencil, Phone, Power, Send, ShieldAlert, Trash2, User } from "lucide-react";
 import { ApiError, useAuth } from "@/lib/auth-context";
 import type { Teacher } from "@/lib/api";
 import { teachersApi } from "../api";
@@ -15,6 +16,7 @@ import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { Input } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 
 const STATUS_TONE: Record<Teacher["status"], "success" | "warning" | "neutral"> = {
@@ -26,6 +28,7 @@ const STATUS_TONE: Record<Teacher["status"], "success" | "warning" | "neutral"> 
 export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teacherId: string }) {
   const { user, accessToken } = useAuth();
   const { show } = useToast();
+  const router = useRouter();
 
   const [teacher, setTeacher] = useState<Teacher | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -35,6 +38,10 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteResult, setInviteResult] = useState<{ email: string; acceptUrl: string } | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
+  const [showStatusConfirm, setShowStatusConfirm] = useState(false);
+  const [togglingStatus, setTogglingStatus] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -66,6 +73,37 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
       setInviteError(err instanceof ApiError ? err.message : "Failed to send invite");
     } finally {
       setInviting(false);
+    }
+  }
+
+  async function onToggleStatus() {
+    if (!accessToken || !teacher) return;
+    setTogglingStatus(true);
+    try {
+      const nextStatus = teacher.status === "INACTIVE" ? "ACTIVE" : "INACTIVE";
+      const updated = await teachersApi.update(accessToken, schoolId, teacher.id, { status: nextStatus });
+      setTeacher(updated);
+      show(nextStatus === "INACTIVE" ? "Teacher deactivated." : "Teacher reactivated.");
+      setShowStatusConfirm(false);
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to update teacher status", "danger");
+    } finally {
+      setTogglingStatus(false);
+    }
+  }
+
+  async function onDelete() {
+    if (!accessToken || !teacher) return;
+    setDeleting(true);
+    try {
+      await teachersApi.remove(accessToken, schoolId, teacher.id);
+      show("Teacher deleted permanently.");
+      router.push(`/schools/${schoolId}/teachers`);
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to delete teacher", "danger");
+      setShowDeleteConfirm(false);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -107,11 +145,54 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
             </div>
           </div>
           {canUpdate && !editing && (
-            <Button size="sm" variant="outline" icon={<Pencil className="size-4" />} onClick={() => setEditing(true)}>
-              Edit profile
-            </Button>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" icon={<Pencil className="size-4" />} onClick={() => setEditing(true)}>
+                Edit profile
+              </Button>
+              <Button
+                size="sm"
+                variant={teacher.status === "INACTIVE" ? "outline" : "danger"}
+                icon={<Power className="size-4" />}
+                onClick={() => setShowStatusConfirm(true)}
+              >
+                {teacher.status === "INACTIVE" ? "Reactivate" : "Deactivate"}
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                icon={<Trash2 className="size-4" />}
+                onClick={() => setShowDeleteConfirm(true)}
+              >
+                Delete
+              </Button>
+            </div>
           )}
         </div>
+
+        <ConfirmDialog
+          open={showStatusConfirm}
+          title={teacher.status === "INACTIVE" ? `Reactivate ${teacher.firstName}?` : `Deactivate ${teacher.firstName}?`}
+          description={
+            teacher.status === "INACTIVE"
+              ? "This teacher will become active again and regain access to their portal."
+              : "This teacher will lose access to their portal. Their records, assignments, and history are kept."
+          }
+          confirmLabel={teacher.status === "INACTIVE" ? "Reactivate" : "Deactivate"}
+          tone={teacher.status === "INACTIVE" ? "primary" : "danger"}
+          loading={togglingStatus}
+          onConfirm={onToggleStatus}
+          onCancel={() => setShowStatusConfirm(false)}
+        />
+
+        <ConfirmDialog
+          open={showDeleteConfirm}
+          title={`Delete ${teacher.firstName} ${teacher.lastName} permanently?`}
+          description="This permanently deletes this teacher and every related record — class/subject assignments, their login account (if any), and uploaded photos/documents. This action cannot be undone."
+          confirmLabel="Delete permanently"
+          loading={deleting}
+          onConfirm={onDelete}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
 
         <div className="mt-4 grid grid-cols-2 gap-4 border-t border-border pt-4 sm:grid-cols-3 lg:grid-cols-4">
           <Field icon={User} label="Gender" value={teacher.sex === "MALE" ? "Male" : teacher.sex === "FEMALE" ? "Female" : "—"} />

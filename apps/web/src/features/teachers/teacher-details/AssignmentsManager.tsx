@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BookUser, Plus, X } from "lucide-react";
-import { api, type AcademicYear, type ClassWithSections, type Subject, type Teacher } from "@/lib/api";
+import { BookUser, Check, Pencil, Plus, Trash2 } from "lucide-react";
+import { api, type AcademicYear, type ClassSubjectRecord, type ClassWithSections, type Teacher } from "@/lib/api";
 import { ApiError } from "@/lib/auth-context";
 import { teachersApi } from "../api";
 import { Card, CardHeader } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Select } from "@/components/ui/FormControls";
+import { FormField, Select } from "@/components/ui/FormControls";
 import { useToast } from "@/components/ui/Toast";
+
+type TeacherAssignment = Teacher["assignments"][number];
 
 // Lets a School Admin hold a teacher assigned to any number of
 // class/section/subject/year combinations — not just the ones picked
@@ -31,46 +33,53 @@ export function AssignmentsManager({
   onChange: (teacher: Teacher) => void;
 }) {
   const { show } = useToast();
+  const [editing, setEditing] = useState(false);
   const [years, setYears] = useState<AcademicYear[]>([]);
   const [classes, setClasses] = useState<ClassWithSections[]>([]);
-  const [subjects, setSubjects] = useState<Subject[]>([]);
   const [academicYearId, setAcademicYearId] = useState("");
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [subjectId, setSubjectId] = useState("");
   const [adding, setAdding] = useState(false);
-  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<TeacherAssignment | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!canManage) return;
-    Promise.all([
-      api.listAcademicYears(accessToken, schoolId),
-      api.listClasses(accessToken, schoolId),
-      api.listSubjects(accessToken, schoolId),
-    ]).then(([y, c, s]) => {
-      setYears(y);
-      setClasses(c);
-      setSubjects(s);
-      const current = y.find((yr) => yr.isCurrent) ?? y[0];
-      if (current) setAcademicYearId(current.id);
-      if (c[0]) setClassId(c[0].id);
-      if (c[0]?.sections[0]) setSectionId(c[0].sections[0].id);
-      if (s[0]) setSubjectId(s[0].id);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canManage]);
+    if (!canManage || !editing) return;
+    Promise.all([api.listAcademicYears(accessToken, schoolId), api.listClasses(accessToken, schoolId)]).then(
+      ([y, c]) => {
+        setYears(y);
+        setClasses(c);
+      },
+    );
+  }, [accessToken, schoolId, canManage, editing]);
 
   const selectedClass = classes.find((c) => c.id === classId);
 
+  function startEditing() {
+    setAcademicYearId("");
+    setClassId("");
+    setSectionId("");
+    setSubjectId("");
+    setEditing(true);
+  }
+
+  function onYearChange(newYearId: string) {
+    setAcademicYearId(newYearId);
+    setClassId("");
+    setSectionId("");
+    setSubjectId("");
+  }
+
   function onClassChange(newClassId: string) {
     setClassId(newClassId);
-    const cls = classes.find((c) => c.id === newClassId);
-    setSectionId(cls?.sections[0]?.id ?? "");
+    setSectionId("");
+    setSubjectId("");
   }
 
   async function onAdd() {
-    if (!academicYearId || !sectionId || !subjectId) return;
+    if (!academicYearId || !classId || !sectionId || !subjectId) return;
     setAdding(true);
     setError(null);
     try {
@@ -85,18 +94,19 @@ export function AssignmentsManager({
     }
   }
 
-  async function onRemove(assignmentId: string) {
-    setRemovingId(assignmentId);
-    setError(null);
+  async function onDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await teachersApi.removeAssignment(accessToken, schoolId, teacher.id, assignmentId);
+      await teachersApi.removeAssignment(accessToken, schoolId, teacher.id, deleteTarget.id);
       const updated = await teachersApi.getOne(accessToken, schoolId, teacher.id);
       onChange(updated);
-      show("Assignment removed.");
+      show("Assignment deleted permanently.");
+      setDeleteTarget(null);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to remove assignment");
+      show(err instanceof ApiError ? err.message : "Failed to delete assignment", "danger");
     } finally {
-      setRemovingId(null);
+      setDeleting(false);
     }
   }
 
@@ -107,77 +117,124 @@ export function AssignmentsManager({
 
   return (
     <Card padding="none">
-      <CardHeader title="Classes & subjects" description="Every assignment this teacher currently holds, by academic year." />
+      <CardHeader
+        title="Classes & subjects"
+        description="Every assignment this teacher currently holds, by academic year."
+        actions={
+          canManage &&
+          (editing ? (
+            <Button size="sm" variant="outline" icon={<Check className="size-4" />} onClick={() => setEditing(false)}>
+              Done
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" icon={<Pencil className="size-4" />} onClick={startEditing}>
+              Edit
+            </Button>
+          ))
+        }
+      />
       <div className="space-y-4 p-5">
         {teacher.assignments.length === 0 ? (
           <EmptyState
             icon={BookUser}
             title="No assignments yet"
-            description={canManage ? "Assign this teacher to a class and subject below." : "This teacher has no assignments yet."}
+            description={
+              canManage
+                ? editing
+                  ? "Assign this teacher to a class and subject below."
+                  : "Click Edit to assign this teacher to a class and subject."
+                : "This teacher has no assignments yet."
+            }
           />
         ) : (
           Object.entries(assignmentsByYear).map(([yearName, assignments]) => (
             <div key={yearName}>
               <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">{yearName}</p>
-              <div className="mt-1.5 flex flex-wrap gap-2">
+              <div className="mt-1.5 space-y-2">
                 {assignments.map((a) => (
-                  <Badge key={a.id} tone="accent">
-                    {a.section.class.name} · {a.section.name} — {a.subject.name}
-                    {canManage && (
-                      <button
-                        type="button"
-                        onClick={() => onRemove(a.id)}
-                        disabled={removingId === a.id}
-                        aria-label={`Remove ${a.section.class.name} · ${a.section.name} — ${a.subject.name}`}
-                        className="ml-1 rounded-full hover:bg-accent/30 disabled:opacity-50"
+                  <div
+                    key={a.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
+                  >
+                    <p className="text-sm text-foreground">
+                      {a.section.class.name} · {a.section.name} — {a.subject.name}
+                    </p>
+                    {canManage && editing && (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        icon={<Trash2 className="size-4" />}
+                        onClick={() => setDeleteTarget(a)}
                       >
-                        <X className="size-3" />
-                      </button>
+                        Delete
+                      </Button>
                     )}
-                  </Badge>
+                  </div>
                 ))}
               </div>
             </div>
           ))
         )}
 
-        {canManage && (
+        {canManage && editing && (
           <div className="border-t border-border pt-4">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground-muted">Add assignment</p>
             <div className="flex flex-wrap items-end gap-2">
-              <Select value={academicYearId} onChange={(e) => setAcademicYearId(e.target.value)} className="w-auto">
-                {years.map((y) => (
-                  <option key={y.id} value={y.id}>
-                    {y.name}
-                  </option>
-                ))}
-              </Select>
-              <Select value={classId} onChange={(e) => onClassChange(e.target.value)} className="w-auto">
-                {classes.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
-              <Select value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="w-auto">
-                {(selectedClass?.sections ?? []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
-              <Select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} className="w-auto">
-                {subjects.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
+              <FormField label="Academic year" required className="w-auto">
+                <Select value={academicYearId} onChange={(e) => onYearChange(e.target.value)} className="w-auto">
+                  <option value="">Select academic year</option>
+                  {years.map((y) => (
+                    <option key={y.id} value={y.id}>
+                      {y.name}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Class" required className="w-auto">
+                <Select
+                  value={classId}
+                  onChange={(e) => onClassChange(e.target.value)}
+                  disabled={!academicYearId}
+                  className="w-auto"
+                >
+                  <option value="">Select class</option>
+                  {classes.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Section" required className="w-auto">
+                <Select
+                  value={sectionId}
+                  onChange={(e) => setSectionId(e.target.value)}
+                  disabled={!classId}
+                  className="w-auto"
+                >
+                  <option value="">Select section</option>
+                  {(selectedClass?.sections ?? []).map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Subject" required className="w-auto">
+                <ClassSubjectSelect
+                  key={classId}
+                  accessToken={accessToken}
+                  schoolId={schoolId}
+                  classId={classId}
+                  value={subjectId}
+                  onChange={setSubjectId}
+                />
+              </FormField>
               <Button
                 size="sm"
                 icon={<Plus className="size-4" />}
                 loading={adding}
-                disabled={!academicYearId || !sectionId || !subjectId}
+                disabled={!academicYearId || !classId || !sectionId || !subjectId}
                 onClick={onAdd}
               >
                 Add
@@ -191,6 +248,55 @@ export function AssignmentsManager({
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete this assignment permanently?"
+        description={
+          deleteTarget
+            ? `This permanently removes ${teacher.firstName} ${teacher.lastName}'s assignment to ${deleteTarget.section.class.name} · ${deleteTarget.section.name} — ${deleteTarget.subject.name} from the database. This action cannot be undone. The teacher, subject, class, and section themselves are not affected.`
+            : undefined
+        }
+        confirmLabel="Delete permanently"
+        loading={deleting}
+        onConfirm={onDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </Card>
+  );
+}
+
+function ClassSubjectSelect({
+  accessToken,
+  schoolId,
+  classId,
+  value,
+  onChange,
+}: {
+  accessToken: string;
+  schoolId: string;
+  classId: string;
+  value: string;
+  onChange: (subjectId: string) => void;
+}) {
+  const [subjects, setSubjects] = useState<ClassSubjectRecord[] | null>(null);
+
+  useEffect(() => {
+    if (!classId) return;
+    api
+      .listClassSubjects(accessToken, schoolId, classId)
+      .then(setSubjects)
+      .catch(() => setSubjects([]));
+  }, [accessToken, schoolId, classId]);
+
+  return (
+    <Select value={value} onChange={(e) => onChange(e.target.value)} disabled={!classId || !subjects} className="w-auto">
+      <option value="">{classId && subjects === null ? "Loading…" : "Select subject"}</option>
+      {(subjects ?? []).map((cs) => (
+        <option key={cs.subjectId} value={cs.subjectId}>
+          {cs.subject.name}
+        </option>
+      ))}
+    </Select>
   );
 }

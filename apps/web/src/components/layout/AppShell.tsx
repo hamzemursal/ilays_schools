@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { SelectedChildProvider } from "@/features/parent-portal/SelectedChildContext";
+import { ChildSwitcher } from "@/features/parent-portal/ChildSwitcher";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
@@ -48,7 +50,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Topbar onMenuClick={() => setDrawerOpen(true)} />
-        <main className="flex-1 overflow-y-auto">{children}</main>
+        <SelectedChildProvider>
+          <main className="flex-1 overflow-y-auto">
+            <ChildSwitcher />
+            {children}
+          </main>
+        </SelectedChildProvider>
       </div>
     </div>
   );

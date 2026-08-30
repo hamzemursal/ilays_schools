@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import {
   api,
@@ -20,13 +21,15 @@ import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
-import { GraduationCap, Plus } from "lucide-react";
+import { GraduationCap, Pencil, Plus, Trash2, Check, X } from "lucide-react";
 
 export default function ClassDetailPage({ params }: { params: Promise<{ id: string; classId: string }> }) {
   const { id: schoolId, classId } = use(params);
   const { user, accessToken } = useAuth();
   const { show } = useToast();
+  const router = useRouter();
 
   const [cls, setCls] = useState<ClassWithSections | null>(null);
   const [sections, setSections] = useState<Section[] | null>(null);
@@ -41,6 +44,19 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const [sectionFormError, setSectionFormError] = useState<string | null>(null);
   const [pickSubjectId, setPickSubjectId] = useState("");
   const [assigning, setAssigning] = useState(false);
+
+  const [editingClassName, setEditingClassName] = useState(false);
+  const [classNameDraft, setClassNameDraft] = useState("");
+  const [savingClassName, setSavingClassName] = useState(false);
+  const [showDeleteClass, setShowDeleteClass] = useState(false);
+  const [deletingClass, setDeletingClass] = useState(false);
+
+  const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
+  const [sectionEditName, setSectionEditName] = useState("");
+  const [sectionEditCapacity, setSectionEditCapacity] = useState("");
+  const [savingSectionId, setSavingSectionId] = useState<string | null>(null);
+  const [deleteSectionTarget, setDeleteSectionTarget] = useState<Section | null>(null);
+  const [deletingSectionId, setDeletingSectionId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -118,6 +134,81 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  function startRenameClass() {
+    if (!cls) return;
+    setClassNameDraft(cls.name);
+    setEditingClassName(true);
+  }
+
+  async function onSaveClassName() {
+    if (!accessToken || !cls || !classNameDraft.trim()) return;
+    setSavingClassName(true);
+    try {
+      const updated = await api.updateClass(accessToken, schoolId, classId, { name: classNameDraft.trim() });
+      setCls(updated);
+      setEditingClassName(false);
+      show("Class renamed.");
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to rename class", "danger");
+    } finally {
+      setSavingClassName(false);
+    }
+  }
+
+  async function onDeleteClass() {
+    if (!accessToken) return;
+    setDeletingClass(true);
+    try {
+      await api.removeClass(accessToken, schoolId, classId);
+      show("Class deleted.");
+      router.push(`/schools/${schoolId}/academic`);
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to delete class", "danger");
+      setShowDeleteClass(false);
+    } finally {
+      setDeletingClass(false);
+    }
+  }
+
+  function startEditSection(s: Section) {
+    setEditingSectionId(s.id);
+    setSectionEditName(s.name);
+    setSectionEditCapacity(s.capacity === null ? "" : String(s.capacity));
+  }
+
+  async function onSaveSection(sectionId: string) {
+    if (!accessToken || !sectionEditName.trim()) return;
+    setSavingSectionId(sectionId);
+    try {
+      const updated = await api.updateSection(accessToken, schoolId, classId, sectionId, {
+        name: sectionEditName.trim(),
+        capacity: sectionEditCapacity.trim() === "" ? null : Number(sectionEditCapacity),
+      });
+      setSections((prev) => prev?.map((s) => (s.id === sectionId ? updated : s)) ?? prev);
+      setEditingSectionId(null);
+      show(`Section ${updated.name} updated.`);
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to update section", "danger");
+    } finally {
+      setSavingSectionId(null);
+    }
+  }
+
+  async function onDeleteSection() {
+    if (!accessToken || !deleteSectionTarget) return;
+    setDeletingSectionId(deleteSectionTarget.id);
+    try {
+      await api.removeSection(accessToken, schoolId, classId, deleteSectionTarget.id);
+      setSections((prev) => prev?.filter((s) => s.id !== deleteSectionTarget.id) ?? prev);
+      show(`Section ${deleteSectionTarget.name} deleted.`);
+      setDeleteSectionTarget(null);
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to delete section", "danger");
+    } finally {
+      setDeletingSectionId(null);
+    }
+  }
+
   const schoolName = user?.schools.find((s) => s.id === schoolId)?.name ?? "School";
   const canManage = user?.permissions.includes("academic.manage") ?? false;
   const unassignedSubjects = allSubjects.filter((s) => !subjects?.some((cs) => cs.subjectId === s.id));
@@ -141,6 +232,43 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
           { label: "Academic", href: `/schools/${schoolId}/academic` },
           { label: schoolName },
         ]}
+        actions={
+          cls && canManage ? (
+            <>
+              <Button variant="outline" size="sm" icon={<Pencil className="size-4" />} onClick={startRenameClass}>
+                Rename
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                icon={<Trash2 className="size-4" />}
+                onClick={() => setShowDeleteClass(true)}
+              >
+                Delete
+              </Button>
+            </>
+          ) : undefined
+        }
+      />
+
+      <ConfirmDialog
+        open={showDeleteClass}
+        title={`Delete ${cls?.name ?? "this class"} permanently?`}
+        description="This permanently removes the class and its sections and subject links from the database. This action cannot be undone. Deletion is only possible if no student has ever been enrolled in this class."
+        confirmLabel="Delete permanently"
+        loading={deletingClass}
+        onConfirm={onDeleteClass}
+        onCancel={() => setShowDeleteClass(false)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteSectionTarget}
+        title={`Delete section ${deleteSectionTarget?.name ?? ""} permanently?`}
+        description="This permanently removes the section from the database. This action cannot be undone. Deletion is only possible if no student has ever been enrolled in this section."
+        confirmLabel="Delete permanently"
+        loading={!!deletingSectionId}
+        onConfirm={onDeleteSection}
+        onCancel={() => setDeleteSectionTarget(null)}
       />
 
       <div className="space-y-5 p-4 sm:p-6">
@@ -148,6 +276,37 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
           <SkeletonCards count={3} />
         ) : (
           <>
+            {editingClassName && (
+              <Card>
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="min-w-[200px] flex-1">
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+                      Class name
+                    </label>
+                    <Input value={classNameDraft} onChange={(e) => setClassNameDraft(e.target.value)} />
+                  </div>
+                  <Button
+                    size="sm"
+                    icon={<Check className="size-4" />}
+                    loading={savingClassName}
+                    disabled={!classNameDraft.trim()}
+                    onClick={onSaveClassName}
+                  >
+                    Save
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon={<X className="size-4" />}
+                    onClick={() => setEditingClassName(false)}
+                    disabled={savingClassName}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </Card>
+            )}
+
             <Card padding="none">
               <CardHeader title="Sections" description={`${sections.length} section(s) in this class.`} />
               {sections.length === 0 ? (
@@ -162,16 +321,83 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                         <th className="px-5 py-2.5">Section</th>
                         <th className="px-5 py-2.5">Capacity</th>
                         <th className="px-5 py-2.5">Enrolled</th>
+                        {canManage && <th className="px-5 py-2.5 text-right">Actions</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {sections.map((s) => (
-                        <tr key={s.id}>
-                          <td className="px-5 py-3 font-medium text-foreground">{s.name}</td>
-                          <td className="px-5 py-3 text-foreground-soft">{s.capacity === null ? "Unlimited" : s.capacity}</td>
-                          <td className="px-5 py-3 text-foreground-soft">{s._count.enrollments}</td>
-                        </tr>
-                      ))}
+                      {sections.map((s) =>
+                        editingSectionId === s.id ? (
+                          <tr key={s.id}>
+                            <td className="px-5 py-2.5">
+                              <Input
+                                value={sectionEditName}
+                                onChange={(e) => setSectionEditName(e.target.value)}
+                                className="max-w-[120px]"
+                              />
+                            </td>
+                            <td className="px-5 py-2.5">
+                              <Input
+                                type="number"
+                                min={1}
+                                value={sectionEditCapacity}
+                                onChange={(e) => setSectionEditCapacity(e.target.value)}
+                                placeholder="Unlimited"
+                                className="max-w-[120px]"
+                              />
+                            </td>
+                            <td className="px-5 py-2.5 text-foreground-soft">{s._count.enrollments}</td>
+                            <td className="px-5 py-2.5">
+                              <div className="flex justify-end gap-1.5">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  icon={<Check className="size-4" />}
+                                  loading={savingSectionId === s.id}
+                                  disabled={!sectionEditName.trim()}
+                                  onClick={() => onSaveSection(s.id)}
+                                  aria-label="Save"
+                                />
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  icon={<X className="size-4" />}
+                                  onClick={() => setEditingSectionId(null)}
+                                  disabled={savingSectionId === s.id}
+                                  aria-label="Cancel"
+                                />
+                              </div>
+                            </td>
+                          </tr>
+                        ) : (
+                          <tr key={s.id}>
+                            <td className="px-5 py-3 font-medium text-foreground">{s.name}</td>
+                            <td className="px-5 py-3 text-foreground-soft">{s.capacity === null ? "Unlimited" : s.capacity}</td>
+                            <td className="px-5 py-3 text-foreground-soft">{s._count.enrollments}</td>
+                            {canManage && (
+                              <td className="px-5 py-3">
+                                <div className="flex justify-end gap-1.5">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    icon={<Pencil className="size-4" />}
+                                    onClick={() => startEditSection(s)}
+                                  >
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="danger"
+                                    icon={<Trash2 className="size-4" />}
+                                    onClick={() => setDeleteSectionTarget(s)}
+                                  >
+                                    Delete
+                                  </Button>
+                                </div>
+                              </td>
+                            )}
+                          </tr>
+                        ),
+                      )}
                     </tbody>
                   </table>
                 </div>

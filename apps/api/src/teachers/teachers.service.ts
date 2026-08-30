@@ -5,6 +5,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import { GuardiansService } from "../guardians/guardians.service";
 import { DocumentsService } from "../documents/documents.service";
+import { StorageService } from "../storage/storage.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateTeacherDto } from "./dto/create-teacher.dto";
 import { CreateTeacherAssignmentInputDto } from "./dto/create-teacher-assignment-input.dto";
@@ -30,6 +31,7 @@ export class TeachersService {
     private readonly schools: SchoolsService,
     private readonly guardians: GuardiansService,
     private readonly documents: DocumentsService,
+    private readonly storage: StorageService,
   ) {}
 
   // "My own classes" — no permission gate beyond authentication, same as
@@ -189,11 +191,60 @@ export class TeachersService {
     return updated;
   }
 
+  // Genuine permanent deletion. TeacherAssignment rows cascade automatically
+  // once the Teacher row is deleted — the only manual cleanup needed is the
+  // linked login account (if any) and this teacher's photo/document files,
+  // neither of which Postgres would clean up on its own (User is a separate
+  // aggregate; MediaFile.ownerId isn't a real FK at all).
+  async remove(actor: AuthenticatedUser, schoolId: string, teacherId: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    const teacher = await this.prisma.teacher.findFirst({ where: { id: teacherId, schoolId } });
+    if (!teacher) throw new NotFoundException("Teacher not found in this school");
+
+    const mediaFiles = await this.prisma.$transaction(async (tx) => {
+      const files = await tx.mediaFile.findMany({ where: { ownerType: "TEACHER", ownerId: teacherId } });
+      await tx.mediaFile.deleteMany({ where: { ownerType: "TEACHER", ownerId: teacherId } });
+
+      await tx.teacher.delete({ where: { id: teacherId } });
+
+      if (teacher.userId) {
+        await tx.user.delete({ where: { id: teacher.userId } });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          organizationId: actor.organizationId,
+          schoolId,
+          actorUserId: actor.id,
+          action: "teacher.delete",
+          resource: "Teacher",
+          resourceId: teacherId,
+          before: { firstName: teacher.firstName, lastName: teacher.lastName, employeeNumber: teacher.employeeNumber },
+        },
+      });
+
+      return files;
+    });
+
+    await Promise.all(mediaFiles.map((f) => this.storage.delete(f.storageKey).catch(() => undefined)));
+
+    return { success: true };
+  }
+
   async create(actor: AuthenticatedUser, schoolId: string, dto: CreateTeacherDto) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
 
     for (const a of dto.assignments ?? []) {
       await this.assertAssignmentBelongsToSchool(schoolId, a);
+    }
+
+    const assignmentKeys = new Set<string>();
+    for (const a of dto.assignments ?? []) {
+      const key = `${a.academicYearId}|${a.sectionId}|${a.subjectId}`;
+      if (assignmentKeys.has(key)) {
+        throw new BadRequestException("The same subject can't be assigned to the same class/section twice");
+      }
+      assignmentKeys.add(key);
     }
 
     const employeeNumber = dto.employeeNumber ?? (await this.generateEmployeeNumber(schoolId));

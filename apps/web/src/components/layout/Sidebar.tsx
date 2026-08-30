@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { GraduationCap } from "lucide-react";
 import type { Profile } from "@/lib/api";
-import { orgNavItems, schoolNavItems, type NavItem } from "./nav-config";
+import { orgNavItems, parentNavItems, schoolNavItems, type NavItem } from "./nav-config";
 
 export function useCurrentSchool(user: Profile | null) {
   const pathname = usePathname();
@@ -38,6 +38,7 @@ export function Sidebar({ user, onNavigate }: { user: Profile; onNavigate?: () =
   const currentSchool = useCurrentSchool(user);
   const schoolItems = currentSchool ? schoolNavItems(user, currentSchool.id) : [];
   const orgItems = orgNavItems(user);
+  const parentItems = parentNavItems(user);
 
   return (
     <div className="flex h-full flex-col bg-sidebar-bg">
@@ -69,6 +70,19 @@ export function Sidebar({ user, onNavigate }: { user: Profile; onNavigate?: () =
             </p>
             <div className="space-y-0.5">
               {orgItems.map((item) => (
+                <NavLink key={item.href} item={item} onNavigate={onNavigate} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {parentItems.length > 0 && (
+          <div>
+            <p className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+              Parent Portal
+            </p>
+            <div className="space-y-0.5">
+              {parentItems.map((item) => (
                 <NavLink key={item.href} item={item} onNavigate={onNavigate} />
               ))}
             </div>

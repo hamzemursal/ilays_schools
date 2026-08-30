@@ -25,6 +25,7 @@ import { DashboardModule } from "./dashboard/dashboard.module";
 import { ImportsModule } from "./imports/imports.module";
 import { ExportsModule } from "./exports/exports.module";
 import { ReportsModule } from "./reports/reports.module";
+import { AnnouncementsModule } from "./announcements/announcements.module";
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { ReportsModule } from "./reports/reports.module";
     ImportsModule,
     ExportsModule,
     ReportsModule,
+    AnnouncementsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

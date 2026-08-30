@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { api, ApiError, type Profile } from "./api";
+import { api, ApiError, setUnauthorizedHandler, type Profile } from "./api";
 
 interface AuthState {
   user: Profile | null;
@@ -14,6 +14,13 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+// The access token is deliberately short-lived (15m, see AuthService).
+// Refreshing a few minutes ahead of expiry means normal use never actually
+// hits a 401 in the first place — the reactive handler registered below is
+// the fallback for whatever this timer doesn't catch (a laptop asleep past
+// the margin, a clock skew, etc.), not the primary mechanism.
+const PROACTIVE_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [user, setUser] = useState<Profile | null>(null);
@@ -23,6 +30,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const profile = await api.me(token);
     setUser(profile);
   }, []);
+
+  // Concurrent 401s (e.g. a dashboard firing several requests at once right
+  // as the token expires) must share one refresh, not each trigger their
+  // own — the refresh token rotates on use, so a second call presented with
+  // the now-revoked old cookie would read as theft and kill the session.
+  const refreshPromiseRef = useRef<Promise<string | null> | null>(null);
+
+  const performRefresh = useCallback((): Promise<string | null> => {
+    if (refreshPromiseRef.current) return refreshPromiseRef.current;
+
+    const p = (async () => {
+      try {
+        const { accessToken: token } = await api.refresh();
+        setAccessToken(token);
+        await loadProfile(token);
+        return token;
+      } catch {
+        // Refresh cookie is gone/expired/revoked — this session is truly
+        // over. Clear state so the app's own "no user -> /login" redirect
+        // takes it from here, instead of leaving a dead token around.
+        setAccessToken(null);
+        setUser(null);
+        return null;
+      } finally {
+        refreshPromiseRef.current = null;
+      }
+    })();
+
+    refreshPromiseRef.current = p;
+    return p;
+  }, [loadProfile]);
 
   // On first load, there's no access token in memory yet — try the refresh
   // cookie silently to resume a session without asking for credentials again.
@@ -35,18 +73,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (refreshedOnce.current) return;
     refreshedOnce.current = true;
 
-    (async () => {
-      try {
-        const { accessToken: token } = await api.refresh();
-        setAccessToken(token);
-        await loadProfile(token);
-      } catch {
-        // No valid session — that's fine, user just isn't logged in.
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [loadProfile]);
+    performRefresh().finally(() => setLoading(false));
+  }, [performRefresh]);
+
+  // Lets the transport layer (api.ts) recover from an expired access token
+  // by refreshing and retrying, instead of every page having to catch its
+  // own "Invalid or expired access token" error.
+  useEffect(() => {
+    setUnauthorizedHandler(performRefresh);
+    return () => setUnauthorizedHandler(null);
+  }, [performRefresh]);
+
+  // Proactive renewal — restarts every time the token actually changes, so
+  // the interval tracks the real 15m window from whenever it was last
+  // issued rather than an arbitrary wall-clock schedule.
+  useEffect(() => {
+    if (!accessToken) return;
+    const id = setInterval(() => {
+      performRefresh();
+    }, PROACTIVE_REFRESH_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [accessToken, performRefresh]);
 
   const login = useCallback(
     async (email: string, password: string) => {

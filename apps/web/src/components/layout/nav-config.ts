@@ -12,6 +12,10 @@ import {
   BookUser,
   ClipboardCheck,
   BarChart3,
+  Contact,
+  Megaphone,
+  Bell,
+  UserCircle,
 } from "lucide-react";
 import type { Profile } from "@/lib/api";
 
@@ -39,6 +43,12 @@ export function schoolNavItems(user: Profile, schoolId: string): NavItem[] {
   }
   if (has("teachers.view")) {
     items.push({ label: "Teachers", href: `/schools/${schoolId}/teachers`, icon: UserSquare2 });
+  }
+  if (has("guardians.view")) {
+    items.push({ label: "Parents", href: `/schools/${schoolId}/parents`, icon: Contact });
+  }
+  if (has("announcements.view")) {
+    items.push({ label: "Announcements", href: `/schools/${schoolId}/announcements`, icon: Megaphone });
   }
   if (user.roles.includes("TEACHER")) {
     items.push({ label: "My classes", href: `/my-classes`, icon: BookUser });
@@ -73,4 +83,22 @@ export function orgNavItems(user: Profile): NavItem[] {
     items.push({ label: "Schools", href: "/schools", icon: Building2 });
   }
   return items;
+}
+
+// A parent's children can span multiple schools, so — unlike schoolNavItems
+// — this section never resolves against a "current school" and always shows
+// once the account holds the PARENT role, matching how the Parent Portal's
+// own routes (/parent/...) aren't school-scoped in the URL either.
+export function parentNavItems(user: Profile): NavItem[] {
+  if (!user.roles.includes("PARENT")) return [];
+  return [
+    { label: "Dashboard", href: "/parent", icon: LayoutDashboard },
+    { label: "My Children", href: "/parent/children", icon: Users },
+    { label: "Academics", href: "/parent/academics", icon: GraduationCap },
+    { label: "Attendance", href: "/parent/attendance", icon: ClipboardCheck },
+    { label: "Fees", href: "/parent/fees", icon: Wallet },
+    { label: "Announcements", href: "/parent/announcements", icon: Megaphone },
+    { label: "Notifications", href: "/parent/notifications", icon: Bell },
+    { label: "Profile", href: "/parent/profile", icon: UserCircle },
+  ];
 }

@@ -18,19 +18,43 @@ export class ApiError extends Error {
   }
 }
 
+// The access token is short-lived (15m) by design. Rather than every page
+// having to catch its own "Invalid or expired access token" 401 and figure
+// out what to do, AuthProvider registers a single handler here on mount: on
+// any 401 from an authenticated call, refresh the session once and retry the
+// exact same request with the new token. If the refresh itself fails (the
+// refresh cookie is gone/expired too), the handler returns null, we don't
+// retry, and AuthProvider has already cleared the session so the app's
+// existing "no user -> redirect to /login" effect takes over — a real
+// re-auth prompt instead of a stuck error screen.
+type UnauthorizedHandler = () => Promise<string | null>;
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+  unauthorizedHandler = handler;
+}
+
 async function request<T>(
   path: string,
   options: { method?: string; body?: unknown; accessToken?: string | null } = {},
 ): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    method: options.method ?? "GET",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.accessToken ? { Authorization: `Bearer ${options.accessToken}` } : {}),
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  const doFetch = (token?: string | null) =>
+    fetch(`${API_URL}${path}`, {
+      method: options.method ?? "GET",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+
+  let res = await doFetch(options.accessToken);
+
+  if (res.status === 401 && options.accessToken && unauthorizedHandler) {
+    const freshToken = await unauthorizedHandler();
+    if (freshToken) res = await doFetch(freshToken);
+  }
 
   const data = await res.json().catch(() => null);
 
@@ -45,10 +69,18 @@ async function request<T>(
 // href> download link can't attach — so we fetch the file ourselves and
 // trigger the save via a throwaway object URL.
 async function downloadFile(path: string, accessToken: string, filename: string): Promise<void> {
-  const res = await fetch(`${API_URL}${path}`, {
-    credentials: "include",
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const doFetch = (token: string) =>
+    fetch(`${API_URL}${path}`, {
+      credentials: "include",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+  let res = await doFetch(accessToken);
+  if (res.status === 401 && unauthorizedHandler) {
+    const freshToken = await unauthorizedHandler();
+    if (freshToken) res = await doFetch(freshToken);
+  }
+
   if (!res.ok) {
     const data = await res.json().catch(() => null);
     throw new ApiError(data?.message ?? `Request failed with status ${res.status}`, res.status, data);
@@ -73,12 +105,19 @@ async function uploadFile<T>(
   formData.append(fieldName, file);
   for (const [key, value] of Object.entries(extraFields ?? {})) formData.append(key, value);
 
-  const res = await fetch(`${API_URL}${path}`, {
-    method: "POST",
-    credentials: "include",
-    headers: { Authorization: `Bearer ${accessToken}` },
-    body: formData,
-  });
+  const doFetch = (token: string) =>
+    fetch(`${API_URL}${path}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+
+  let res = await doFetch(accessToken);
+  if (res.status === 401 && unauthorizedHandler) {
+    const freshToken = await unauthorizedHandler();
+    if (freshToken) res = await doFetch(freshToken);
+  }
 
   const data = await res.json().catch(() => null);
   if (!res.ok) {
@@ -97,6 +136,7 @@ export interface Profile {
   schoolIds: string[];
   schools: { id: string; name: string }[];
   teacherId: string | null;
+  guardianId: string | null;
 }
 
 export type SchoolType = "PRIMARY" | "SECONDARY" | "PRIMARY_AND_SECONDARY";
@@ -205,6 +245,199 @@ export interface GuardianSearchResult {
   email: string | null;
 }
 
+export type ParentStatus = "ACTIVE" | "ARCHIVED";
+export type PortalAccountStatus = "PENDING_SETUP" | "ACTIVE" | "SUSPENDED";
+export type StudentGuardianStatus = "ACTIVE" | "INACTIVE";
+
+export interface ParentChildSummary {
+  studentId: string;
+  firstName: string;
+  lastName: string;
+  relationship: GuardianRelationship;
+  isPrimaryContact: boolean;
+  status: StudentGuardianStatus;
+  enrollment: { className: string; sectionName: string; academicYearName: string } | null;
+}
+
+export interface ParentListItem {
+  id: string;
+  guardianCode: string | null;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  status: ParentStatus;
+  hasPortalAccount: boolean;
+  portalAccountStatus: PortalAccountStatus | null;
+  children: ParentChildSummary[];
+}
+
+export interface ParentDetail {
+  id: string;
+  guardianCode: string | null;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  status: ParentStatus;
+  user: { id: string; email: string; status: PortalAccountStatus } | null;
+  students: {
+    studentId: string;
+    relationship: GuardianRelationship;
+    isPrimaryContact: boolean;
+    status: StudentGuardianStatus;
+    student: {
+      firstName: string;
+      lastName: string;
+      enrollments: {
+        status: EnrollmentStatus;
+        startDate: string;
+        school: { id: string; name: string };
+        class: { id: string; name: string };
+        section: { id: string; name: string };
+        academicYear: { id: string; name: string };
+      }[];
+    };
+  }[];
+}
+
+export interface CreateParentInput {
+  firstName: string;
+  lastName: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  confirmDespiteDuplicates?: boolean;
+}
+
+export interface UpdateParentInput {
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  status?: ParentStatus;
+}
+
+export interface LinkChildInput {
+  studentId: string;
+  relationship: GuardianRelationship;
+  isPrimaryContact?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Parent Portal — a parent viewing their own linked children, read-only.
+// ---------------------------------------------------------------------------
+
+export interface MyChild {
+  studentId: string;
+  firstName: string;
+  lastName: string;
+  sex: Sex;
+  dateOfBirth: string;
+  currentStatus: StudentStatus;
+  relationship: GuardianRelationship;
+  isPrimaryContact: boolean;
+  enrollment: {
+    schoolName: string;
+    className: string;
+    sectionName: string;
+    academicYearName: string;
+    studentNumber: string;
+    rollNumber: number;
+  } | null;
+}
+
+export interface MyChildProfile {
+  id: string;
+  firstName: string;
+  lastName: string;
+  sex: Sex;
+  dateOfBirth: string;
+  legacyStudentNumber: string | null;
+  currentStatus: StudentStatus;
+  enrollments: StudentEnrollmentRecord[];
+}
+
+export interface MyChildSubject {
+  subjectId: string;
+  name: string;
+  code: string | null;
+  teacher: { firstName: string; lastName: string } | null;
+}
+
+export interface MyChildAttendanceRecord {
+  id: string;
+  date: string;
+  status: "PRESENT" | "ABSENT" | "LATE" | "EXCUSED";
+  note: string | null;
+  className: string;
+  sectionName: string;
+}
+
+export interface MyChildAttendance {
+  summary: { total: number; present: number; absent: number; late: number; excused: number; percentage: number | null };
+  records: MyChildAttendanceRecord[];
+}
+
+export interface MyChildResult {
+  id: string;
+  examName: string;
+  examType: string;
+  subjectName: string;
+  marksObtained: number;
+  maxMarks: number;
+  percentage: number;
+  examDate: string | null;
+}
+
+export interface MyChildInvoice {
+  id: string;
+  feeName: string;
+  amount: number;
+  paid: number;
+  balance: number;
+  status: InvoiceStatus;
+  dueDate: string | null;
+  payments: { id: string; amount: number; method: PaymentMethod; paidAt: string; reference: string | null }[];
+}
+
+export type AnnouncementAudience = "ALL" | "PARENTS" | "TEACHERS";
+
+export interface Announcement {
+  id: string;
+  schoolId: string;
+  title: string;
+  body: string;
+  audience: AnnouncementAudience;
+  createdAt: string;
+  school?: { name: string };
+}
+
+export interface MyGuardianProfile {
+  id: string;
+  guardianCode: string | null;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  status: ParentStatus;
+  user: { id: string; email: string; status: PortalAccountStatus } | null;
+}
+
+export interface NotificationItem {
+  id: string;
+  guardianId: string;
+  announcementId: string | null;
+  title: string;
+  body: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
 export interface StudentEnrollmentRecord {
   id: string;
   studentNumber: string;
@@ -232,6 +465,7 @@ export interface StudentDetail {
 }
 
 export interface GuardianInput {
+  existingGuardianId?: string;
   firstName: string;
   lastName: string;
   phone?: string;
@@ -249,6 +483,22 @@ export interface CreateStudentInput {
   enrollment: { academicYearId: string; classId: string; sectionId: string; studentNumber?: string; rollNumber?: number };
   guardians?: GuardianInput[];
   confirmDespiteDuplicates?: boolean;
+}
+
+export interface UpdateStudentInput {
+  firstName?: string;
+  lastName?: string;
+  dateOfBirth?: string;
+  sex?: Sex;
+  legacyStudentNumber?: string;
+  // Present only when the student's current active enrollment is being
+  // corrected in place — see StudentsService.updateActiveEnrollment.
+  enrollment?: {
+    academicYearId: string;
+    classId: string;
+    sectionId: string;
+    rollNumber: number;
+  };
 }
 
 export type AttendanceStatus = "PRESENT" | "ABSENT" | "LATE" | "EXCUSED";
@@ -622,22 +872,40 @@ export const api = {
       subjectIds?: string[];
     },
   ) => request<ClassWithSections>(`/schools/${schoolId}/classes`, { method: "POST", body, accessToken }),
+  updateClass: (
+    accessToken: string,
+    schoolId: string,
+    classId: string,
+    body: { divisionId?: string; name?: string; level?: number },
+  ) =>
+    request<ClassWithSections>(`/schools/${schoolId}/classes/${classId}`, {
+      method: "PATCH",
+      body,
+      accessToken,
+    }),
+  removeClass: (accessToken: string, schoolId: string, classId: string) =>
+    request<{ success: boolean }>(`/schools/${schoolId}/classes/${classId}`, { method: "DELETE", accessToken }),
   createSection: (
     accessToken: string,
     schoolId: string,
     classId: string,
     body: { name: string; capacity?: number | null },
   ) => request<Section>(`/schools/${schoolId}/classes/${classId}/sections`, { method: "POST", body, accessToken }),
-  updateSectionCapacity: (
+  updateSection: (
     accessToken: string,
     schoolId: string,
     classId: string,
     sectionId: string,
-    capacity: number | null,
+    body: { name?: string; capacity?: number | null },
   ) =>
     request<Section>(`/schools/${schoolId}/classes/${classId}/sections/${sectionId}`, {
       method: "PATCH",
-      body: { capacity },
+      body,
+      accessToken,
+    }),
+  removeSection: (accessToken: string, schoolId: string, classId: string, sectionId: string) =>
+    request<{ success: boolean }>(`/schools/${schoolId}/classes/${classId}/sections/${sectionId}`, {
+      method: "DELETE",
       accessToken,
     }),
   listClassSubjects: (accessToken: string, schoolId: string, classId: string) =>
@@ -669,6 +937,10 @@ export const api = {
     request<Subject[]>(`/schools/${schoolId}/subjects`, { accessToken }),
   createSubject: (accessToken: string, schoolId: string, body: { name: string; code?: string }) =>
     request<Subject>(`/schools/${schoolId}/subjects`, { method: "POST", body, accessToken }),
+  updateSubject: (accessToken: string, schoolId: string, subjectId: string, body: { name?: string; code?: string }) =>
+    request<Subject>(`/schools/${schoolId}/subjects/${subjectId}`, { method: "PATCH", body, accessToken }),
+  removeSubject: (accessToken: string, schoolId: string, subjectId: string) =>
+    request<{ success: boolean }>(`/schools/${schoolId}/subjects/${subjectId}`, { method: "DELETE", accessToken }),
 
   listStudents: (accessToken: string, schoolId: string) =>
     request<StudentListItem[]>(`/schools/${schoolId}/students`, { accessToken }),
@@ -680,6 +952,12 @@ export const api = {
     }),
   getStudent: (accessToken: string, studentId: string) =>
     request<StudentDetail>(`/students/${studentId}`, { accessToken }),
+  updateStudent: (accessToken: string, studentId: string, body: UpdateStudentInput) =>
+    request<StudentDetail>(`/students/${studentId}`, { method: "PATCH", body, accessToken }),
+  archiveStudent: (accessToken: string, studentId: string) =>
+    request<StudentDetail>(`/students/${studentId}/archive`, { method: "POST", accessToken }),
+  deleteStudent: (accessToken: string, studentId: string) =>
+    request<{ success: boolean }>(`/students/${studentId}`, { method: "DELETE", accessToken }),
   addGuardian: (accessToken: string, studentId: string, body: GuardianInput) =>
     request<GuardianRecord>(`/students/${studentId}/guardians`, { method: "POST", body, accessToken }),
   searchGuardians: (accessToken: string, schoolId: string, search: string) =>
@@ -687,6 +965,68 @@ export const api = {
       `/schools/${schoolId}/guardians?search=${encodeURIComponent(search)}`,
       { accessToken },
     ),
+
+  listParents: (accessToken: string, schoolId: string) =>
+    request<ParentListItem[]>(`/schools/${schoolId}/guardians`, { accessToken }),
+  getParent: (accessToken: string, schoolId: string, guardianId: string) =>
+    request<ParentDetail>(`/schools/${schoolId}/guardians/${guardianId}`, { accessToken }),
+  createParent: (accessToken: string, schoolId: string, body: CreateParentInput) =>
+    request<ParentListItem>(`/schools/${schoolId}/guardians`, { method: "POST", body, accessToken }),
+  updateParent: (accessToken: string, schoolId: string, guardianId: string, body: UpdateParentInput) =>
+    request<ParentListItem>(`/schools/${schoolId}/guardians/${guardianId}`, { method: "PATCH", body, accessToken }),
+  deleteParent: (accessToken: string, schoolId: string, guardianId: string) =>
+    request<{ success: boolean }>(`/schools/${schoolId}/guardians/${guardianId}`, { method: "DELETE", accessToken }),
+  addParentChild: (accessToken: string, schoolId: string, guardianId: string, body: LinkChildInput) =>
+    request<{ studentId: string; guardianId: string }>(`/schools/${schoolId}/guardians/${guardianId}/children`, {
+      method: "POST",
+      body,
+      accessToken,
+    }),
+  removeParentChild: (accessToken: string, schoolId: string, guardianId: string, studentId: string) =>
+    request<{ studentId: string; guardianId: string }>(
+      `/schools/${schoolId}/guardians/${guardianId}/children/${studentId}`,
+      { method: "DELETE", accessToken },
+    ),
+  createParentPortalAccount: (accessToken: string, schoolId: string, guardianId: string, email?: string) =>
+    request<{ email: string; acceptUrl: string }>(`/schools/${schoolId}/guardians/${guardianId}/portal-account`, {
+      method: "POST",
+      body: { email },
+      accessToken,
+    }),
+
+  listAnnouncements: (accessToken: string, schoolId: string) =>
+    request<Announcement[]>(`/schools/${schoolId}/announcements`, { accessToken }),
+  createAnnouncement: (
+    accessToken: string,
+    schoolId: string,
+    body: { title: string; body: string; audience?: AnnouncementAudience },
+  ) => request<Announcement>(`/schools/${schoolId}/announcements`, { method: "POST", body, accessToken }),
+
+  // Parent Portal — self-service, scoped to the authenticated parent's own
+  // linked children (see GuardianPortalController on the backend).
+  getMyParentProfile: (accessToken: string) =>
+    request<MyGuardianProfile | null>(`/guardians/me`, { accessToken }),
+  listMyChildren: (accessToken: string) => request<MyChild[]>(`/guardians/me/children`, { accessToken }),
+  getMyChild: (accessToken: string, studentId: string) =>
+    request<MyChildProfile>(`/guardians/me/children/${studentId}`, { accessToken }),
+  getMyChildSubjects: (accessToken: string, studentId: string) =>
+    request<MyChildSubject[]>(`/guardians/me/children/${studentId}/subjects`, { accessToken }),
+  getMyChildAttendance: (accessToken: string, studentId: string) =>
+    request<MyChildAttendance>(`/guardians/me/children/${studentId}/attendance`, { accessToken }),
+  getMyChildResults: (accessToken: string, studentId: string) =>
+    request<MyChildResult[]>(`/guardians/me/children/${studentId}/exams`, { accessToken }),
+  getMyChildInvoices: (accessToken: string, studentId: string) =>
+    request<MyChildInvoice[]>(`/guardians/me/children/${studentId}/fees`, { accessToken }),
+  getMyChildPhotoUrl: (accessToken: string, studentId: string) =>
+    request<{ url: string; uploadedAt: string }>(`/guardians/me/children/${studentId}/photo`, { accessToken }),
+  listMyAnnouncements: (accessToken: string) => request<Announcement[]>(`/guardians/me/announcements`, { accessToken }),
+  listMyNotifications: (accessToken: string) =>
+    request<NotificationItem[]>(`/guardians/me/notifications`, { accessToken }),
+  markNotificationRead: (accessToken: string, notificationId: string) =>
+    request<NotificationItem>(`/guardians/me/notifications/${notificationId}/read`, {
+      method: "PATCH",
+      accessToken,
+    }),
 
   listTeachers: (accessToken: string, schoolId: string) =>
     request<Teacher[]>(`/schools/${schoolId}/teachers`, { accessToken }),
@@ -696,6 +1036,8 @@ export const api = {
     request<Teacher>(`/schools/${schoolId}/teachers/${teacherId}`, { accessToken }),
   updateTeacher: (accessToken: string, schoolId: string, teacherId: string, body: UpdateTeacherInput) =>
     request<Teacher>(`/schools/${schoolId}/teachers/${teacherId}`, { method: "PATCH", body, accessToken }),
+  deleteTeacher: (accessToken: string, schoolId: string, teacherId: string) =>
+    request<{ success: boolean }>(`/schools/${schoolId}/teachers/${teacherId}`, { method: "DELETE", accessToken }),
   uploadTeacherDocument: (accessToken: string, schoolId: string, teacherId: string, file: File, label?: string) =>
     uploadFile<TeacherDocument>(`/schools/${schoolId}/teachers/${teacherId}/documents`, file, "file", accessToken, {
       ...(label ? { label } : {}),

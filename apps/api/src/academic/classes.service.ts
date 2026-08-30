@@ -4,9 +4,16 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateClassDto } from "./dto/create-class.dto";
+import { UpdateClassDto } from "./dto/update-class.dto";
 import { CreateSectionDto } from "./dto/create-section.dto";
 import { UpdateSectionDto } from "./dto/update-section.dto";
 import { AssignSubjectDto } from "./dto/assign-subject.dto";
+
+const CLASS_INCLUDE = {
+  division: true,
+  sections: { include: { _count: { select: { enrollments: { where: { status: "ACTIVE" as const } } } } } },
+  _count: { select: { classSubjects: true } },
+} as const;
 
 @Injectable()
 export class ClassesService {
@@ -75,18 +82,56 @@ export class ClassesService {
           await tx.classSubject.create({ data: { classId: cls.id, subjectId } });
         }
 
-        return tx.class.findUniqueOrThrow({
-          where: { id: cls.id },
-          include: {
-            division: true,
-            sections: { include: { _count: { select: { enrollments: { where: { status: "ACTIVE" } } } } } },
-            _count: { select: { classSubjects: true } },
-          },
-        });
+        return tx.class.findUniqueOrThrow({ where: { id: cls.id }, include: CLASS_INCLUDE });
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("A class with this level already exists in this division");
+      }
+      throw error;
+    }
+  }
+
+  async update(actor: AuthenticatedUser, schoolId: string, classId: string, dto: UpdateClassDto) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    await this.getClassInSchoolOrThrow(schoolId, classId);
+
+    if (dto.divisionId) {
+      const division = await this.prisma.division.findFirst({ where: { id: dto.divisionId, schoolId } });
+      if (!division) throw new BadRequestException("That division does not belong to this school");
+    }
+
+    try {
+      return await this.prisma.class.update({
+        where: { id: classId },
+        data: { divisionId: dto.divisionId, name: dto.name, level: dto.level },
+        include: CLASS_INCLUDE,
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictException("A class with this level already exists in this division");
+      }
+      throw error;
+    }
+  }
+
+  // Deleting a class is only possible when nothing enrolled a student into
+  // it, ever — StudentEnrollment.classId/sectionId are onDelete: Restrict,
+  // so Postgres itself blocks this (P2003) rather than silently orphaning
+  // enrollment history. Sections and class-subject links, which carry no
+  // historical record of their own, cascade away with it.
+  async remove(actor: AuthenticatedUser, schoolId: string, classId: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    await this.getClassInSchoolOrThrow(schoolId, classId);
+
+    try {
+      await this.prisma.class.delete({ where: { id: classId } });
+      return { success: true };
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+        throw new BadRequestException(
+          "Cannot delete this class — it has students enrolled (past or present). Withdraw or transfer them first.",
+        );
       }
       throw error;
     }
@@ -127,7 +172,7 @@ export class ClassesService {
     }
   }
 
-  async updateSectionCapacity(
+  async updateSection(
     actor: AuthenticatedUser,
     schoolId: string,
     classId: string,
@@ -153,11 +198,40 @@ export class ClassesService {
       }
     }
 
-    return this.prisma.section.update({
-      where: { id: sectionId },
-      data: { capacity: dto.capacity },
-      include: { _count: { select: { enrollments: { where: { status: "ACTIVE" } } } } },
-    });
+    try {
+      return await this.prisma.section.update({
+        where: { id: sectionId },
+        data: { name: dto.name, capacity: dto.capacity },
+        include: { _count: { select: { enrollments: { where: { status: "ACTIVE" } } } } },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictException("A section with this name already exists in this class");
+      }
+      throw error;
+    }
+  }
+
+  // Same Restrict-driven guard as removing a class — a section can only be
+  // deleted once it has never had a student enrolled in it.
+  async removeSection(actor: AuthenticatedUser, schoolId: string, classId: string, sectionId: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    await this.getClassInSchoolOrThrow(schoolId, classId);
+
+    const section = await this.prisma.section.findFirst({ where: { id: sectionId, classId } });
+    if (!section) throw new NotFoundException("Section not found in this class");
+
+    try {
+      await this.prisma.section.delete({ where: { id: sectionId } });
+      return { success: true };
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+        throw new BadRequestException(
+          "Cannot delete this section — it has students enrolled (past or present). Withdraw or transfer them first.",
+        );
+      }
+      throw error;
+    }
   }
 
   async listSubjects(actor: AuthenticatedUser, schoolId: string, classId: string) {

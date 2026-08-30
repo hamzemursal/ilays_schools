@@ -55,6 +55,16 @@ export class TeachersController {
   }
 
   @RequirePermissions("teachers.update")
+  @Delete(":teacherId")
+  remove(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("teacherId") teacherId: string,
+  ) {
+    return this.teachers.remove(user, schoolId, teacherId);
+  }
+
+  @RequirePermissions("teachers.update")
   @Post(":teacherId/assignments")
   addAssignment(
     @CurrentUser() user: AuthenticatedUser,

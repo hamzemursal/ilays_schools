@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { ArrowLeftRight, Cake, Plus, User } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowLeftRight, BookOpen, Cake, Pencil, Plus, Trash2, User } from "lucide-react";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type GuardianRecord, type StudentDetail } from "@/lib/api";
+import { api, type ClassSubjectRecord, type GuardianRecord, type SectionTeacherAssignment, type StudentDetail } from "@/lib/api";
 import { studentsApi } from "../api";
 import { PhotoUpload } from "../components/PhotoUpload";
+import { EditStudentForm } from "./EditStudentForm";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -13,6 +15,7 @@ import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { FormField, Select, Textarea } from "@/components/ui/FormControls";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { GuardianCard } from "@/features/guardians/components/GuardianCard";
 import { GuardianForm } from "@/features/guardians/forms/GuardianForm";
 import { useToast } from "@/components/ui/Toast";
@@ -29,11 +32,15 @@ const STATUS_TONE: Record<StudentDetail["currentStatus"], "success" | "accent" |
 export function StudentProfile({ studentId }: { studentId: string }) {
   const { user, accessToken } = useAuth();
   const { show } = useToast();
+  const router = useRouter();
 
   const [student, setStudent] = useState<StudentDetail | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [addingGuardian, setAddingGuardian] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -47,11 +54,28 @@ export function StudentProfile({ studentId }: { studentId: string }) {
       .catch(() => setPhotoUrl(null));
   }, [accessToken, studentId]);
 
+  async function onDelete() {
+    if (!accessToken || !student) return;
+    setDeleting(true);
+    try {
+      await studentsApi.remove(accessToken, student.id);
+      show("Student deleted permanently.");
+      const schoolId = student.enrollments.find((e) => e.status === "ACTIVE")?.school.id ?? student.enrollments[0]?.school.id;
+      router.push(schoolId ? `/schools/${schoolId}/students` : "/dashboard");
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to delete student", "danger");
+      setShowDeleteConfirm(false);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   if (error) return <Alert tone="danger">{error}</Alert>;
   if (!student) return <SkeletonCards count={3} />;
 
   const activeEnrollment = student.enrollments.find((e) => e.status === "ACTIVE");
   const canUpdate = user?.permissions.includes("students.update") ?? false;
+  const canDelete = user?.permissions.includes("students.archive") ?? false;
   const canManageGuardians = user?.permissions.includes("guardians.manage") ?? false;
   const canTransfer = (user?.permissions.includes("transfers.create") ?? false) && !!activeEnrollment;
 
@@ -89,8 +113,50 @@ export function StudentProfile({ studentId }: { studentId: string }) {
               )}
             </div>
           </div>
+          {(canUpdate || canDelete) && !editing && (
+            <div className="flex gap-2">
+              {canUpdate && (
+                <Button size="sm" variant="outline" icon={<Pencil className="size-4" />} onClick={() => setEditing(true)}>
+                  Edit
+                </Button>
+              )}
+              {canDelete && (
+                <Button
+                  size="sm"
+                  variant="danger"
+                  icon={<Trash2 className="size-4" />}
+                  onClick={() => setShowDeleteConfirm(true)}
+                >
+                  Delete
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </Card>
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title={`Delete ${student.firstName} ${student.lastName} permanently?`}
+        description="This permanently deletes this student and every related record — enrollment history, attendance, exam results, invoices and payments, transfers, guardian links, and uploaded photos/documents. This action cannot be undone."
+        confirmLabel="Delete permanently"
+        loading={deleting}
+        onConfirm={onDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
+
+      {editing && accessToken && (
+        <EditStudentForm
+          accessToken={accessToken}
+          student={student}
+          schoolId={activeEnrollment?.school.id ?? student.enrollments[0]?.school.id ?? ""}
+          onCancel={() => setEditing(false)}
+          onSaved={(updated) => {
+            setStudent(updated);
+            setEditing(false);
+          }}
+        />
+      )}
 
       {activeEnrollment && (
         <Card>
@@ -102,6 +168,17 @@ export function StudentProfile({ studentId }: { studentId: string }) {
             <Field label="Roll #" value={String(activeEnrollment.rollNumber)} />
           </div>
         </Card>
+      )}
+
+      {activeEnrollment && accessToken && (
+        <SubjectsAndTeachersCard
+          key={`${activeEnrollment.class.id}:${activeEnrollment.section.id}:${activeEnrollment.academicYear.id}`}
+          accessToken={accessToken}
+          schoolId={activeEnrollment.school.id}
+          classId={activeEnrollment.class.id}
+          sectionId={activeEnrollment.section.id}
+          academicYearId={activeEnrollment.academicYear.id}
+        />
       )}
 
       <Card padding="none">
@@ -187,6 +264,69 @@ function Field({ label, value }: { label: string; value: string }) {
       <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">{label}</p>
       <p className="mt-0.5 text-sm font-medium text-foreground">{value}</p>
     </div>
+  );
+}
+
+function SubjectsAndTeachersCard({
+  accessToken,
+  schoolId,
+  classId,
+  sectionId,
+  academicYearId,
+}: {
+  accessToken: string;
+  schoolId: string;
+  classId: string;
+  sectionId: string;
+  academicYearId: string;
+}) {
+  const [subjects, setSubjects] = useState<ClassSubjectRecord[] | null>(null);
+  const [assignments, setAssignments] = useState<SectionTeacherAssignment[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .listClassSubjects(accessToken, schoolId, classId)
+      .then(setSubjects)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load subjects"));
+    api
+      .listSectionTeacherAssignments(accessToken, schoolId, classId, sectionId, academicYearId)
+      .then(setAssignments)
+      .catch(() => setAssignments([]));
+  }, [accessToken, schoolId, classId, sectionId, academicYearId]);
+
+  return (
+    <Card padding="none">
+      <CardHeader title="Subjects & Teachers" />
+      <div className="p-5">
+        {error ? (
+          <Alert tone="danger">{error}</Alert>
+        ) : !subjects ? (
+          <SkeletonCards count={3} />
+        ) : subjects.length === 0 ? (
+          <EmptyState icon={BookOpen} title="No subjects configured" description="This class has no subjects set up yet." />
+        ) : (
+          <div className="divide-y divide-border">
+            {subjects.map((cs) => {
+              const assignment = assignments?.find((a) => a.subjectId === cs.subjectId);
+              return (
+                <div key={cs.subjectId} className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                  <p className="font-medium text-foreground">
+                    {cs.subject.name}
+                    {cs.subject.code && (
+                      <span className="ml-1 font-mono text-xs text-foreground-muted">· {cs.subject.code}</span>
+                    )}
+                  </p>
+                  <p className={assignment ? "text-sm text-foreground-soft" : "text-sm italic text-foreground-muted"}>
+                    {assignment ? `${assignment.teacher.firstName} ${assignment.teacher.lastName}` : "No teacher assigned"}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 

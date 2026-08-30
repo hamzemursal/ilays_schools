@@ -79,6 +79,7 @@ export function StudentWizard({ schoolId }: { schoolId: string }) {
         },
         guardians: state.guardians.length
           ? state.guardians.map((g) => ({
+              existingGuardianId: g.mode === "existing" ? g.guardianId : undefined,
               firstName: g.firstName,
               lastName: g.lastName,
               phone: g.phone || undefined,

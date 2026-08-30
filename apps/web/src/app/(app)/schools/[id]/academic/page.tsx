@@ -13,15 +13,18 @@ import {
   type Subject,
 } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { Card } from "@/components/ui/Card";
+import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { BulkActionBar } from "@/components/ui/BulkActionBar";
 import { useToast } from "@/components/ui/Toast";
-import { Plus } from "lucide-react";
+import { runBulkAction, summarizeBulkResult } from "@/lib/bulkAction";
+import { Check, Pencil, Plus, Trash2 } from "lucide-react";
 
 const TABS = ["Years", "Classes & sections", "Subjects", "Exams"] as const;
 type Tab = (typeof TABS)[number];
@@ -243,6 +246,10 @@ function ClassesSection({
 }) {
   const currentYear = years.find((y) => y.isCurrent) ?? years[0];
   const [yearId, setYearId] = useState(currentYear?.id ?? "");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBulkConfirm, setShowBulkConfirm] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const { show } = useToast();
 
   // Class/Section are permanent structures reused every year — the year
   // selector doesn't filter which classes exist, only which year's roster
@@ -252,6 +259,29 @@ function ClassesSection({
     api.listClasses(accessToken, schoolId, yearId).then((list) => setClasses(() => list));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, schoolId, yearId]);
+
+  function toggle(id: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  async function onBulkDelete() {
+    setBulkDeleting(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const result = await runBulkAction(ids, (id) => api.removeClass(accessToken, schoolId, id));
+      setClasses((prev) => prev.filter((c) => !result.succeededIds.includes(c.id)));
+      show(summarizeBulkResult(result, "deleted"));
+      setSelectedIds(new Set());
+      setShowBulkConfirm(false);
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -275,53 +305,151 @@ function ClassesSection({
         )}
       </div>
 
+      {canManage && (
+        <BulkActionBar count={selectedIds.size} onClear={() => setSelectedIds(new Set())}>
+          <Button size="sm" variant="danger" icon={<Trash2 className="size-4" />} onClick={() => setShowBulkConfirm(true)}>
+            Delete selected
+          </Button>
+        </BulkActionBar>
+      )}
+
       {classes.length === 0 ? (
         <EmptyState title="No classes yet" description="Create your first class to start building the structure." />
       ) : (
         <div className="space-y-3">
           {classes.map((cls) => (
-            <ClassRow key={cls.id} schoolId={schoolId} cls={cls} />
+            <ClassRow
+              key={cls.id}
+              schoolId={schoolId}
+              accessToken={accessToken}
+              cls={cls}
+              canManage={canManage}
+              selected={selectedIds.has(cls.id)}
+              onToggle={(checked) => toggle(cls.id, checked)}
+              onDeleted={() => {
+                setClasses((prev) => prev.filter((c) => c.id !== cls.id));
+                setSelectedIds((prev) => {
+                  const next = new Set(prev);
+                  next.delete(cls.id);
+                  return next;
+                });
+              }}
+            />
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={showBulkConfirm}
+        title={`Delete ${selectedIds.size} class${selectedIds.size === 1 ? "" : "es"}?`}
+        description="This cannot be undone. Only classes with no student ever enrolled will be deleted — the rest are skipped."
+        confirmLabel="Delete"
+        loading={bulkDeleting}
+        onConfirm={onBulkDelete}
+        onCancel={() => setShowBulkConfirm(false)}
+      />
     </div>
   );
 }
 
-function ClassRow({ schoolId, cls }: { schoolId: string; cls: ClassWithSections }) {
+function ClassRow({
+  schoolId,
+  accessToken,
+  cls,
+  canManage,
+  selected,
+  onToggle,
+  onDeleted,
+}: {
+  schoolId: string;
+  accessToken: string;
+  cls: ClassWithSections;
+  canManage: boolean;
+  selected: boolean;
+  onToggle: (checked: boolean) => void;
+  onDeleted: () => void;
+}) {
+  const { show } = useToast();
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const totalStudents = cls.sections.reduce((sum, s) => sum + s._count.enrollments, 0);
-  const allUnlimited = cls.sections.every((s) => s.capacity === null);
+
+  async function onDelete() {
+    setDeleting(true);
+    try {
+      await api.removeClass(accessToken, schoolId, cls.id);
+      show(`${cls.name} deleted permanently.`);
+      onDeleted();
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to delete class", "danger");
+      setShowDeleteConfirm(false);
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
-    <Card>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="font-medium text-foreground">
-            {cls.name} <span className="text-sm font-normal text-foreground-soft">· {cls.division.type}</span>
-          </p>
-          <p className="mt-0.5 text-sm text-foreground-soft">
-            {cls.sections.length} Section{cls.sections.length === 1 ? "" : "s"} ·{" "}
-            {allUnlimited ? "Unlimited Capacity" : `${totalStudents} student${totalStudents === 1 ? "" : "s"}`} ·{" "}
-            {cls._count.classSubjects} Subject{cls._count.classSubjects === 1 ? "" : "s"}
-          </p>
-          <p className="mt-1.5 text-sm text-foreground-muted">
-            {cls.sections.length === 0 ? "No sections yet." : cls.sections.map((s) => s.name).join(" · ")}
-          </p>
+    <>
+      <Card>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex gap-3">
+            {canManage && (
+              <input
+                type="checkbox"
+                checked={selected}
+                onChange={(e) => onToggle(e.target.checked)}
+                aria-label={`Select ${cls.name}`}
+                className="mt-1 size-4 shrink-0 rounded border-border text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+              />
+            )}
+            <div>
+              <p className="font-medium text-foreground">
+                {cls.name} <span className="text-sm font-normal text-foreground-soft">· {cls.division.type}</span>
+              </p>
+              <p className="mt-0.5 text-sm text-foreground-soft">
+                {cls.sections.length} Section{cls.sections.length === 1 ? "" : "s"} · {totalStudents} student
+                {totalStudents === 1 ? "" : "s"} · {cls._count.classSubjects} Subject{cls._count.classSubjects === 1 ? "" : "s"}
+              </p>
+              <p className="mt-1.5 text-sm text-foreground-muted">
+                {cls.sections.length === 0 ? "No sections yet." : cls.sections.map((s) => s.name).join(" · ")}
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Link href={`/schools/${schoolId}/academic/classes/${cls.id}`}>
+              <Button size="sm" variant="outline">
+                View
+              </Button>
+            </Link>
+            <Link href={`/schools/${schoolId}/academic/classes/${cls.id}`}>
+              <Button size="sm" variant="ghost">
+                Edit
+              </Button>
+            </Link>
+            {canManage && (
+              <Button
+                size="sm"
+                variant="danger"
+                icon={<Trash2 className="size-4" />}
+                onClick={() => setShowDeleteConfirm(true)}
+              >
+                Delete
+              </Button>
+            )}
+          </div>
         </div>
-        <div className="flex shrink-0 gap-2">
-          <Link href={`/schools/${schoolId}/academic/classes/${cls.id}`}>
-            <Button size="sm" variant="outline">
-              View
-            </Button>
-          </Link>
-          <Link href={`/schools/${schoolId}/academic/classes/${cls.id}`}>
-            <Button size="sm" variant="ghost">
-              Edit
-            </Button>
-          </Link>
-        </div>
-      </div>
-    </Card>
+      </Card>
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title={`Delete ${cls.name} permanently?`}
+        description="This permanently removes the class and its sections and subject links from the database. This action cannot be undone. Deletion is only possible if no student has ever been enrolled in this class."
+        confirmLabel="Delete permanently"
+        loading={deleting}
+        onConfirm={onDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
+    </>
   );
 }
 
@@ -338,8 +466,14 @@ function SubjectsSection({
   setSubjects: (fn: (prev: Subject[]) => Subject[]) => void;
   canManage: boolean;
 }) {
+  const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBulkConfirm, setShowBulkConfirm] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Subject | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const { show } = useToast();
 
   async function onCreate(e: FormEvent) {
@@ -355,37 +489,152 @@ function SubjectsSection({
     }
   }
 
+  function toggle(id: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  async function onBulkDelete() {
+    setBulkDeleting(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const result = await runBulkAction(ids, (id) => api.removeSubject(accessToken, schoolId, id));
+      setSubjects((prev) => prev.filter((s) => !result.succeededIds.includes(s.id)));
+      show(summarizeBulkResult(result, "deleted"));
+      setSelectedIds(new Set());
+      setShowBulkConfirm(false);
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
+  async function onDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.removeSubject(accessToken, schoolId, deleteTarget.id);
+      setSubjects((prev) => prev.filter((s) => s.id !== deleteTarget.id));
+      show(`${deleteTarget.name} deleted permanently.`);
+      setDeleteTarget(null);
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to delete subject", "danger");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
-      <Card>
-        {subjects.length === 0 ? (
-          <p className="text-sm text-foreground-muted">No subjects yet.</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {subjects.map((s) => (
-              <Link key={s.id} href={`/schools/${schoolId}/academic/subjects/${s.id}`}>
-                <Badge>
-                  {s.name}
-                  {s.code && <span className="ml-1 font-mono text-foreground-muted">· {s.code}</span>}
-                </Badge>
-              </Link>
-            ))}
-          </div>
-        )}
+      <Card padding="none">
+        <CardHeader
+          title="Subjects"
+          description="Every subject offered at this school."
+          actions={
+            canManage &&
+            (editing ? (
+              <Button size="sm" variant="outline" icon={<Check className="size-4" />} onClick={() => setEditing(false)}>
+                Done
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" icon={<Pencil className="size-4" />} onClick={() => setEditing(true)}>
+                Edit
+              </Button>
+            ))
+          }
+        />
+        <div className="p-5">
+          {canManage && editing && (
+            <BulkActionBar count={selectedIds.size} onClear={() => setSelectedIds(new Set())}>
+              <Button size="sm" variant="danger" icon={<Trash2 className="size-4" />} onClick={() => setShowBulkConfirm(true)}>
+                Delete selected
+              </Button>
+            </BulkActionBar>
+          )}
 
-        {canManage && (
-          <form onSubmit={onCreate} className="mt-4 flex flex-wrap items-end gap-2 border-t border-border pt-4">
-            <div>
-              <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Mathematics" />
-              <p className="mt-1 text-xs text-foreground-muted">A subject code is generated automatically.</p>
+          {subjects.length === 0 ? (
+            <p className="text-sm text-foreground-muted">No subjects yet.</p>
+          ) : editing ? (
+            <div className="space-y-2">
+              {subjects.map((s) => (
+                <div key={s.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2">
+                  {canManage && (
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(s.id)}
+                      onChange={(e) => toggle(s.id, e.target.checked)}
+                      aria-label={`Select ${s.name}`}
+                      className="size-4 shrink-0 rounded border-border text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    />
+                  )}
+                  <Link
+                    href={`/schools/${schoolId}/academic/subjects/${s.id}`}
+                    className="flex-1 text-sm font-medium text-foreground hover:underline"
+                  >
+                    {s.name}
+                    {s.code && <span className="ml-1 font-mono text-xs text-foreground-muted">· {s.code}</span>}
+                  </Link>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    icon={<Trash2 className="size-4" />}
+                    onClick={() => setDeleteTarget(s)}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              ))}
             </div>
-            <Button type="submit" size="sm" icon={<Plus className="size-4" />}>
-              Add subject
-            </Button>
-            {formError && <p className="w-full text-sm text-danger">{formError}</p>}
-          </form>
-        )}
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {subjects.map((s) => (
+                <Link key={s.id} href={`/schools/${schoolId}/academic/subjects/${s.id}`}>
+                  <Badge>
+                    {s.name}
+                    {s.code && <span className="ml-1 font-mono text-foreground-muted">· {s.code}</span>}
+                  </Badge>
+                </Link>
+              ))}
+            </div>
+          )}
+
+          {canManage && editing && (
+            <form onSubmit={onCreate} className="mt-4 flex flex-wrap items-end gap-2 border-t border-border pt-4">
+              <div>
+                <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Mathematics" />
+                <p className="mt-1 text-xs text-foreground-muted">A subject code is generated automatically.</p>
+              </div>
+              <Button type="submit" size="sm" icon={<Plus className="size-4" />}>
+                Add subject
+              </Button>
+              {formError && <p className="w-full text-sm text-danger">{formError}</p>}
+            </form>
+          )}
+        </div>
       </Card>
+
+      <ConfirmDialog
+        open={showBulkConfirm}
+        title={`Delete ${selectedIds.size} subject${selectedIds.size === 1 ? "" : "s"}?`}
+        description="This cannot be undone. Only subjects with no exam, teacher assignment, or class link will be deleted — the rest are skipped."
+        confirmLabel="Delete"
+        loading={bulkDeleting}
+        onConfirm={onBulkDelete}
+        onCancel={() => setShowBulkConfirm(false)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title={`Delete ${deleteTarget?.name ?? "this subject"} permanently?`}
+        description="This action cannot be undone. Deletion is only possible if the subject has no dependent exams, teacher assignments, or class links."
+        confirmLabel="Delete permanently"
+        loading={deleting}
+        onConfirm={onDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

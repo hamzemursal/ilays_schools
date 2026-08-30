@@ -12,7 +12,7 @@ import { Stepper } from "@/components/ui/Stepper";
 import { useToast } from "@/components/ui/Toast";
 import { PersonalInfoStep, isPersonalInfoValid } from "./steps/PersonalInfoStep";
 import { ContactStep } from "./steps/ContactStep";
-import { AssignmentsStep } from "./steps/AssignmentsStep";
+import { AssignmentsStep, findDuplicateAssignmentIndexes } from "./steps/AssignmentsStep";
 import { ReviewStep } from "./steps/ReviewStep";
 import { emptyTeacherWizardState, TEACHER_WIZARD_STEPS, type TeacherWizardState } from "./types";
 
@@ -58,7 +58,8 @@ export function TeacherWizard({ schoolId }: { schoolId: string }) {
     setState((prev) => ({ ...prev, ...p }));
   }
 
-  const canProceed = step === 0 ? isPersonalInfoValid(state) : true;
+  const hasDuplicateAssignments = findDuplicateAssignmentIndexes(state.assignments).size > 0;
+  const canProceed = step === 0 ? isPersonalInfoValid(state) : step === 2 ? !hasDuplicateAssignments : true;
 
   async function submit() {
     if (!accessToken) return;
@@ -153,7 +154,7 @@ export function TeacherWizard({ schoolId }: { schoolId: string }) {
         ) : (
           <Button
             icon={submitting ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
-            disabled={submitting}
+            disabled={submitting || hasDuplicateAssignments}
             onClick={submit}
           >
             {submitting ? "Creating…" : "Create teacher"}

@@ -4,6 +4,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { StorageService } from "../storage/storage.service";
 import { StudentsService } from "../students/students.service";
 import { SchoolsService } from "../schools/schools.service";
+import { GuardiansService } from "../guardians/guardians.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -18,7 +19,15 @@ export class DocumentsService {
     private readonly storage: StorageService,
     private readonly students: StudentsService,
     private readonly schools: SchoolsService,
+    private readonly guardians: GuardiansService,
   ) {}
+
+  // Parent-portal variant — ownership is "this guardian is linked to this
+  // student", not students.view, since a parent has no admin permissions.
+  async getChildPhotoUrl(actor: AuthenticatedUser, studentId: string) {
+    await this.guardians.assertGuardianCanAccessStudent(actor, studentId);
+    return this.getPhotoUrl("STUDENT", studentId);
+  }
 
   async uploadStudentPhoto(actor: AuthenticatedUser, studentId: string, file: Express.Multer.File) {
     const student = await this.students.assertAccessibleStudent(actor, studentId);

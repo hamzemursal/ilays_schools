@@ -1,10 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react";
 import { Input } from "./FormControls";
 import { EmptyState } from "./EmptyState";
 import { SkeletonTable } from "./Skeleton";
+
+export interface TableSelection {
+  selectedKeys: Set<string>;
+  onToggle: (key: string, checked: boolean) => void;
+  onToggleAll: (keys: string[], checked: boolean) => void;
+}
 
 export interface Column<T> {
   key: string;
@@ -26,6 +32,7 @@ export function DataTable<T>({
   emptyDescription,
   onRowClick,
   toolbar,
+  selection,
 }: {
   data: T[] | null;
   columns: Column<T>[];
@@ -37,6 +44,7 @@ export function DataTable<T>({
   emptyDescription?: string;
   onRowClick?: (row: T) => void;
   toolbar?: React.ReactNode;
+  selection?: TableSelection;
 }) {
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<string | null>(null);
@@ -102,6 +110,19 @@ export function DataTable<T>({
           <table className="w-full min-w-[560px] text-left text-sm">
             <thead className="bg-surface-soft">
               <tr>
+                {selection && (
+                  <th className="w-10 px-4 py-2.5">
+                    <SelectCheckbox
+                      checked={sorted.length > 0 && sorted.every((row) => selection.selectedKeys.has(rowKey(row)))}
+                      indeterminate={
+                        sorted.some((row) => selection.selectedKeys.has(rowKey(row))) &&
+                        !sorted.every((row) => selection.selectedKeys.has(rowKey(row)))
+                      }
+                      onChange={(checked) => selection.onToggleAll(sorted.map(rowKey), checked)}
+                      ariaLabel="Select all rows"
+                    />
+                  </th>
+                )}
                 {columns.map((col) => (
                   <th
                     key={col.key}
@@ -138,6 +159,15 @@ export function DataTable<T>({
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                   className={`bg-background ${onRowClick ? "cursor-pointer hover:bg-surface-hover" : ""}`}
                 >
+                  {selection && (
+                    <td className="px-4 py-3 align-middle" onClick={(e) => e.stopPropagation()}>
+                      <SelectCheckbox
+                        checked={selection.selectedKeys.has(rowKey(row))}
+                        onChange={(checked) => selection.onToggle(rowKey(row), checked)}
+                        ariaLabel="Select row"
+                      />
+                    </td>
+                  )}
                   {columns.map((col) => (
                     <td key={col.key} className={`px-4 py-3 align-middle text-foreground ${col.className ?? ""}`}>
                       {col.render(row)}
@@ -150,5 +180,33 @@ export function DataTable<T>({
         </div>
       )}
     </div>
+  );
+}
+
+function SelectCheckbox({
+  checked,
+  indeterminate,
+  onChange,
+  ariaLabel,
+}: {
+  checked: boolean;
+  indeterminate?: boolean;
+  onChange: (checked: boolean) => void;
+  ariaLabel: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = !!indeterminate;
+  }, [indeterminate]);
+
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={checked}
+      onChange={(e) => onChange(e.target.checked)}
+      aria-label={ariaLabel}
+      className="size-4 rounded border-border text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+    />
   );
 }

@@ -94,7 +94,7 @@ export class TransfersService {
 
     const studentNumber =
       dto.studentNumber ?? (await this.generateStudentNumber(transfer.toSchoolId, dto.academicYearId, academicYear.name));
-    const rollNumber = dto.rollNumber ?? (await this.generateRollNumber(section.id));
+    const rollNumber = dto.rollNumber ?? (await this.generateRollNumber(section.id, dto.academicYearId));
 
     return this.prisma.$transaction(async (tx) => {
       await tx.studentEnrollment.update({
@@ -191,9 +191,10 @@ export class TransfersService {
     return `STU-${academicYearName}-${sequence}`;
   }
 
-  private async generateRollNumber(sectionId: string): Promise<number> {
+  // Scoped by academicYearId — see StudentsService.generateRollNumber for why.
+  private async generateRollNumber(sectionId: string, academicYearId: string): Promise<number> {
     const result = await this.prisma.studentEnrollment.aggregate({
-      where: { sectionId, status: "ACTIVE" },
+      where: { sectionId, academicYearId, status: "ACTIVE" },
       _max: { rollNumber: true },
     });
     return (result._max.rollNumber ?? 0) + 1;

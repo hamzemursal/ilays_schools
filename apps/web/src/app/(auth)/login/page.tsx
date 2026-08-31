@@ -36,7 +36,7 @@ export default function LoginPage() {
         <div className="flex size-12 items-center justify-center rounded-xl bg-accent text-white shadow-md">
           <GraduationCap className="size-6" />
         </div>
-        <h1 className="mt-4 text-xl font-semibold text-foreground">Ilays Schools ERP</h1>
+        <h1 className="mt-4 text-xl font-semibold text-foreground">Ilays Schools</h1>
         <p className="mt-1 text-sm text-foreground-soft">Sign in to your account</p>
       </div>
 

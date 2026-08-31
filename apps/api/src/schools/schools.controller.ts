@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post } from "@nestjs/common";
 import { SchoolsService } from "./schools.service";
 import { CreateSchoolDto } from "./dto/create-school.dto";
 import { InviteSchoolAdminDto } from "./dto/invite-school-admin.dto";
@@ -43,6 +43,15 @@ export class SchoolsController {
   @Get(":id")
   get(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.schools.findOneAccessibleOrThrow(user, id);
+  }
+
+  // schools.manage is only ever granted to SUPER_ADMIN/ORGANIZATION_ADMIN
+  // (see seed.ts) — a School Admin can never reach this even for their own
+  // school, which is deliberate: deleting a school is an org-wide decision.
+  @RequirePermissions("schools.manage")
+  @Delete(":id")
+  remove(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.schools.remove(user, id);
   }
 
   @RequirePermissions("schools.manage")

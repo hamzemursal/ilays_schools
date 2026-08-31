@@ -13,7 +13,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
-import { Building2, GraduationCap, MapPin, Plus, Search, ShieldCheck, ShieldX, Users } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Building2, GraduationCap, MapPin, Plus, Search, ShieldCheck, ShieldX, Trash2, Users } from "lucide-react";
 
 const SCHOOL_TYPES: { value: SchoolType; label: string }[] = [
   { value: "PRIMARY", label: "Primary" },
@@ -48,6 +49,8 @@ export default function SchoolsPage() {
   const [address, setAddress] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<School | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const { show } = useToast();
 
   useEffect(() => {
@@ -79,6 +82,22 @@ export default function SchoolsPage() {
 
   const canCreate = user?.permissions.includes("schools.create") ?? false;
   const canView = user?.permissions.includes("schools.view") ?? false;
+  const canManage = user?.permissions.includes("schools.manage") ?? false;
+
+  async function onDelete() {
+    if (!accessToken || !deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.removeSchool(accessToken, deleteTarget.id);
+      setSchools((prev) => (prev ? prev.filter((s) => s.id !== deleteTarget.id) : prev));
+      show(`${deleteTarget.name} deleted.`);
+      setDeleteTarget(null);
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to delete school", "danger");
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   const filtered = useMemo(() => {
     if (!schools) return null;
@@ -258,18 +277,37 @@ export default function SchoolsPage() {
                     )}
                   </div>
                 </div>
-                <div className="border-t border-border p-3">
-                  <Link href={`/schools/${school.id}`}>
+                <div className="flex gap-2 border-t border-border p-3">
+                  <Link href={`/schools/${school.id}`} className="flex-1">
                     <Button size="sm" variant="outline" className="w-full">
                       View School
                     </Button>
                   </Link>
+                  {canManage && (
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      icon={<Trash2 className="size-4" />}
+                      onClick={() => setDeleteTarget(school)}
+                      aria-label={`Delete ${school.name}`}
+                    />
+                  )}
                 </div>
               </Card>
             ))}
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title={`Delete ${deleteTarget?.name ?? "this school"}?`}
+        description="This permanently deletes the school and everything it owns — academic years, classes, subjects, exams, fee structures, announcements. Blocked if it has any student or teacher on record; deactivate it instead if you just want to stop using it."
+        confirmLabel="Delete school"
+        loading={deleting}
+        onConfirm={onDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

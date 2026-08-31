@@ -878,6 +878,8 @@ export const api = {
       body: { email },
       accessToken,
     }),
+  removeSchool: (accessToken: string, schoolId: string) =>
+    request<{ success: boolean }>(`/schools/${schoolId}`, { method: "DELETE", accessToken }),
 
   listDivisions: (accessToken: string, schoolId: string) =>
     request<Division[]>(`/schools/${schoolId}/divisions`, { accessToken }),

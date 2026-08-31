@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomBytes, createHash } from "node:crypto";
 import { Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
@@ -303,5 +303,43 @@ export class SchoolsService {
 
     const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3010";
     return { email, acceptUrl: `${webOrigin}/accept-invite?token=${rawToken}` };
+  }
+
+  // A genuine, permanent delete — not the ACTIVE/INACTIVE status toggle.
+  // StudentEnrollment and Teacher both use onDelete: Restrict against School
+  // (see schema.prisma), so Postgres itself refuses this the moment a school
+  // has ever had a student enrolled or a teacher on record; everything else
+  // the school owns (academic years, divisions/classes/sections, subjects,
+  // exams, fee structures, announcements, invitations, import batches) is
+  // Cascade and disappears with it. That FK, not application code, is what
+  // keeps a populated school's academic/financial history from ever being
+  // wiped out by this endpoint.
+  async remove(actor: AuthenticatedUser, schoolId: string) {
+    const school = await this.findOneAccessibleOrThrow(actor, schoolId);
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.school.delete({ where: { id: schoolId } });
+        await tx.auditLog.create({
+          data: {
+            organizationId: school.organizationId,
+            schoolId: school.id,
+            actorUserId: actor.id,
+            action: "school.delete",
+            resource: "School",
+            resourceId: school.id,
+            before: { name: school.name, type: school.type, address: school.address },
+          },
+        });
+      });
+      return { success: true };
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+        throw new BadRequestException(
+          "Cannot delete this school — it still has enrolled students or teachers on record. Remove or transfer them first, or deactivate the school instead.",
+        );
+      }
+      throw error;
+    }
   }
 }

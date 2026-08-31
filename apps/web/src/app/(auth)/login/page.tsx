@@ -50,7 +50,7 @@ export default function LoginPage() {
               autoFocus
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@saamalay.test"
+              placeholder="adminlogin"
             />
           </FormField>
 

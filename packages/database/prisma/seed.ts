@@ -179,11 +179,11 @@ async function seedDevAuthFixtures() {
   });
 
   const school = await prisma.school.upsert({
-    where: { organizationId_name: { organizationId: org.id, name: "Saamalay Primary School (dev)" } },
+    where: { organizationId_name: { organizationId: org.id, name: "Saamalay Primary School" } },
     update: {},
     create: {
       organizationId: org.id,
-      name: "Saamalay Primary School (dev)",
+      name: "Saamalay Primary School",
       type: "PRIMARY",
     },
   });

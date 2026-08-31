@@ -226,7 +226,7 @@ export class TeachersService {
       return files;
     });
 
-    await Promise.all(mediaFiles.map((f) => this.storage.delete(f.storageKey).catch(() => undefined)));
+    await Promise.all(mediaFiles.map((f) => this.storage.delete(f.storageKey, f.mimeType).catch(() => undefined)));
 
     return { success: true };
   }

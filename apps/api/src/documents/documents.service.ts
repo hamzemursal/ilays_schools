@@ -193,7 +193,7 @@ export class DocumentsService {
         mimeType: row.mimeType,
         sizeBytes: row.sizeBytes,
         uploadedAt: row.createdAt,
-        url: await this.storage.getSignedDownloadUrl(row.storageKey),
+        url: await this.storage.getSignedDownloadUrl(row.storageKey, row.mimeType),
       })),
     );
   }

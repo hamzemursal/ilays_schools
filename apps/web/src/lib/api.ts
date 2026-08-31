@@ -150,6 +150,44 @@ export interface School {
   phone: string | null;
   email: string | null;
   createdAt: string;
+  studentCount: number;
+  teacherCount: number;
+  hasActiveAdmin: boolean;
+}
+
+export interface SystemSummaryAlert {
+  severity: "warning" | "info";
+  message: string;
+  schoolId: string;
+}
+
+export interface SystemSummaryActivity {
+  id: string;
+  action: string;
+  resource: string;
+  resourceId: string | null;
+  schoolId: string | null;
+  createdAt: string;
+  actorEmail: string;
+}
+
+export interface SystemSummary {
+  totals: {
+    schools: number;
+    primarySchools: number;
+    secondarySchools: number;
+    activeSchools: number;
+    inactiveSchools: number;
+    students: number;
+    maleStudents: number;
+    femaleStudents: number;
+    teachers: number;
+    guardians: number;
+    staff: number;
+  };
+  schools: School[];
+  recentActivity: SystemSummaryActivity[];
+  alerts: SystemSummaryAlert[];
 }
 
 export type DivisionType = "PRIMARY" | "SECONDARY";
@@ -828,6 +866,7 @@ export const api = {
   listSchools: (accessToken: string) => request<School[]>("/schools", { accessToken }),
   listSchoolDirectory: (accessToken: string) =>
     request<{ id: string; name: string }[]>("/schools/directory", { accessToken }),
+  getSystemSummary: (accessToken: string) => request<SystemSummary>("/schools/system-summary", { accessToken }),
   getSchool: (accessToken: string, id: string) => request<School>(`/schools/${id}`, { accessToken }),
   createSchool: (
     accessToken: string,

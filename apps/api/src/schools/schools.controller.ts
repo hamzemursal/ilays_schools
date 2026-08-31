@@ -29,6 +29,16 @@ export class SchoolsController {
     return this.schools.listDirectory(user);
   }
 
+  // Must come before ":id" for the same reason as "directory" above. Gated
+  // on the same "schools.view" as the plain list — a Super Admin sees every
+  // school's totals, a School Admin (schoolIds non-empty) would only ever
+  // see totals for their own school(s), never another school's data.
+  @RequirePermissions("schools.view")
+  @Get("system-summary")
+  systemSummary(@CurrentUser() user: AuthenticatedUser) {
+    return this.schools.getSystemSummary(user);
+  }
+
   @RequirePermissions("schools.view")
   @Get(":id")
   get(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {

@@ -31,10 +31,139 @@ export class SchoolsService {
   }
 
   async findAccessible(actor: AuthenticatedUser) {
-    return this.prisma.school.findMany({
+    const schools = await this.prisma.school.findMany({
       where: this.accessibleWhere(actor),
       orderBy: { createdAt: "desc" },
     });
+    return this.withCounts(schools);
+  }
+
+  // Enrolled-student and teacher counts, plus whether an active School Admin
+  // exists yet — computed once here (via groupBy, not N+1 per-school
+  // queries) so both the schools list/card-grid and the system-wide summary
+  // below can share the exact same numbers instead of two separate
+  // aggregations drifting apart.
+  private async withCounts<T extends { id: string }>(schools: T[]) {
+    const schoolIds = schools.map((s) => s.id);
+    if (schoolIds.length === 0) {
+      return schools.map((s) => ({ ...s, studentCount: 0, teacherCount: 0, hasActiveAdmin: false }));
+    }
+
+    const [studentGroups, teacherGroups, schoolAdminRole] = await Promise.all([
+      this.prisma.studentEnrollment.groupBy({
+        by: ["schoolId"],
+        where: { schoolId: { in: schoolIds }, status: "ACTIVE" },
+        _count: { _all: true },
+      }),
+      this.prisma.teacher.groupBy({
+        by: ["schoolId"],
+        where: { schoolId: { in: schoolIds } },
+        _count: { _all: true },
+      }),
+      this.prisma.role.findUnique({ where: { name: "SCHOOL_ADMIN" } }),
+    ]);
+
+    const studentCountBySchool = new Map(studentGroups.map((g) => [g.schoolId, g._count._all]));
+    const teacherCountBySchool = new Map(teacherGroups.map((g) => [g.schoolId, g._count._all]));
+
+    let schoolsWithActiveAdmin = new Set<string>();
+    if (schoolAdminRole) {
+      const adminLinks = await this.prisma.userSchool.findMany({
+        where: { schoolId: { in: schoolIds }, user: { status: "ACTIVE", roles: { some: { roleId: schoolAdminRole.id } } } },
+        select: { schoolId: true },
+      });
+      schoolsWithActiveAdmin = new Set(adminLinks.map((l) => l.schoolId));
+    }
+
+    return schools.map((s) => ({
+      ...s,
+      studentCount: studentCountBySchool.get(s.id) ?? 0,
+      teacherCount: teacherCountBySchool.get(s.id) ?? 0,
+      hasActiveAdmin: schoolsWithActiveAdmin.has(s.id),
+    }));
+  }
+
+  // The Super Admin's system-wide overview — every figure is derived from
+  // the same School/StudentEnrollment/Teacher/Guardian/AuditLog relationships
+  // used everywhere else (accessibleWhere() still applies, so a School Admin
+  // calling this would only ever see totals for their own school(s), never
+  // another school's data). There is no dedicated "Staff" model in this
+  // schema — Teacher is the only staff type with real profile records, so
+  // `staff` is reported as the teacher count rather than inventing a number
+  // for roles (finance/HR/etc.) that have no underlying records at all.
+  async getSystemSummary(actor: AuthenticatedUser) {
+    const schools = await this.findAccessible(actor);
+    const schoolIds = schools.map((s) => s.id);
+
+    const primarySchools = schools.filter((s) => s.type === "PRIMARY" || s.type === "PRIMARY_AND_SECONDARY").length;
+    const secondarySchools = schools.filter((s) => s.type === "SECONDARY" || s.type === "PRIMARY_AND_SECONDARY").length;
+    const activeSchools = schools.filter((s) => s.status === "ACTIVE").length;
+    const inactiveSchools = schools.filter((s) => s.status === "INACTIVE").length;
+    const totalStudents = schools.reduce((sum, s) => sum + s.studentCount, 0);
+    const totalTeachers = schools.reduce((sum, s) => sum + s.teacherCount, 0);
+
+    const [maleStudents, femaleStudents, totalGuardians, recentActivityRaw] = await Promise.all([
+      schoolIds.length > 0
+        ? this.prisma.studentEnrollment.count({
+            where: { schoolId: { in: schoolIds }, status: "ACTIVE", student: { sex: "MALE" } },
+          })
+        : Promise.resolve(0),
+      schoolIds.length > 0
+        ? this.prisma.studentEnrollment.count({
+            where: { schoolId: { in: schoolIds }, status: "ACTIVE", student: { sex: "FEMALE" } },
+          })
+        : Promise.resolve(0),
+      schoolIds.length > 0
+        ? this.prisma.guardian.count({
+            where: { students: { some: { student: { enrollments: { some: { schoolId: { in: schoolIds } } } } } } },
+          })
+        : Promise.resolve(0),
+      this.prisma.auditLog.findMany({
+        where: { organizationId: actor.organizationId },
+        orderBy: { createdAt: "desc" },
+        take: 15,
+      }),
+    ]);
+
+    const actorIds = [...new Set(recentActivityRaw.map((l) => l.actorUserId).filter((id): id is string => !!id))];
+    const users =
+      actorIds.length > 0
+        ? await this.prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, email: true } })
+        : [];
+    const emailById = new Map(users.map((u) => [u.id, u.email]));
+    const recentActivity = recentActivityRaw.map((l) => ({
+      ...l,
+      actorEmail: l.actorUserId ? (emailById.get(l.actorUserId) ?? "(deleted user)") : "(system)",
+    }));
+
+    const alerts: { severity: "warning" | "info"; message: string; schoolId: string }[] = [];
+    for (const s of schools) {
+      if (!s.hasActiveAdmin) {
+        alerts.push({ severity: "warning", message: `${s.name} has no active School Admin yet`, schoolId: s.id });
+      }
+      if (s.studentCount === 0) {
+        alerts.push({ severity: "info", message: `${s.name} has no students enrolled yet`, schoolId: s.id });
+      }
+    }
+
+    return {
+      totals: {
+        schools: schools.length,
+        primarySchools,
+        secondarySchools,
+        activeSchools,
+        inactiveSchools,
+        students: totalStudents,
+        maleStudents,
+        femaleStudents,
+        teachers: totalTeachers,
+        guardians: totalGuardians,
+        staff: totalTeachers,
+      },
+      schools,
+      recentActivity,
+      alerts,
+    };
   }
 
   async findOneAccessibleOrThrow(actor: AuthenticatedUser, id: string) {

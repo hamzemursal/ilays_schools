@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type School, type SchoolType } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -11,9 +11,9 @@ import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
-import { SkeletonTable } from "@/components/ui/Skeleton";
+import { SkeletonCards } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
-import { Building2, ChevronRight, Plus } from "lucide-react";
+import { Building2, GraduationCap, MapPin, Plus, Search, ShieldCheck, ShieldX, Users } from "lucide-react";
 
 const SCHOOL_TYPES: { value: SchoolType; label: string }[] = [
   { value: "PRIMARY", label: "Primary" },
@@ -21,11 +21,27 @@ const SCHOOL_TYPES: { value: SchoolType; label: string }[] = [
   { value: "PRIMARY_AND_SECONDARY", label: "Primary & Secondary" },
 ];
 
+// A combined PRIMARY_AND_SECONDARY school genuinely teaches both divisions
+// (SchoolsService.create gives it both Division rows), so it belongs in
+// both tabs rather than being arbitrarily assigned to just one — the point
+// of the tabs is "never show primary and secondary mixed in one list," not
+// "hide a school that offers both."
+const TABS = ["Primary Schools", "Secondary Schools"] as const;
+type Tab = (typeof TABS)[number];
+
+type StatusFilter = "ALL" | "ACTIVE" | "INACTIVE";
+type SortOption = "NAME_ASC" | "NAME_DESC" | "STUDENTS_DESC" | "STUDENTS_ASC";
+
 export default function SchoolsPage() {
   const { user, accessToken } = useAuth();
   const [schools, setSchools] = useState<School[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+
+  const [tab, setTab] = useState<Tab>("Primary Schools");
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [sort, setSort] = useState<SortOption>("NAME_ASC");
 
   const [name, setName] = useState("");
   const [type, setType] = useState<SchoolType>("PRIMARY");
@@ -64,6 +80,29 @@ export default function SchoolsPage() {
   const canCreate = user?.permissions.includes("schools.create") ?? false;
   const canView = user?.permissions.includes("schools.view") ?? false;
 
+  const filtered = useMemo(() => {
+    if (!schools) return null;
+    const wantsPrimary = tab === "Primary Schools";
+    let list = schools.filter((s) =>
+      wantsPrimary
+        ? s.type === "PRIMARY" || s.type === "PRIMARY_AND_SECONDARY"
+        : s.type === "SECONDARY" || s.type === "PRIMARY_AND_SECONDARY",
+    );
+    if (statusFilter !== "ALL") list = list.filter((s) => s.status === statusFilter);
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      list = list.filter((s) => s.name.toLowerCase().includes(q) || (s.address ?? "").toLowerCase().includes(q));
+    }
+    const sorted = [...list];
+    sorted.sort((a, b) => {
+      if (sort === "NAME_ASC") return a.name.localeCompare(b.name);
+      if (sort === "NAME_DESC") return b.name.localeCompare(a.name);
+      if (sort === "STUDENTS_DESC") return b.studentCount - a.studentCount;
+      return a.studentCount - b.studentCount;
+    });
+    return sorted;
+  }, [schools, tab, statusFilter, query, sort]);
+
   if (user && !canView) {
     return (
       <div className="p-4 sm:p-6">
@@ -91,6 +130,22 @@ export default function SchoolsPage() {
         }
       />
 
+      <div className="border-b border-border px-4 sm:px-6">
+        <div className="flex gap-1 overflow-x-auto">
+          {TABS.map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`shrink-0 border-b-2 px-3 py-3 text-sm font-medium transition-colors ${
+                tab === t ? "border-accent text-accent" : "border-transparent text-foreground-soft hover:text-foreground"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="space-y-5 p-4 sm:p-6">
         {showForm && (
           <Card>
@@ -112,7 +167,11 @@ export default function SchoolsPage() {
                 <Input value={address} onChange={(e) => setAddress(e.target.value)} />
               </FormField>
 
-              {formError && <Alert tone="danger" className="sm:col-span-2">{formError}</Alert>}
+              {formError && (
+                <Alert tone="danger" className="sm:col-span-2">
+                  {formError}
+                </Alert>
+              )}
 
               <div className="sm:col-span-2">
                 <Button type="submit" loading={submitting}>
@@ -123,27 +182,90 @@ export default function SchoolsPage() {
           </Card>
         )}
 
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-full max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-muted" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by name or location…"
+              className="pl-9"
+            />
+          </div>
+          <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} className="w-auto">
+            <option value="ALL">All statuses</option>
+            <option value="ACTIVE">Active</option>
+            <option value="INACTIVE">Inactive</option>
+          </Select>
+          <Select value={sort} onChange={(e) => setSort(e.target.value as SortOption)} className="w-auto">
+            <option value="NAME_ASC">Name (A–Z)</option>
+            <option value="NAME_DESC">Name (Z–A)</option>
+            <option value="STUDENTS_DESC">Most students</option>
+            <option value="STUDENTS_ASC">Fewest students</option>
+          </Select>
+        </div>
+
         {listError ? (
           <Alert tone="danger">{listError}</Alert>
-        ) : !schools ? (
-          <SkeletonTable rows={4} cols={3} />
-        ) : schools.length === 0 ? (
-          <EmptyState icon={Building2} title="No schools yet" description="Create your organization's first school to get started." />
+        ) : !filtered ? (
+          <SkeletonCards count={6} />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={Building2}
+            title={`No ${tab === "Primary Schools" ? "primary" : "secondary"} schools yet`}
+            description="Create one to get started, or adjust your filters."
+          />
         ) : (
-          <div className="space-y-2">
-            {schools.map((school) => (
-              <Link key={school.id} href={`/schools/${school.id}`}>
-                <Card className="flex items-center justify-between transition-colors hover:border-accent">
-                  <div>
-                    <p className="font-medium text-foreground">{school.name}</p>
-                    <p className="text-sm text-foreground-soft">{school.type.replace(/_/g, " ")}</p>
-                  </div>
-                  <div className="flex items-center gap-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {filtered.map((school) => (
+              <Card key={school.id} padding="none" className="flex flex-col">
+                <div className="flex-1 p-5">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="font-semibold text-foreground">{school.name}</p>
                     <Badge tone={school.status === "ACTIVE" ? "success" : "neutral"}>{school.status}</Badge>
-                    <ChevronRight className="size-4 text-foreground-muted" />
                   </div>
-                </Card>
-              </Link>
+                  <p className="mt-1 text-xs font-medium uppercase tracking-wide text-foreground-muted">
+                    {school.type.replace(/_/g, " ")}
+                  </p>
+                  {school.address && (
+                    <p className="mt-2 flex items-center gap-1.5 text-sm text-foreground-soft">
+                      <MapPin className="size-3.5 shrink-0" /> {school.address}
+                    </p>
+                  )}
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+                        <Users className="size-3.5 text-foreground-muted" /> {school.studentCount}
+                      </p>
+                      <p className="text-xs text-foreground-muted">Students</p>
+                    </div>
+                    <div>
+                      <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+                        <GraduationCap className="size-3.5 text-foreground-muted" /> {school.teacherCount}
+                      </p>
+                      <p className="text-xs text-foreground-muted">Teachers</p>
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    {school.hasActiveAdmin ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-success">
+                        <ShieldCheck className="size-3.5" /> Admin active
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-warning">
+                        <ShieldX className="size-3.5" /> No admin yet
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="border-t border-border p-3">
+                  <Link href={`/schools/${school.id}`}>
+                    <Button size="sm" variant="outline" className="w-full">
+                      View School
+                    </Button>
+                  </Link>
+                </div>
+              </Card>
             ))}
           </div>
         )}

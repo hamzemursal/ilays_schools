@@ -21,6 +21,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 import { SkeletonCards } from "@/components/ui/Skeleton";
+import { SuperAdminDashboard } from "@/features/dashboard/SuperAdminDashboard";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -31,6 +32,12 @@ export default function DashboardPage() {
   const isTeacher = user?.roles.includes("TEACHER") ?? false;
   const primarySchool = user?.schools[0];
   const hasSchoolDashboard = !!primarySchool && (user?.permissions.includes("academic.view") ?? false);
+  // An org-wide account (Super Admin / Organization Admin) never has a
+  // UserSchool row, so user.schools is always empty for it — the same
+  // signal the "Authorized schools" card below already uses. schools.view
+  // is the permission that actually grants the system-wide summary
+  // endpoint, so gating on both keeps this exact to "can see every school."
+  const isSystemAdmin = !!user && user.schools.length === 0 && user.permissions.includes("schools.view");
 
   useEffect(() => {
     if (!loading && !user) router.push("/login");
@@ -78,13 +85,15 @@ export default function DashboardPage() {
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
       <PageHeader
-        eyebrow="Overview"
+        eyebrow={isSystemAdmin ? "System overview" : "Overview"}
         title={`Welcome back${primarySchool ? `, ${primarySchool.name}` : ""}`}
         description={user.email}
       />
 
       <div className="mt-6 space-y-6">
-        {hasSchoolDashboard && (
+        {isSystemAdmin && <SuperAdminDashboard />}
+
+        {!isSystemAdmin && hasSchoolDashboard && (
           <section>
             {summaryError ? (
               <Alert tone="danger">{summaryError}</Alert>
@@ -114,7 +123,7 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {quickLinks.length > 0 && (
+        {!isSystemAdmin && quickLinks.length > 0 && (
           <section>
             <h2 className="mb-3 text-sm font-semibold text-foreground">Quick links</h2>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">

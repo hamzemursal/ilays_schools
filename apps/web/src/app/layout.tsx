@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ilays Schools ERP",
+  title: "Ilays Schools",
   description: "School ERP platform for Ilays Organization",
 };
 

@@ -317,29 +317,46 @@ export class SchoolsService {
   async remove(actor: AuthenticatedUser, schoolId: string) {
     const school = await this.findOneAccessibleOrThrow(actor, schoolId);
 
+    // Deliberately NOT wrapped in $transaction with the audit log write —
+    // the delete's own FK check is what needs to fail cleanly here, and
+    // keeping it a bare call (same shape as ClassesService.remove, which
+    // this mirrors) avoids any risk of an interactive transaction changing
+    // how the underlying error surfaces. The `code` check is duck-typed
+    // rather than `instanceof Prisma.PrismaClientKnownRequestError` so it
+    // still matches even if this file's Prisma import and the one that threw
+    // ever come from different resolved copies of the generated client.
     try {
-      await this.prisma.$transaction(async (tx) => {
-        await tx.school.delete({ where: { id: schoolId } });
-        await tx.auditLog.create({
-          data: {
-            organizationId: school.organizationId,
-            schoolId: school.id,
-            actorUserId: actor.id,
-            action: "school.delete",
-            resource: "School",
-            resourceId: school.id,
-            before: { name: school.name, type: school.type, address: school.address },
-          },
-        });
-      });
-      return { success: true };
+      await this.prisma.school.delete({ where: { id: schoolId } });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+      if (this.isForeignKeyViolation(error)) {
         throw new BadRequestException(
           "Cannot delete this school — it still has enrolled students or teachers on record. Remove or transfer them first, or deactivate the school instead.",
         );
       }
       throw error;
     }
+
+    await this.prisma.auditLog.create({
+      data: {
+        organizationId: school.organizationId,
+        schoolId: school.id,
+        actorUserId: actor.id,
+        action: "school.delete",
+        resource: "School",
+        resourceId: school.id,
+        before: { name: school.name, type: school.type, address: school.address },
+      },
+    });
+
+    return { success: true };
+  }
+
+  private isForeignKeyViolation(error: unknown): boolean {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "P2003"
+    );
   }
 }

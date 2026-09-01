@@ -4,7 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { GraduationCap } from "lucide-react";
 import type { Profile } from "@/lib/api";
-import { orgNavItems, parentNavItems, schoolNavItems, studentNavItems, type NavItem } from "./nav-config";
+import {
+  orgNavItems,
+  otherLoginNavItems,
+  parentNavItems,
+  schoolNavItems,
+  studentNavItems,
+  type NavItem,
+} from "./nav-config";
 
 export function useCurrentSchool(user: Profile | null) {
   const pathname = usePathname();
@@ -34,12 +41,31 @@ function NavLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void 
   );
 }
 
+// Unlike NavLink, this always opens in a new tab and never renders as
+// "active" — it's a jump to an unrelated, unauthenticated login page, not
+// in-app navigation, so the Super Admin's own session/tab is untouched.
+function NewTabNavLink({ item }: { item: NavItem }) {
+  const Icon = item.icon;
+  return (
+    <a
+      href={item.href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-foreground-soft transition-colors hover:bg-surface-hover hover:text-foreground"
+    >
+      <Icon className="size-4.5 shrink-0" />
+      <span className="truncate">{item.label}</span>
+    </a>
+  );
+}
+
 export function Sidebar({ user, onNavigate }: { user: Profile; onNavigate?: () => void }) {
   const currentSchool = useCurrentSchool(user);
   const schoolItems = currentSchool ? schoolNavItems(user, currentSchool.id) : [];
   const orgItems = orgNavItems(user);
   const parentItems = parentNavItems(user);
   const studentItems = studentNavItems(user);
+  const otherLoginItems = otherLoginNavItems(user);
 
   return (
     <div className="flex h-full flex-col bg-sidebar-bg">
@@ -98,6 +124,19 @@ export function Sidebar({ user, onNavigate }: { user: Profile; onNavigate?: () =
             <div className="space-y-0.5">
               {studentItems.map((item) => (
                 <NavLink key={item.href} item={item} onNavigate={onNavigate} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {otherLoginItems.length > 0 && (
+          <div>
+            <p className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+              Other Logins
+            </p>
+            <div className="space-y-0.5">
+              {otherLoginItems.map((item) => (
+                <NewTabNavLink key={item.href} item={item} />
               ))}
             </div>
           </div>

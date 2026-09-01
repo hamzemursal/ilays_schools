@@ -18,6 +18,7 @@ import {
   UserCircle,
   Award,
   KeyRound,
+  ShieldCheck,
 } from "lucide-react";
 import type { Profile } from "@/lib/api";
 
@@ -113,6 +114,23 @@ export function parentNavItems(user: Profile): NavItem[] {
 // Notification.guardianId is required in the schema, so there is no way for
 // one to belong to a Student yet; shipping a permanently-empty page would
 // violate "don't invent functionality just to fill the sidebar."
+// Every role's login page except /portal itself (Student/Parent are already
+// public and linked from there) — Super Admin only, since /admin/login,
+// /teacher/login, and /super-admin/login are intentionally unadvertised
+// elsewhere in the app and otherwise unreachable without the exact URL.
+// Rendered as target="_blank" links (see Sidebar), not full navigations, so
+// clicking one never ends the Super Admin's own session.
+export function otherLoginNavItems(user: Profile): NavItem[] {
+  if (!user.roles.includes("SUPER_ADMIN")) return [];
+  return [
+    { label: "Super Admin Login", href: "/super-admin/login", icon: ShieldCheck },
+    { label: "School Admin Login", href: "/admin/login", icon: Building2 },
+    { label: "Teacher Login", href: "/teacher/login", icon: BookUser },
+    { label: "Student Login", href: "/student/login", icon: GraduationCap },
+    { label: "Parent Login", href: "/parent/login", icon: Users },
+  ];
+}
+
 export function studentNavItems(user: Profile): NavItem[] {
   if (!user.roles.includes("STUDENT")) return [];
   return [

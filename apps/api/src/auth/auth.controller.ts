@@ -12,6 +12,22 @@ import type { AuthenticatedUser } from "./types/authenticated-user";
 const REFRESH_COOKIE = "refresh_token";
 const REFRESH_COOKIE_PATH = "/api/v1/auth";
 
+// The web app (Vercel) and this API (Render) are on different registrable
+// domains, so every refresh-cookie request is genuinely cross-site — a
+// "SameSite=Lax" cookie is never sent on those (only on top-level
+// navigations), which silently broke session restore on any full page
+// reload. "None" is required to have it sent at all, and the Secure flag
+// is mandatory the moment SameSite is "None" — browsers drop the cookie
+// outright otherwise. Local dev keeps Lax/non-Secure since localhost:3010
+// -> localhost:4000 is same-site and plain HTTP.
+const isCrossSiteDeployment = process.env.NODE_ENV === "production";
+const REFRESH_COOKIE_OPTIONS = {
+  path: REFRESH_COOKIE_PATH,
+  httpOnly: true,
+  secure: isCrossSiteDeployment,
+  sameSite: (isCrossSiteDeployment ? "none" : "lax") as "none" | "lax",
+};
+
 @Controller("auth")
 export class AuthController {
   constructor(
@@ -43,7 +59,9 @@ export class AuthController {
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const raw = req.cookies?.[REFRESH_COOKIE];
     if (raw) await this.auth.logout(raw);
-    res.clearCookie(REFRESH_COOKIE, { path: REFRESH_COOKIE_PATH });
+    // clearCookie must be called with the same SameSite/Secure attributes
+    // the cookie was actually set with, or some browsers silently keep it.
+    res.clearCookie(REFRESH_COOKIE, REFRESH_COOKIE_OPTIONS);
     return { success: true };
   }
 
@@ -85,10 +103,7 @@ export class AuthController {
 
   private setRefreshCookie(res: Response, tokens: TokenPair) {
     res.cookie(REFRESH_COOKIE, tokens.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: REFRESH_COOKIE_PATH,
+      ...REFRESH_COOKIE_OPTIONS,
       expires: tokens.refreshTokenExpiresAt,
     });
   }

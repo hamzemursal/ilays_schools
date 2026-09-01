@@ -184,7 +184,7 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
                 <button
                   onClick={async () => {
                     await logout();
-                    router.push("/login");
+                    router.push("/portal");
                   }}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-foreground-soft hover:bg-surface-hover hover:text-foreground"
                 >

@@ -42,7 +42,7 @@ export default function DashboardPage() {
   const isStudent = user?.roles.includes("STUDENT") ?? false;
 
   useEffect(() => {
-    if (!loading && !user) router.push("/login");
+    if (!loading && !user) router.push("/portal");
   }, [loading, user, router]);
 
   // A Student Portal account has its own dedicated dashboard, distinct from

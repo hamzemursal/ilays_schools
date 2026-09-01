@@ -328,6 +328,19 @@ export class SchoolsService {
     try {
       await this.prisma.school.delete({ where: { id: schoolId } });
     } catch (error) {
+      // TEMPORARY diagnostic — production was returning a raw 500 here with
+      // nothing useful in the logs, so this pins down exactly what's being
+      // thrown before deciding how to handle it. Remove once confirmed.
+      // eslint-disable-next-line no-console
+      console.error(
+        "SCHOOL_DELETE_DEBUG",
+        JSON.stringify({
+          name: (error as { name?: string })?.name,
+          code: (error as { code?: string })?.code,
+          message: (error as { message?: string })?.message,
+          stack: (error as { stack?: string })?.stack,
+        }),
+      );
       if (this.isForeignKeyViolation(error)) {
         throw new BadRequestException(
           "Cannot delete this school — it still has enrolled students or teachers on record. Remove or transfer them first, or deactivate the school instead.",

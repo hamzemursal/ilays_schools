@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeftRight, BookOpen, Cake, Pencil, Plus, Trash2, User } from "lucide-react";
+import { ArrowLeftRight, BookOpen, Cake, KeyRound, Pencil, Plus, Trash2, User } from "lucide-react";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type ClassSubjectRecord, type GuardianRecord, type SectionTeacherAssignment, type StudentDetail } from "@/lib/api";
 import { studentsApi } from "../api";
@@ -251,6 +251,10 @@ export function StudentProfile({ studentId }: { studentId: string }) {
         </div>
       </Card>
 
+      {canUpdate && !student.userId && accessToken && (
+        <PortalAccountCard accessToken={accessToken} studentId={student.id} />
+      )}
+
       {canTransfer && activeEnrollment && accessToken && (
         <TransferRequestCard accessToken={accessToken} studentId={student.id} fromSchoolName={activeEnrollment.school.name} />
       )}
@@ -324,6 +328,63 @@ function SubjectsAndTeachersCard({
               );
             })}
           </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// Student Portal accounts are only available for SECONDARY students — the
+// backend re-verifies this from the student's actual current division on
+// every request (see StudentPortalService.getSelfOrThrow), not just here.
+// A PRIMARY student's admin will see the backend's own rejection message if
+// they try, which is clearer than guessing the division client-side and
+// hiding the button — the button is offered whenever there's simply no
+// account yet, and the server is the one source of truth on eligibility.
+function PortalAccountCard({ accessToken, studentId }: { accessToken: string; studentId: string }) {
+  const { show } = useToast();
+  const [result, setResult] = useState<{ loginId: string; temporaryPassword: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  async function onCreate() {
+    setError(null);
+    setCreating(true);
+    try {
+      const account = await studentsApi.createPortalAccount(accessToken, studentId);
+      setResult(account);
+      show("Student Portal account created.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to create portal account");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <Card padding="none">
+      <CardHeader title="Student Portal account" description="Give this student their own login to the Student Portal." />
+      <div className="p-5">
+        {result ? (
+          <Alert tone="success">
+            <p className="font-medium">Account created — share these with the student now.</p>
+            <div className="mt-2 space-y-1 font-mono text-sm">
+              <p>Login ID: {result.loginId}</p>
+              <p>Temporary password: {result.temporaryPassword}</p>
+            </div>
+            <p className="mt-2 text-foreground-soft">
+              This password won&apos;t be shown again. The student will be asked to set their own on first login.
+            </p>
+          </Alert>
+        ) : (
+          <Button size="sm" icon={<KeyRound className="size-4" />} loading={creating} onClick={onCreate}>
+            Create Student Login
+          </Button>
+        )}
+        {error && (
+          <Alert tone="danger" className="mt-3">
+            {error}
+          </Alert>
         )}
       </div>
     </Card>

@@ -520,6 +520,7 @@ export interface StudentEnrollmentRecord {
 export interface StudentDetail {
   id: string;
   organizationId: string;
+  userId: string | null;
   firstName: string;
   lastName: string;
   dateOfBirth: string;
@@ -1029,6 +1030,11 @@ export const api = {
     request<{ success: boolean }>(`/students/${studentId}`, { method: "DELETE", accessToken }),
   addGuardian: (accessToken: string, studentId: string, body: GuardianInput) =>
     request<GuardianRecord>(`/students/${studentId}/guardians`, { method: "POST", body, accessToken }),
+  createStudentPortalAccount: (accessToken: string, studentId: string) =>
+    request<{ loginId: string; temporaryPassword: string }>(`/students/${studentId}/portal-account`, {
+      method: "POST",
+      accessToken,
+    }),
   searchGuardians: (accessToken: string, schoolId: string, search: string) =>
     request<GuardianSearchResult[]>(
       `/schools/${schoolId}/guardians?search=${encodeURIComponent(search)}`,

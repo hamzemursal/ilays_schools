@@ -16,6 +16,8 @@ import {
   Megaphone,
   Bell,
   UserCircle,
+  Award,
+  KeyRound,
 } from "lucide-react";
 import type { Profile } from "@/lib/api";
 
@@ -100,5 +102,27 @@ export function parentNavItems(user: Profile): NavItem[] {
     { label: "Announcements", href: "/parent/announcements", icon: Megaphone },
     { label: "Notifications", href: "/parent/notifications", icon: Bell },
     { label: "Profile", href: "/parent/profile", icon: UserCircle },
+  ];
+}
+
+// The Student Portal, gated purely on the STUDENT role — same pattern as
+// parentNavItems. Deliberately no child-switcher equivalent: a student is
+// always exactly themselves, never a chooser of who to view (see
+// StudentPortalService, which resolves everything from the actor's own
+// userId, never a route param). Notifications is intentionally absent —
+// Notification.guardianId is required in the schema, so there is no way for
+// one to belong to a Student yet; shipping a permanently-empty page would
+// violate "don't invent functionality just to fill the sidebar."
+export function studentNavItems(user: Profile): NavItem[] {
+  if (!user.roles.includes("STUDENT")) return [];
+  return [
+    { label: "Dashboard", href: "/student", icon: LayoutDashboard },
+    { label: "My Profile", href: "/student/profile", icon: UserCircle },
+    { label: "Academics", href: "/student/academics", icon: GraduationCap },
+    { label: "Attendance", href: "/student/attendance", icon: ClipboardCheck },
+    { label: "Results", href: "/student/results", icon: Award },
+    { label: "Fees", href: "/student/fees", icon: Wallet },
+    { label: "Announcements", href: "/student/announcements", icon: Megaphone },
+    { label: "Change Password", href: "/student/change-password", icon: KeyRound },
   ];
 }

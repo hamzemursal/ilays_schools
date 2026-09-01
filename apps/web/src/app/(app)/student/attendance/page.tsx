@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type MyChildAcademicYear, type MyChildAttendance, type MyChildSubject } from "@/lib/api";
-import { useSelectedChild } from "@/features/parent-portal/SelectedChildContext";
+import { api, type MyChildAcademicYear, type MyChildAttendance } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -12,17 +11,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { StatCard } from "@/components/ui/StatCard";
 import { Select } from "@/components/ui/FormControls";
-import {
-  BookUser,
-  CalendarCheck,
-  CalendarDays,
-  CalendarX,
-  ClipboardCheck,
-  Clock,
-  Percent,
-  ShieldCheck,
-  Users,
-} from "lucide-react";
+import { CalendarCheck, CalendarDays, CalendarX, ClipboardCheck, Clock, Percent, ShieldCheck } from "lucide-react";
 
 const STATUS_TONE: Record<string, "success" | "danger" | "warning" | "neutral"> = {
   PRESENT: "success",
@@ -31,58 +20,39 @@ const STATUS_TONE: Record<string, "success" | "danger" | "warning" | "neutral"> 
   EXCUSED: "neutral",
 };
 
-export default function ParentAttendancePage() {
+export default function StudentAttendancePage() {
   const { accessToken } = useAuth();
-  const { selectedChild, loading: childrenLoading, children } = useSelectedChild();
 
   return (
     <div>
-      <PageHeader eyebrow="Parent Portal" title="Attendance" description="Daily attendance record, by academic year." />
+      <PageHeader eyebrow="Student Portal" title="Attendance" description="Your daily attendance record, by academic year." />
 
       <div className="space-y-5 p-4 sm:p-6">
-        {childrenLoading ? (
-          <SkeletonCards count={3} />
-        ) : children.length === 0 ? (
-          <EmptyState icon={Users} title="No children linked yet" />
-        ) : !selectedChild || !accessToken ? (
-          <EmptyState icon={Users} title="Select a child above" />
-        ) : (
-          <YearPicker key={selectedChild.studentId} accessToken={accessToken} studentId={selectedChild.studentId} />
-        )}
+        {!accessToken ? <SkeletonCards count={3} /> : <YearPicker accessToken={accessToken} />}
       </div>
     </div>
   );
 }
 
-// Loads the list of academic years this student has ever been enrolled in,
-// then hands the chosen one down — attendance and subjects are always
-// fetched together, scoped to the same year, so the two sections on the
-// page can never show data from two different years at once.
-function YearPicker({ accessToken, studentId }: { accessToken: string; studentId: string }) {
+function YearPicker({ accessToken }: { accessToken: string }) {
   const [years, setYears] = useState<MyChildAcademicYear[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedYearId, setSelectedYearId] = useState<string | null>(null);
 
   useEffect(() => {
     api
-      .getMyChildAcademicYears(accessToken, studentId)
+      .getMyStudentAcademicYears(accessToken)
       .then((list) => {
         setYears(list);
         setSelectedYearId(list.find((y) => y.isCurrent)?.id ?? list[0]?.id ?? null);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load academic years"));
-  }, [accessToken, studentId]);
+  }, [accessToken]);
 
   if (error) return <Alert tone="danger">{error}</Alert>;
   if (!years) return <SkeletonCards count={3} />;
   if (years.length === 0) {
-    return (
-      <EmptyState
-        icon={CalendarDays}
-        title="No academic year on record"
-        description="This student doesn't have any enrollment history yet."
-      />
-    );
+    return <EmptyState icon={CalendarDays} title="No academic year on record" />;
   }
 
   return (
@@ -109,44 +79,25 @@ function YearPicker({ accessToken, studentId }: { accessToken: string; studentId
       </Card>
 
       {selectedYearId && (
-        <YearAttendance
-          key={selectedYearId}
-          accessToken={accessToken}
-          studentId={studentId}
-          academicYearId={selectedYearId}
-        />
+        <YearAttendance key={selectedYearId} accessToken={accessToken} academicYearId={selectedYearId} />
       )}
     </>
   );
 }
 
-function YearAttendance({
-  accessToken,
-  studentId,
-  academicYearId,
-}: {
-  accessToken: string;
-  studentId: string;
-  academicYearId: string;
-}) {
+function YearAttendance({ accessToken, academicYearId }: { accessToken: string; academicYearId: string }) {
   const [attendance, setAttendance] = useState<MyChildAttendance | null>(null);
-  const [subjects, setSubjects] = useState<MyChildSubject[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      api.getMyChildAttendance(accessToken, studentId, academicYearId),
-      api.getMyChildSubjects(accessToken, studentId, academicYearId),
-    ])
-      .then(([att, subs]) => {
-        setAttendance(att);
-        setSubjects(subs);
-      })
+    api
+      .getMyStudentAttendance(accessToken, academicYearId)
+      .then(setAttendance)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load attendance"));
-  }, [accessToken, studentId, academicYearId]);
+  }, [accessToken, academicYearId]);
 
   if (error) return <Alert tone="danger">{error}</Alert>;
-  if (!attendance || !subjects) return <SkeletonCards count={3} />;
+  if (!attendance) return <SkeletonCards count={3} />;
 
   const { summary, records } = attendance;
 
@@ -155,7 +106,7 @@ function YearAttendance({
       <Card>
         <EmptyState
           icon={ClipboardCheck}
-          title="No attendance records found for this year"
+          title="No attendance records found for this academic year"
           description="Nothing has been marked for this academic year yet."
         />
       </Card>
@@ -165,7 +116,7 @@ function YearAttendance({
   return (
     <>
       <Alert tone="info">
-        This is the student&apos;s overall daily attendance — one record per school day, not broken down by subject.
+        This is your overall daily attendance — one record per school day. It is not currently separated by subject.
       </Alert>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -181,27 +132,6 @@ function YearAttendance({
         <StatCard icon={ShieldCheck} label="Excused" value={summary.excused} tone="neutral" />
         <StatCard icon={CalendarDays} label="Total days" value={summary.total} tone="neutral" />
       </div>
-
-      <Card padding="none">
-        <CardHeader title="Subjects & teachers" description="This year's subjects and their assigned teacher." />
-        <div className="p-5">
-          {subjects.length === 0 ? (
-            <EmptyState icon={BookUser} title="No subjects on record for this year" />
-          ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {subjects.map((s) => (
-                <div key={s.subjectId} className="rounded-lg border border-border p-3.5">
-                  <p className="font-medium text-foreground">{s.name}</p>
-                  <p className="mt-1 flex items-center gap-1.5 text-sm text-foreground-soft">
-                    <BookUser className="size-3.5 shrink-0 text-foreground-muted" />
-                    {s.teacher ? `${s.teacher.firstName} ${s.teacher.lastName}` : "No teacher assigned yet"}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </Card>
 
       <Card padding="none">
         <CardHeader title="Daily attendance" description={`${records.length} day(s) recorded this year.`} />

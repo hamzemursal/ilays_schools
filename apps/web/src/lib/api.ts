@@ -137,6 +137,8 @@ export interface Profile {
   schools: { id: string; name: string }[];
   teacherId: string | null;
   guardianId: string | null;
+  studentId: string | null;
+  mustChangePassword: boolean;
 }
 
 export type SchoolType = "PRIMARY" | "SECONDARY" | "PRIMARY_AND_SECONDARY";
@@ -399,6 +401,13 @@ export interface MyChildProfile {
   enrollments: StudentEnrollmentRecord[];
 }
 
+export interface MyChildAcademicYear {
+  id: string;
+  name: string;
+  isCurrent: boolean;
+  hasAttendance: boolean;
+}
+
 export interface MyChildSubject {
   subjectId: string;
   name: string;
@@ -440,6 +449,25 @@ export interface MyChildInvoice {
   status: InvoiceStatus;
   dueDate: string | null;
   payments: { id: string; amount: number; method: PaymentMethod; paidAt: string; reference: string | null }[];
+}
+
+export interface MyStudentProfile {
+  id: string;
+  firstName: string;
+  lastName: string;
+  dateOfBirth: string;
+  sex: Sex;
+  currentStatus: StudentStatus;
+  loginId: string;
+  enrollment: {
+    status: EnrollmentStatus;
+    schoolName: string;
+    academicYearId: string;
+    academicYearName: string;
+    className: string;
+    sectionName: string;
+    rollNumber: number;
+  };
 }
 
 export type AnnouncementAudience = "ALL" | "PARENTS" | "TEACHERS";
@@ -1050,10 +1078,14 @@ export const api = {
   listMyChildren: (accessToken: string) => request<MyChild[]>(`/guardians/me/children`, { accessToken }),
   getMyChild: (accessToken: string, studentId: string) =>
     request<MyChildProfile>(`/guardians/me/children/${studentId}`, { accessToken }),
-  getMyChildSubjects: (accessToken: string, studentId: string) =>
-    request<MyChildSubject[]>(`/guardians/me/children/${studentId}/subjects`, { accessToken }),
-  getMyChildAttendance: (accessToken: string, studentId: string) =>
-    request<MyChildAttendance>(`/guardians/me/children/${studentId}/attendance`, { accessToken }),
+  getMyChildAcademicYears: (accessToken: string, studentId: string) =>
+    request<MyChildAcademicYear[]>(`/guardians/me/children/${studentId}/academic-years`, { accessToken }),
+  getMyChildSubjects: (accessToken: string, studentId: string, academicYearId?: string) =>
+    request<MyChildSubject[]>(`/guardians/me/children/${studentId}/subjects${qs({ academicYearId })}`, { accessToken }),
+  getMyChildAttendance: (accessToken: string, studentId: string, academicYearId?: string) =>
+    request<MyChildAttendance>(`/guardians/me/children/${studentId}/attendance${qs({ academicYearId })}`, {
+      accessToken,
+    }),
   getMyChildResults: (accessToken: string, studentId: string) =>
     request<MyChildResult[]>(`/guardians/me/children/${studentId}/exams`, { accessToken }),
   getMyChildInvoices: (accessToken: string, studentId: string) =>
@@ -1066,6 +1098,28 @@ export const api = {
   markNotificationRead: (accessToken: string, notificationId: string) =>
     request<NotificationItem>(`/guardians/me/notifications/${notificationId}/read`, {
       method: "PATCH",
+      accessToken,
+    }),
+
+  // Student Portal — self-service, scoped to the authenticated student's own
+  // linked Student record (see StudentPortalService on the backend). None of
+  // these take a studentId: there is nothing for a student to tamper with.
+  getMyStudentProfile: (accessToken: string) => request<MyStudentProfile>(`/students/me`, { accessToken }),
+  getMyStudentAcademicYears: (accessToken: string) =>
+    request<MyChildAcademicYear[]>(`/students/me/academic-years`, { accessToken }),
+  getMyStudentSubjects: (accessToken: string, academicYearId?: string) =>
+    request<MyChildSubject[]>(`/students/me/subjects${qs({ academicYearId })}`, { accessToken }),
+  getMyStudentAttendance: (accessToken: string, academicYearId?: string) =>
+    request<MyChildAttendance>(`/students/me/attendance${qs({ academicYearId })}`, { accessToken }),
+  getMyStudentResults: (accessToken: string) => request<MyChildResult[]>(`/students/me/results`, { accessToken }),
+  getMyStudentInvoices: (accessToken: string) => request<MyChildInvoice[]>(`/students/me/invoices`, { accessToken }),
+  getMyStudentAnnouncements: (accessToken: string) =>
+    request<Announcement[]>(`/students/me/announcements`, { accessToken }),
+
+  changeMyPassword: (accessToken: string, currentPassword: string, newPassword: string) =>
+    request<{ success: boolean }>(`/auth/change-password`, {
+      method: "POST",
+      body: { currentPassword, newPassword },
       accessToken,
     }),
 

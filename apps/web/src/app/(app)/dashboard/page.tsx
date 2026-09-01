@@ -39,9 +39,19 @@ export default function DashboardPage() {
   // endpoint, so gating on both keeps this exact to "can see every school."
   const isSystemAdmin = !!user && user.schools.length === 0 && user.permissions.includes("schools.view");
 
+  const isStudent = user?.roles.includes("STUDENT") ?? false;
+
   useEffect(() => {
     if (!loading && !user) router.push("/login");
   }, [loading, user, router]);
+
+  // A Student Portal account has its own dedicated dashboard, distinct from
+  // every other role here — never the generic per-school summary or org
+  // overview, both of which would otherwise show its synthetic login email
+  // and no student-relevant content at all.
+  useEffect(() => {
+    if (isStudent) router.replace("/student");
+  }, [isStudent, router]);
 
   useEffect(() => {
     if (!accessToken || !primarySchool || !hasSchoolDashboard) return;
@@ -51,7 +61,7 @@ export default function DashboardPage() {
       .catch((err) => setSummaryError(err instanceof ApiError ? err.message : "Failed to load summary"));
   }, [accessToken, primarySchool, hasSchoolDashboard]);
 
-  if (loading || !user) return null;
+  if (loading || !user || isStudent) return null;
 
   const quickLinks = [
     primarySchool &&

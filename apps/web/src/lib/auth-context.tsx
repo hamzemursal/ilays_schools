@@ -10,6 +10,7 @@ interface AuthState {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   acceptInvite: (token: string, password: string) => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -119,8 +120,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
+  // Re-fetches /auth/me against the current token — used after a password
+  // change clears mustChangePassword, so the forced gate in AppShell lifts
+  // without needing a full logout/login round trip.
+  const refreshProfile = useCallback(async () => {
+    if (!accessToken) return;
+    await loadProfile(accessToken);
+  }, [accessToken, loadProfile]);
+
   return (
-    <AuthContext.Provider value={{ user, accessToken, loading, login, logout, acceptInvite }}>
+    <AuthContext.Provider value={{ user, accessToken, loading, login, logout, acceptInvite, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

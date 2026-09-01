@@ -81,11 +81,55 @@ export class GuardianPortalService {
     return student;
   }
 
-  async myChildSubjects(actor: AuthenticatedUser, studentId: string) {
+  // Every academic year the student has actually been enrolled in — the
+  // year selector's options on the parent portal's Attendance page. Flagging
+  // hasAttendance up front means the frontend never has to guess which
+  // historical years are worth offering versus ones with an enrollment but
+  // no marked days yet.
+  async myChildAcademicYears(actor: AuthenticatedUser, studentId: string) {
+    await this.guardians.assertGuardianCanAccessStudent(actor, studentId);
+
+    const enrollments = await this.prisma.studentEnrollment.findMany({
+      where: { studentId },
+      include: { academicYear: true },
+      orderBy: { academicYear: { startDate: "desc" } },
+    });
+
+    const seen = new Set<string>();
+    const years = enrollments.filter((e) => {
+      if (seen.has(e.academicYearId)) return false;
+      seen.add(e.academicYearId);
+      return true;
+    });
+
+    const attendanceCounts = await this.prisma.attendance.groupBy({
+      by: ["enrollmentId"],
+      where: { enrollment: { studentId } },
+      _count: true,
+    });
+    const enrollmentIdsWithAttendance = new Set(attendanceCounts.map((c) => c.enrollmentId));
+    const enrollmentIdsByYear = new Map<string, string[]>();
+    for (const e of enrollments) {
+      const list = enrollmentIdsByYear.get(e.academicYearId) ?? [];
+      list.push(e.id);
+      enrollmentIdsByYear.set(e.academicYearId, list);
+    }
+
+    return years.map((e) => ({
+      id: e.academicYearId,
+      name: e.academicYear.name,
+      isCurrent: e.academicYear.isCurrent,
+      hasAttendance: (enrollmentIdsByYear.get(e.academicYearId) ?? []).some((id) =>
+        enrollmentIdsWithAttendance.has(id),
+      ),
+    }));
+  }
+
+  async myChildSubjects(actor: AuthenticatedUser, studentId: string, academicYearId?: string) {
     await this.guardians.assertGuardianCanAccessStudent(actor, studentId);
 
     const enrollment = await this.prisma.studentEnrollment.findFirst({
-      where: { studentId, status: "ACTIVE" },
+      where: academicYearId ? { studentId, academicYearId } : { studentId, status: "ACTIVE" },
       orderBy: { startDate: "desc" },
     });
     if (!enrollment) return [];
@@ -111,11 +155,16 @@ export class GuardianPortalService {
     });
   }
 
-  async myChildAttendance(actor: AuthenticatedUser, studentId: string) {
+  // This is the student's whole-day attendance — one PRESENT/ABSENT/LATE/
+  // EXCUSED mark per enrollment per day (see Attendance in schema.prisma),
+  // never per subject. There's no timetable/period model in this system, so
+  // there is no real per-subject attendance to report; the portal UI must
+  // present this as a daily total, not silently imply it's subject-specific.
+  async myChildAttendance(actor: AuthenticatedUser, studentId: string, academicYearId?: string) {
     await this.guardians.assertGuardianCanAccessStudent(actor, studentId);
 
     const records = await this.prisma.attendance.findMany({
-      where: { enrollment: { studentId } },
+      where: { enrollment: { studentId, ...(academicYearId ? { academicYearId } : {}) } },
       include: { enrollment: { include: { academicYear: true, class: true, section: true } } },
       orderBy: { date: "desc" },
     });

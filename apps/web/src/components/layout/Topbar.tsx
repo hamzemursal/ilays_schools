@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, LogOut, Menu, Search, X } from "lucide-react";
+import Link from "next/link";
+import { Bell, KeyRound, LogOut, Menu, Search, UserCircle, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { Avatar } from "@/components/ui/Avatar";
 import { useCurrentSchool } from "./Sidebar";
@@ -159,6 +160,27 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
                   <p className="mt-0.5 text-xs text-foreground-muted">{user.roles.join(", ") || "No role"}</p>
                 </div>
                 <div className="my-1 h-px bg-border" />
+                {user.roles.includes("STUDENT") && (
+                  <>
+                    <Link
+                      href="/student/profile"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-foreground-soft hover:bg-surface-hover hover:text-foreground"
+                    >
+                      <UserCircle className="size-4" />
+                      My Profile
+                    </Link>
+                    <Link
+                      href="/student/change-password"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-foreground-soft hover:bg-surface-hover hover:text-foreground"
+                    >
+                      <KeyRound className="size-4" />
+                      Change Password
+                    </Link>
+                    <div className="my-1 h-px bg-border" />
+                  </>
+                )}
                 <button
                   onClick={async () => {
                     await logout();

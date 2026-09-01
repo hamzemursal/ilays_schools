@@ -1,5 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@school-erp/database";
+import { randomBytes } from "node:crypto";
+import * as argon2 from "argon2";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import { GuardiansService } from "../guardians/guardians.service";
@@ -419,5 +421,73 @@ export class StudentsService {
       _max: { rollNumber: true },
     });
     return (result._max.rollNumber ?? 0) + 1;
+  }
+
+  // Student Portal accounts exist only for SECONDARY students — never
+  // PRIMARY, per product decision. The school's own School.type isn't
+  // enough to decide this: a PRIMARY_AND_SECONDARY school has both
+  // Divisions at once, so the only real per-student signal is which
+  // Division the student's *current* class actually belongs to. This is
+  // the single gate every path to a Student login must go through.
+  async createPortalAccount(actor: AuthenticatedUser, studentId: string) {
+    const student = await this.assertAccessibleStudent(actor, studentId);
+    if (student.userId) {
+      throw new ConflictException("This student already has a portal account");
+    }
+
+    const enrollment = await this.prisma.studentEnrollment.findFirst({
+      where: { studentId, status: "ACTIVE" },
+      include: { class: { include: { division: true } }, school: true },
+      orderBy: { startDate: "desc" },
+    });
+    if (!enrollment) {
+      throw new BadRequestException("This student has no active enrollment — cannot determine their division");
+    }
+    if (enrollment.class.division.type !== "SECONDARY") {
+      throw new BadRequestException(
+        "Student Portal accounts are only available for secondary students. This student is currently enrolled in a primary division.",
+      );
+    }
+
+    // Never a real inbox — students aren't required to have an email. The
+    // studentNumber (e.g. "STU-2027-00003") is unique for this school's
+    // whole history (see generateStudentNumber), so qualifying it with the
+    // schoolId is enough to guarantee it's globally unique across schools.
+    const loginEmail = `${enrollment.studentNumber.toLowerCase()}@${enrollment.schoolId}.student.ilays.local`;
+    const temporaryPassword = randomBytes(9).toString("base64url");
+    const passwordHash = await argon2.hash(temporaryPassword, { type: argon2.argon2id });
+
+    const role = await this.prisma.role.findUniqueOrThrow({ where: { name: "STUDENT" } });
+
+    await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email: loginEmail,
+          organizationId: student.organizationId,
+          status: "ACTIVE",
+          passwordHash,
+          mustChangePassword: true,
+        },
+      });
+
+      await tx.student.update({ where: { id: studentId }, data: { userId: user.id } });
+
+      await tx.userRole.create({ data: { userId: user.id, roleId: role.id } });
+      await tx.userSchool.create({ data: { userId: user.id, schoolId: enrollment.schoolId } });
+
+      await tx.auditLog.create({
+        data: {
+          organizationId: student.organizationId,
+          schoolId: enrollment.schoolId,
+          actorUserId: actor.id,
+          action: "student.portal_account.create",
+          resource: "Student",
+          resourceId: studentId,
+          after: { loginId: enrollment.studentNumber },
+        },
+      });
+    });
+
+    return { loginId: enrollment.studentNumber, temporaryPassword };
   }
 }

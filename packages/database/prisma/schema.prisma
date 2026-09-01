@@ -210,6 +210,11 @@ model Student {
   id             String       @id @default(uuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  // Only ever set for a student currently enrolled in a SECONDARY division
+  // (see StudentsService.createPortalAccount) — the Student Portal login.
+  // Mirrors Guardian.userId/Teacher.userId exactly.
+  userId         String?      @unique
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   firstName           String
   lastName            String
@@ -764,6 +769,12 @@ model User {
   email        String     @unique
   passwordHash String?
   status       UserStatus @default(PENDING_SETUP)
+  // Set on any account whose password was assigned by an admin rather than
+  // chosen by the account holder (currently: Student Portal accounts only,
+  // see StudentsService.createPortalAccount). Login still succeeds — this
+  // only signals the frontend to gate everything else behind a password
+  // change until AuthService.changeMyPassword clears it.
+  mustChangePassword Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -774,6 +785,7 @@ model User {
   invitations   Invitation[]
   guardian      Guardian?
   teacher       Teacher?
+  student       Student?
 
   @@map("users")
 }

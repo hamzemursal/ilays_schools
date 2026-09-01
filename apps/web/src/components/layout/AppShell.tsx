@@ -6,6 +6,8 @@ import { X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { SelectedChildProvider } from "@/features/parent-portal/SelectedChildContext";
 import { ChildSwitcher } from "@/features/parent-portal/ChildSwitcher";
+import { ChangePasswordForm } from "@/features/auth/ChangePasswordForm";
+import { GraduationCap } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
@@ -22,6 +24,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="size-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+      </div>
+    );
+  }
+
+  // A temporary-password account (currently only Student Portal accounts,
+  // see StudentsService.createPortalAccount) can't reach anything else until
+  // this clears — blocks the whole shell, not just one route, since the
+  // backend never assumes the frontend enforced this either.
+  if (user.mustChangePassword) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-surface px-4">
+        <div className="w-full max-w-sm rounded-xl border border-border bg-background p-6 shadow-sm">
+          <div className="mb-5 flex items-center gap-2.5">
+            <div className="flex size-9 items-center justify-center rounded-lg bg-accent text-white">
+              <GraduationCap className="size-4.5" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">Set your password</p>
+              <p className="text-xs text-foreground-muted">One-time step before you continue</p>
+            </div>
+          </div>
+          <ChangePasswordForm forced />
+        </div>
       </div>
     );
   }

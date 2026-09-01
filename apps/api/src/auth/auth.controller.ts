@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { AuthService, TokenPair } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
 import { AcceptInviteDto } from "./dto/accept-invite.dto";
+import { ChangePasswordDto } from "./dto/change-password.dto";
 import { Public } from "./decorators/public.decorator";
 import { CurrentUser } from "./decorators/current-user.decorator";
 import { PrismaService } from "../prisma/prisma.service";
@@ -56,15 +57,30 @@ export class AuthController {
 
   @Get("me")
   async me(@CurrentUser() user: AuthenticatedUser) {
-    const [schools, teacher, guardian] = await Promise.all([
+    const [schools, teacher, guardian, student, self] = await Promise.all([
       this.prisma.school.findMany({
         where: { id: { in: user.schoolIds } },
         select: { id: true, name: true },
       }),
       this.prisma.teacher.findFirst({ where: { userId: user.id }, select: { id: true } }),
       this.prisma.guardian.findFirst({ where: { userId: user.id }, select: { id: true } }),
+      this.prisma.student.findFirst({ where: { userId: user.id }, select: { id: true } }),
+      this.prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { mustChangePassword: true } }),
     ]);
-    return { ...user, schools, teacherId: teacher?.id ?? null, guardianId: guardian?.id ?? null };
+    return {
+      ...user,
+      schools,
+      teacherId: teacher?.id ?? null,
+      guardianId: guardian?.id ?? null,
+      studentId: student?.id ?? null,
+      mustChangePassword: self.mustChangePassword,
+    };
+  }
+
+  @Post("change-password")
+  async changePassword(@CurrentUser() user: AuthenticatedUser, @Body() dto: ChangePasswordDto) {
+    await this.auth.changeMyPassword(user.id, dto.currentPassword, dto.newPassword);
+    return { success: true };
   }
 
   private setRefreshCookie(res: Response, tokens: TokenPair) {

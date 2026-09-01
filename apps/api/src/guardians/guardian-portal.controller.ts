@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Patch } from "@nestjs/common";
+import { Controller, Get, Param, Patch, Query } from "@nestjs/common";
 import { GuardianPortalService } from "./guardian-portal.service";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
@@ -28,14 +28,27 @@ export class GuardianPortalController {
     return this.portal.myChild(user, studentId);
   }
 
+  @Get("children/:studentId/academic-years")
+  childAcademicYears(@CurrentUser() user: AuthenticatedUser, @Param("studentId") studentId: string) {
+    return this.portal.myChildAcademicYears(user, studentId);
+  }
+
   @Get("children/:studentId/subjects")
-  childSubjects(@CurrentUser() user: AuthenticatedUser, @Param("studentId") studentId: string) {
-    return this.portal.myChildSubjects(user, studentId);
+  childSubjects(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("studentId") studentId: string,
+    @Query("academicYearId") academicYearId?: string,
+  ) {
+    return this.portal.myChildSubjects(user, studentId, academicYearId);
   }
 
   @Get("children/:studentId/attendance")
-  childAttendance(@CurrentUser() user: AuthenticatedUser, @Param("studentId") studentId: string) {
-    return this.portal.myChildAttendance(user, studentId);
+  childAttendance(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("studentId") studentId: string,
+    @Query("academicYearId") academicYearId?: string,
+  ) {
+    return this.portal.myChildAttendance(user, studentId, academicYearId);
   }
 
   @Get("children/:studentId/exams")

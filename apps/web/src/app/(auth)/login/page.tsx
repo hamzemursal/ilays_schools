@@ -42,15 +42,15 @@ export default function LoginPage() {
 
       <form onSubmit={onSubmit} className="rounded-xl border border-border bg-background p-6 shadow-sm">
         <div className="space-y-4">
-          <FormField label="Email" htmlFor="email" required>
+          <FormField label="Email or Student ID" htmlFor="email" required>
             <Input
               id="email"
-              type="email"
+              type="text"
               required
               autoFocus
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="adminlogin"
+              placeholder="you@school.com or STU-2027-00003"
             />
           </FormField>
 

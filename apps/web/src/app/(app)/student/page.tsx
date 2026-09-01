@@ -104,10 +104,10 @@ export default function StudentDashboardPage() {
         ) : attendance.summary.total === 0 ? (
           <Alert tone="info">No attendance has been recorded yet this academic year.</Alert>
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <StatCard
               icon={Percent}
-              label="Rate"
+              label="Attendance Rate"
               value={attendance.summary.percentage !== null ? `${attendance.summary.percentage}%` : "—"}
               tone={
                 attendance.summary.percentage !== null && attendance.summary.percentage < 80 ? "warning" : "success"
@@ -117,6 +117,7 @@ export default function StudentDashboardPage() {
             <StatCard icon={CalendarX} label="Absent" value={attendance.summary.absent} tone="danger" />
             <StatCard icon={Clock} label="Late" value={attendance.summary.late} tone="warning" />
             <StatCard icon={ShieldCheck} label="Excused" value={attendance.summary.excused} tone="neutral" />
+            <StatCard icon={CalendarDays} label="Total Days" value={attendance.summary.total} tone="neutral" />
           </div>
         )}
 

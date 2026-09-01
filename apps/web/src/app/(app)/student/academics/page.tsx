@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type MyChildSubject } from "@/lib/api";
 import { useStudentProfile } from "@/features/student-portal/useStudentProfile";
@@ -9,7 +10,7 @@ import { Card, CardHeader } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
-import { BookUser, GraduationCap } from "lucide-react";
+import { BookUser, ChevronRight, GraduationCap } from "lucide-react";
 
 export default function StudentAcademicsPage() {
   const { accessToken } = useAuth();
@@ -73,13 +74,20 @@ export default function StudentAcademicsPage() {
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {subjects.map((s) => (
-                  <div key={s.subjectId} className="rounded-lg border border-border p-3.5">
-                    <p className="font-medium text-foreground">{s.name}</p>
-                    <p className="mt-1 flex items-center gap-1.5 text-sm text-foreground-soft">
-                      <BookUser className="size-3.5 shrink-0 text-foreground-muted" />
-                      {s.teacher ? `${s.teacher.firstName} ${s.teacher.lastName}` : "No teacher assigned yet"}
-                    </p>
-                  </div>
+                  <Link
+                    key={s.subjectId}
+                    href={`/student/academics/${s.subjectId}`}
+                    className="group flex items-center justify-between gap-2 rounded-lg border border-border p-3.5 transition-colors hover:border-accent hover:bg-accent-soft/40"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium text-foreground">{s.name}</p>
+                      <p className="mt-1 flex items-center gap-1.5 text-sm text-foreground-soft">
+                        <BookUser className="size-3.5 shrink-0 text-foreground-muted" />
+                        {s.teacher ? `${s.teacher.firstName} ${s.teacher.lastName}` : "No teacher assigned yet"}
+                      </p>
+                    </div>
+                    <ChevronRight className="size-4 shrink-0 text-foreground-muted transition-colors group-hover:text-accent" />
+                  </Link>
                 ))}
               </div>
             )}

@@ -224,6 +224,24 @@ export interface AcademicYear {
   isCurrent: boolean;
 }
 
+export interface AcademicYearDeletionImpact {
+  academicYear: { id: string; name: string; isCurrent: boolean };
+  counts: {
+    enrollments: number;
+    teacherAssignments: number;
+    exams: number;
+    examSubjects: number;
+    results: number;
+    attendanceRecords: number;
+    feeStructures: number;
+    invoices: number;
+    payments: number;
+    transfers: number;
+    promotionItems: number;
+  };
+  hasAnyData: boolean;
+}
+
 export interface Subject {
   id: string;
   name: string;
@@ -926,6 +944,10 @@ export const api = {
       body: { isCurrent: true },
       accessToken,
     }),
+  getAcademicYearDeletionImpact: (accessToken: string, schoolId: string, id: string) =>
+    request<AcademicYearDeletionImpact>(`/schools/${schoolId}/academic-years/${id}/deletion-impact`, { accessToken }),
+  deleteAcademicYear: (accessToken: string, schoolId: string, id: string) =>
+    request<{ success: boolean }>(`/schools/${schoolId}/academic-years/${id}`, { method: "DELETE", accessToken }),
 
   listClasses: (accessToken: string, schoolId: string, academicYearId?: string) =>
     request<ClassWithSections[]>(`/schools/${schoolId}/classes${qs({ academicYearId })}`, { accessToken }),

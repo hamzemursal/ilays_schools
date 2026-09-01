@@ -60,4 +60,137 @@ export class AcademicYearsService {
       });
     });
   }
+
+  private async getOwnedYearOrThrow(actor: AuthenticatedUser, schoolId: string, id: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    const year = await this.prisma.academicYear.findFirst({ where: { id, schoolId } });
+    if (!year) throw new NotFoundException("Academic year not found");
+    return year;
+  }
+
+  // Real counts only — no fabricated numbers. Classes and Sections are
+  // deliberately excluded: they belong to a Division, not an AcademicYear,
+  // and are reused across years (the same "Class 7" row carries different
+  // StudentEnrollment rows year to year), so deleting one year never
+  // deletes or even touches them.
+  //
+  // Invoices/Payments are counted through BOTH directions — an enrollment
+  // in this year, or a fee structure defined for this year — since either
+  // one alone would block the eventual delete (both are onDelete: Restrict
+  // on Invoice) and an admin deserves to see the real total before
+  // confirming, not just half of it.
+  async getDeletionImpact(actor: AuthenticatedUser, schoolId: string, id: string) {
+    const year = await this.getOwnedYearOrThrow(actor, schoolId, id);
+
+    const [enrollmentIds, feeStructureIds] = await Promise.all([
+      this.prisma.studentEnrollment.findMany({ where: { academicYearId: id }, select: { id: true } }),
+      this.prisma.feeStructure.findMany({ where: { academicYearId: id }, select: { id: true } }),
+    ]);
+    const enrIds = enrollmentIds.map((e) => e.id);
+    const feeIds = feeStructureIds.map((f) => f.id);
+
+    const [
+      enrollments,
+      teacherAssignments,
+      exams,
+      examSubjects,
+      results,
+      attendanceRecords,
+      feeStructures,
+      invoices,
+      payments,
+      transfers,
+      promotionItems,
+    ] = await Promise.all([
+      Promise.resolve(enrIds.length),
+      this.prisma.teacherAssignment.count({ where: { academicYearId: id } }),
+      this.prisma.exam.count({ where: { academicYearId: id } }),
+      this.prisma.examSubject.count({ where: { exam: { academicYearId: id } } }),
+      this.prisma.result.count({ where: { enrollment: { academicYearId: id } } }),
+      this.prisma.attendance.count({ where: { enrollment: { academicYearId: id } } }),
+      Promise.resolve(feeIds.length),
+      this.prisma.invoice.count({
+        where: { OR: [{ enrollmentId: { in: enrIds } }, { feeStructureId: { in: feeIds } }] },
+      }),
+      this.prisma.payment.count({
+        where: { invoice: { OR: [{ enrollmentId: { in: enrIds } }, { feeStructureId: { in: feeIds } }] } },
+      }),
+      this.prisma.transfer.count({ where: { fromEnrollment: { academicYearId: id } } }),
+      this.prisma.promotionItem.count({ where: { fromEnrollment: { academicYearId: id } } }),
+    ]);
+
+    const counts = {
+      enrollments,
+      teacherAssignments,
+      exams,
+      examSubjects,
+      results,
+      attendanceRecords,
+      feeStructures,
+      invoices,
+      payments,
+      transfers,
+      promotionItems,
+    };
+
+    return {
+      academicYear: { id: year.id, name: year.name, isCurrent: year.isCurrent },
+      counts,
+      hasAnyData: Object.values(counts).some((c) => c > 0),
+    };
+  }
+
+  // Genuine permanent deletion, including everything the year owns — per
+  // product decision, an AcademicYear is never blocked from deletion just
+  // because it has history (unlike School/Class/Section elsewhere in this
+  // app). StudentEnrollment.academicYear and Invoice's two parents are all
+  // onDelete: Restrict, so Postgres would otherwise refuse this outright;
+  // every step below exists only to clear those specific blockers, in the
+  // order they'd actually fail in, before the final delete. Everything
+  // else (TeacherAssignment, Exam→ExamSubject→Result, FeeStructure,
+  // Attendance) is onDelete: Cascade and needs no manual handling.
+  async remove(actor: AuthenticatedUser, schoolId: string, id: string) {
+    const year = await this.getOwnedYearOrThrow(actor, schoolId, id);
+
+    await this.prisma.$transaction(async (tx) => {
+      const enrollments = await tx.studentEnrollment.findMany({ where: { academicYearId: id }, select: { id: true } });
+      const feeStructures = await tx.feeStructure.findMany({ where: { academicYearId: id }, select: { id: true } });
+      const enrIds = enrollments.map((e) => e.id);
+      const feeIds = feeStructures.map((f) => f.id);
+
+      const invoices = await tx.invoice.findMany({
+        where: { OR: [{ enrollmentId: { in: enrIds } }, { feeStructureId: { in: feeIds } }] },
+        select: { id: true },
+      });
+      const invoiceIds = invoices.map((i) => i.id);
+
+      // Restrict-blockers, cleared in the order they'd otherwise fail:
+      // Payment -> Invoice, then Transfer/PromotionItem -> StudentEnrollment.
+      await tx.payment.deleteMany({ where: { invoiceId: { in: invoiceIds } } });
+      await tx.invoice.deleteMany({ where: { id: { in: invoiceIds } } });
+      await tx.transfer.deleteMany({ where: { fromEnrollmentId: { in: enrIds } } });
+      await tx.promotionItem.deleteMany({ where: { fromEnrollmentId: { in: enrIds } } });
+
+      // Cascades Attendance and Result automatically.
+      await tx.studentEnrollment.deleteMany({ where: { academicYearId: id } });
+
+      // Cascades TeacherAssignment, Exam -> ExamSubject -> Result, and
+      // FeeStructure (now unblocked) automatically.
+      await tx.academicYear.delete({ where: { id } });
+
+      await tx.auditLog.create({
+        data: {
+          organizationId: actor.organizationId,
+          schoolId,
+          actorUserId: actor.id,
+          action: "academic_year.delete",
+          resource: "AcademicYear",
+          resourceId: id,
+          before: { name: year.name, isCurrent: year.isCurrent },
+        },
+      });
+    });
+
+    return { success: true };
+  }
 }

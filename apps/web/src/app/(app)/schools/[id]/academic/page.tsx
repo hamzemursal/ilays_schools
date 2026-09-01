@@ -6,6 +6,7 @@ import { useAuth, ApiError } from "@/lib/auth-context";
 import {
   api,
   type AcademicYear,
+  type AcademicYearDeletionImpact,
   type ClassWithSections,
   type Division,
   type Exam,
@@ -152,6 +153,11 @@ function AcademicYearsSection({
   const [formError, setFormError] = useState<string | null>(null);
   const { show } = useToast();
 
+  const [loadingImpactFor, setLoadingImpactFor] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AcademicYear | null>(null);
+  const [deletionImpact, setDeletionImpact] = useState<AcademicYearDeletionImpact | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   async function onCreate(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
@@ -173,6 +179,35 @@ function AcademicYearsSection({
     show(`${updated.name} set as the current academic year.`);
   }
 
+  async function onClickDelete(y: AcademicYear) {
+    setLoadingImpactFor(y.id);
+    try {
+      const impact = await api.getAcademicYearDeletionImpact(accessToken, schoolId, y.id);
+      setDeletionImpact(impact);
+      setDeleteTarget(y);
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to load what this year contains", "danger");
+    } finally {
+      setLoadingImpactFor(null);
+    }
+  }
+
+  async function onConfirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.deleteAcademicYear(accessToken, schoolId, deleteTarget.id);
+      setYears((prev) => prev.filter((y) => y.id !== deleteTarget.id));
+      show(`${deleteTarget.name} deleted successfully.`);
+      setDeleteTarget(null);
+      setDeletionImpact(null);
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to delete academic year", "danger");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
       {years.length === 0 ? (
@@ -188,20 +223,46 @@ function AcademicYearsSection({
                     {new Date(y.startDate).toLocaleDateString()} – {new Date(y.endDate).toLocaleDateString()}
                   </p>
                 </div>
-                {y.isCurrent ? (
-                  <Badge tone="success">Current</Badge>
-                ) : (
-                  canManage && (
-                    <Button size="sm" variant="ghost" onClick={() => onSetCurrent(y.id)}>
-                      Set current
-                    </Button>
-                  )
-                )}
+                <div className="flex items-center gap-2">
+                  {y.isCurrent ? (
+                    <Badge tone="success">Current</Badge>
+                  ) : (
+                    canManage && (
+                      <Button size="sm" variant="ghost" onClick={() => onSetCurrent(y.id)}>
+                        Set current
+                      </Button>
+                    )
+                  )}
+                  {canManage && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={<Trash2 className="size-4 text-danger" />}
+                      loading={loadingImpactFor === y.id}
+                      onClick={() => onClickDelete(y)}
+                      aria-label={`Delete ${y.name}`}
+                    />
+                  )}
+                </div>
               </div>
             </Card>
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget && !!deletionImpact}
+        title={`Delete ${deleteTarget?.name ?? "this academic year"}?`}
+        description={deletionImpact && <DeletionImpactSummary impact={deletionImpact} />}
+        confirmLabel="Delete Academic Year"
+        loading={deleting}
+        requireTypedConfirmation={deleteTarget?.name}
+        onConfirm={onConfirmDelete}
+        onCancel={() => {
+          setDeleteTarget(null);
+          setDeletionImpact(null);
+        }}
+      />
 
       {canManage && (
         <Card>
@@ -224,6 +285,55 @@ function AcademicYearsSection({
             {formError && <Alert tone="danger" className="sm:col-span-4">{formError}</Alert>}
           </form>
         </Card>
+      )}
+    </div>
+  );
+}
+
+// Every number here is a real count from the impact-preview endpoint — an
+// academic year is never blocked from deletion just for having history
+// (unlike School/Class/Section elsewhere in this app), so this is the one
+// real warning standing between a click and permanently losing it all.
+// Classes and Sections are deliberately not listed: they belong to a
+// Division, not this year, and nothing here touches them.
+function DeletionImpactSummary({ impact }: { impact: AcademicYearDeletionImpact }) {
+  const allRows: Array<[string, number]> = [
+    ["Student enrollments", impact.counts.enrollments],
+    ["Teacher assignments", impact.counts.teacherAssignments],
+    ["Exams", impact.counts.exams],
+    ["Exam subjects", impact.counts.examSubjects],
+    ["Result records", impact.counts.results],
+    ["Attendance records", impact.counts.attendanceRecords],
+    ["Fee structures", impact.counts.feeStructures],
+    ["Invoices", impact.counts.invoices],
+    ["Payments", impact.counts.payments],
+    ["Transfers", impact.counts.transfers],
+    ["Promotion records", impact.counts.promotionItems],
+  ];
+  const rows = allRows.filter(([, count]) => count > 0);
+
+  return (
+    <div>
+      {rows.length === 0 ? (
+        <p>This academic year has no related records yet — deleting it is safe.</p>
+      ) : (
+        <>
+          <p className="font-medium text-foreground">
+            This permanently deletes the academic year and everything below. This action cannot be undone.
+          </p>
+          <ul className="mt-1.5 list-inside list-disc space-y-0.5">
+            {rows.map(([label, count]) => (
+              <li key={label}>
+                {count.toLocaleString()} {label}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {impact.academicYear.isCurrent && (
+        <p className="mt-2 font-medium text-danger">
+          This is the current academic year — deleting it may affect active school operations.
+        </p>
       )}
     </div>
   );

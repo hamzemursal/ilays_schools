@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
 import { AcademicYearsService } from "./academic-years.service";
 import { CreateAcademicYearDto } from "./dto/create-academic-year.dto";
 import { UpdateAcademicYearDto } from "./dto/update-academic-year.dto";
@@ -35,5 +35,24 @@ export class AcademicYearsController {
     @Body() dto: UpdateAcademicYearDto,
   ) {
     return this.academicYears.update(user, schoolId, id, dto);
+  }
+
+  // Real counts of everything this year owns, shown to the admin before
+  // they can even see the confirm-delete button — see
+  // AcademicYearsService.getDeletionImpact for exactly what's counted.
+  @RequirePermissions("academic.manage")
+  @Get(":id/deletion-impact")
+  getDeletionImpact(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("id") id: string,
+  ) {
+    return this.academicYears.getDeletionImpact(user, schoolId, id);
+  }
+
+  @RequirePermissions("academic.manage")
+  @Delete(":id")
+  remove(@CurrentUser() user: AuthenticatedUser, @Param("schoolId") schoolId: string, @Param("id") id: string) {
+    return this.academicYears.remove(user, schoolId, id);
   }
 }

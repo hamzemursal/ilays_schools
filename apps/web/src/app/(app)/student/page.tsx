@@ -2,26 +2,41 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import type { LucideIcon } from "lucide-react";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type MyChildAttendance, type MyChildInvoice, type MyChildResult } from "@/lib/api";
 import { useStudentProfile } from "@/features/student-portal/useStudentProfile";
+import { StatTile, rateLabel } from "@/features/student-portal/StatTile";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
-import { StatCard } from "@/components/ui/StatCard";
+import { Avatar } from "@/components/ui/Avatar";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import {
   Award,
+  Building2,
   CalendarCheck,
   CalendarDays,
   CalendarX,
   Clock,
   GraduationCap,
+  IdCard,
   Percent,
   ShieldCheck,
+  Users2,
   Wallet,
 } from "lucide-react";
+
+function InfoItem({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <Icon className="size-3.5 shrink-0 text-foreground-muted" />
+      <span className="text-foreground-muted">{label}:</span>
+      <span className="font-medium text-foreground">{value}</span>
+    </div>
+  );
+}
 
 export default function StudentDashboardPage() {
   const { accessToken } = useAuth();
@@ -78,24 +93,41 @@ export default function StudentDashboardPage() {
         {widgetsError && <Alert tone="danger">{widgetsError}</Alert>}
 
         <Card>
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
-                <GraduationCap className="size-6" />
-              </div>
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:items-center sm:text-left">
+              <Avatar name={`${profile.firstName} ${profile.lastName}`} size="xl" />
               <div>
-                <p className="font-semibold text-foreground">
-                  {profile.firstName} {profile.lastName}
-                </p>
-                <p className="text-sm text-foreground-soft">{profile.enrollment.schoolName}</p>
+                <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+                  <p className="text-lg font-semibold text-foreground">
+                    {profile.firstName} {profile.lastName}
+                  </p>
+                  <Badge tone={profile.enrollment.status === "ACTIVE" ? "success" : "neutral"}>
+                    {profile.enrollment.status}
+                  </Badge>
+                </div>
+                <div className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1.5 text-sm text-foreground-soft sm:grid-cols-2">
+                  <InfoItem icon={IdCard} label="Student ID" value={profile.loginId} />
+                  <InfoItem icon={GraduationCap} label="Class" value={profile.enrollment.className} />
+                  <InfoItem icon={Users2} label="Section" value={profile.enrollment.sectionName} />
+                  <InfoItem icon={Building2} label="School" value={profile.enrollment.schoolName} />
+                  <InfoItem icon={CalendarDays} label="Academic Year" value={profile.enrollment.academicYearName} />
+                </div>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone="accent">Academic Year {profile.enrollment.academicYearName}</Badge>
-              <Badge tone={profile.enrollment.status === "ACTIVE" ? "success" : "neutral"}>
-                {profile.enrollment.status}
-              </Badge>
-            </div>
+
+            {academicAverage !== null && (
+              <Link
+                href="/student/results"
+                className="flex shrink-0 flex-col items-center gap-1 rounded-xl bg-accent-soft px-6 py-4 text-center transition-colors hover:bg-accent-soft/70"
+              >
+                <Award className="size-5 text-accent" />
+                <p className="text-xs font-medium uppercase tracking-wide text-accent">Academic Average</p>
+                <p className="text-3xl font-semibold tabular-nums text-accent">{academicAverage}%</p>
+                <p className="text-xs text-accent/80">
+                  {approvedResults.length} approved result{approvedResults.length === 1 ? "" : "s"} · View Details →
+                </p>
+              </Link>
+            )}
           </div>
         </Card>
 
@@ -105,42 +137,27 @@ export default function StudentDashboardPage() {
           <Alert tone="info">No attendance has been recorded yet this academic year.</Alert>
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-            <StatCard
-              icon={Percent}
-              label="Attendance Rate"
-              value={attendance.summary.percentage !== null ? `${attendance.summary.percentage}%` : "—"}
-              tone={
-                attendance.summary.percentage !== null && attendance.summary.percentage < 80 ? "warning" : "success"
-              }
-            />
-            <StatCard icon={CalendarCheck} label="Present" value={attendance.summary.present} tone="success" />
-            <StatCard icon={CalendarX} label="Absent" value={attendance.summary.absent} tone="danger" />
-            <StatCard icon={Clock} label="Late" value={attendance.summary.late} tone="warning" />
-            <StatCard icon={ShieldCheck} label="Excused" value={attendance.summary.excused} tone="neutral" />
-            <StatCard icon={CalendarDays} label="Total Days" value={attendance.summary.total} tone="neutral" />
+            {(() => {
+              const rate = attendance.summary.percentage !== null ? rateLabel(attendance.summary.percentage) : null;
+              return (
+                <StatTile
+                  icon={Percent}
+                  label="Attendance Rate"
+                  value={attendance.summary.percentage !== null ? `${attendance.summary.percentage}%` : "—"}
+                  tone={rate?.tone ?? "accent"}
+                  badge={rate && <Badge tone={rate.tone}>{rate.text}</Badge>}
+                />
+              );
+            })()}
+            <StatTile icon={CalendarCheck} label="Present" value={attendance.summary.present} unit="days" tone="success" />
+            <StatTile icon={CalendarX} label="Absent" value={attendance.summary.absent} unit="days" tone="danger" />
+            <StatTile icon={Clock} label="Late" value={attendance.summary.late} unit="days" tone="warning" />
+            <StatTile icon={ShieldCheck} label="Excused" value={attendance.summary.excused} unit="days" tone="accent" />
+            <StatTile icon={CalendarDays} label="Total Days" value={attendance.summary.total} unit="days" tone="accent" />
           </div>
         )}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {academicAverage !== null && (
-            <Link href="/student/results">
-              <Card className="h-full transition-colors hover:border-accent">
-                <div className="flex items-center gap-3">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
-                    <Award className="size-4.5" />
-                  </div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">
-                    Academic average
-                  </p>
-                </div>
-                <p className="mt-3 text-2xl font-semibold tabular-nums text-foreground">{academicAverage}%</p>
-                <p className="mt-0.5 text-xs text-foreground-soft">
-                  Across {approvedResults.length} approved result{approvedResults.length === 1 ? "" : "s"}
-                </p>
-              </Card>
-            </Link>
-          )}
-
           {invoices && invoices.length > 0 && (
             <Link href="/student/fees">
               <Card className="h-full transition-colors hover:border-accent">

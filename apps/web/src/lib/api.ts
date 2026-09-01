@@ -440,6 +440,10 @@ export interface MyChildAttendanceRecord {
   note: string | null;
   className: string;
   sectionName: string;
+  // Only populated by the Student Portal's own endpoint (see
+  // StudentPortalService.myAttendance) — the Guardian Portal's equivalent
+  // doesn't resolve this, so treat it as absent there, not as null data.
+  markedByName?: string | null;
 }
 
 export interface MyChildAttendance {

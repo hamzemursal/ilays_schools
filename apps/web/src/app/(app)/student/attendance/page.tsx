@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { LucideIcon } from "lucide-react";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type MyChildAcademicYear, type MyChildAttendance } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -9,15 +10,33 @@ import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
-import { StatCard } from "@/components/ui/StatCard";
 import { Select } from "@/components/ui/FormControls";
-import { CalendarCheck, CalendarDays, CalendarX, ClipboardCheck, Clock, Percent, ShieldCheck } from "lucide-react";
+import { AttendanceDonut } from "@/features/student-portal/AttendanceDonut";
+import { StatTile, rateLabel } from "@/features/student-portal/StatTile";
+import {
+  CalendarCheck,
+  CalendarDays,
+  CalendarX,
+  CheckCircle2,
+  ClipboardCheck,
+  Clock,
+  Percent,
+  ShieldCheck,
+  XCircle,
+} from "lucide-react";
 
 const STATUS_TONE: Record<string, "success" | "danger" | "warning" | "neutral"> = {
   PRESENT: "success",
   ABSENT: "danger",
   LATE: "warning",
   EXCUSED: "neutral",
+};
+
+const STATUS_ICON: Record<string, LucideIcon> = {
+  PRESENT: CheckCircle2,
+  ABSENT: XCircle,
+  LATE: Clock,
+  EXCUSED: ShieldCheck,
 };
 
 export default function StudentAttendancePage() {
@@ -113,46 +132,95 @@ function YearAttendance({ accessToken, academicYearId }: { accessToken: string; 
     );
   }
 
+  const rate = summary.percentage !== null ? rateLabel(summary.percentage) : null;
+
   return (
     <>
       <Alert tone="info">
         This is your overall daily attendance — one record per school day. It is not currently separated by subject.
       </Alert>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <StatCard
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <StatTile
           icon={Percent}
-          label="Rate"
+          label="Attendance Rate"
           value={summary.percentage !== null ? `${summary.percentage}%` : "—"}
-          tone={summary.percentage !== null && summary.percentage < 80 ? "warning" : "success"}
+          tone={rate?.tone ?? "accent"}
+          badge={rate && <Badge tone={rate.tone}>{rate.text}</Badge>}
         />
-        <StatCard icon={CalendarCheck} label="Present" value={summary.present} tone="success" />
-        <StatCard icon={CalendarX} label="Absent" value={summary.absent} tone="danger" />
-        <StatCard icon={Clock} label="Late" value={summary.late} tone="warning" />
-        <StatCard icon={ShieldCheck} label="Excused" value={summary.excused} tone="neutral" />
-        <StatCard icon={CalendarDays} label="Total days" value={summary.total} tone="neutral" />
+        <StatTile icon={CalendarCheck} label="Present" value={summary.present} unit="days" tone="success" />
+        <StatTile icon={CalendarX} label="Absent" value={summary.absent} unit="days" tone="danger" />
+        <StatTile icon={Clock} label="Late" value={summary.late} unit="days" tone="warning" />
+        <StatTile icon={ShieldCheck} label="Excused" value={summary.excused} unit="days" tone="accent" />
       </div>
+
+      <Card>
+        <CardHeader title="Attendance Overview" description="Breakdown of every recorded school day this year." />
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-8 sm:justify-between">
+          <AttendanceDonut
+            present={summary.present}
+            absent={summary.absent}
+            late={summary.late}
+            excused={summary.excused}
+            total={summary.total}
+          />
+          <div className="grid flex-1 grid-cols-2 gap-4 sm:min-w-[220px]">
+            {(
+              [
+                { label: "Present", value: summary.present, tone: "success" as const },
+                { label: "Absent", value: summary.absent, tone: "danger" as const },
+                { label: "Late", value: summary.late, tone: "warning" as const },
+                { label: "Excused", value: summary.excused, tone: "accent" as const },
+              ]
+            ).map((item) => {
+              const dotClass = {
+                success: "bg-success",
+                danger: "bg-danger",
+                warning: "bg-warning",
+                accent: "bg-accent",
+              }[item.tone];
+              const pct = summary.total > 0 ? Math.round((item.value / summary.total) * 1000) / 10 : 0;
+              return (
+                <div key={item.label} className="flex items-center gap-2">
+                  <span className={`size-2.5 shrink-0 rounded-full ${dotClass}`} />
+                  <div className="min-w-0">
+                    <p className="text-xs text-foreground-muted">{item.label}</p>
+                    <p className="text-sm font-semibold text-foreground">
+                      {item.value} <span className="font-normal text-foreground-muted">({pct}%)</span>
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </Card>
 
       <Card padding="none">
         <CardHeader title="Daily attendance" description={`${records.length} day(s) recorded this year.`} />
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-left text-sm">
+          <table className="w-full min-w-[680px] text-left text-sm">
             <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
               <tr>
                 <th className="px-5 py-2.5">Date</th>
                 <th className="px-5 py-2.5">Day</th>
                 <th className="px-5 py-2.5">Class / Section</th>
                 <th className="px-5 py-2.5">Status</th>
+                <th className="px-5 py-2.5">Marked by</th>
                 <th className="px-5 py-2.5">Note</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {records.map((r) => {
                 const d = new Date(r.date);
+                const StatusIcon = STATUS_ICON[r.status];
                 return (
-                  <tr key={r.id}>
+                  <tr key={r.id} className="transition-colors hover:bg-surface-hover">
                     <td className="px-5 py-3 whitespace-nowrap text-foreground">
-                      {d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
+                      <span className="flex items-center gap-2">
+                        <CalendarDays className="size-3.5 shrink-0 text-foreground-muted" />
+                        {d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
+                      </span>
                     </td>
                     <td className="px-5 py-3 whitespace-nowrap text-foreground-soft">
                       {d.toLocaleDateString(undefined, { weekday: "long" })}
@@ -161,8 +229,12 @@ function YearAttendance({ accessToken, academicYearId }: { accessToken: string; 
                       {r.className} · {r.sectionName}
                     </td>
                     <td className="px-5 py-3">
-                      <Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge>
+                      <Badge tone={STATUS_TONE[r.status]}>
+                        <StatusIcon className="size-3" />
+                        {r.status}
+                      </Badge>
                     </td>
+                    <td className="px-5 py-3 whitespace-nowrap text-foreground-soft">{r.markedByName ?? "—"}</td>
                     <td className="px-5 py-3 text-foreground-muted">{r.note ?? "—"}</td>
                   </tr>
                 );

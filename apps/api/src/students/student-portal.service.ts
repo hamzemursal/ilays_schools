@@ -152,6 +152,8 @@ export class StudentPortalService {
     const excused = records.filter((r) => r.status === "EXCUSED").length;
     const percentage = total > 0 ? Math.round(((present + late) / total) * 1000) / 10 : null;
 
+    const markedByName = await this.resolveMarkerNames(records.map((r) => r.markedByUserId));
+
     return {
       summary: { total, present, absent, late, excused, percentage },
       records: records.map((r) => ({
@@ -161,8 +163,52 @@ export class StudentPortalService {
         note: r.note,
         className: r.enrollment.class.name,
         sectionName: r.enrollment.section.name,
+        markedByName: markedByName.get(r.markedByUserId) ?? null,
       })),
     };
+  }
+
+  // Attendance.markedByUserId is a plain User id, not a Prisma relation (see
+  // schema.prisma) — the marker is whoever held attendance.mark at the time,
+  // which is a Teacher in the overwhelming majority of cases but can also be
+  // a School/Super Admin correcting a record. Resolved here, once per
+  // distinct marker, rather than fabricating a name: a Teacher match gets
+  // their real name, anyone else gets their real role label, and a marker
+  // that resolves to neither (deleted account) is honestly reported as null.
+  private async resolveMarkerNames(userIds: string[]): Promise<Map<string, string>> {
+    const distinct = [...new Set(userIds)];
+    if (distinct.length === 0) return new Map();
+
+    const names = new Map<string, string>();
+
+    const teachers = await this.prisma.teacher.findMany({
+      where: { userId: { in: distinct } },
+      select: { userId: true, firstName: true, lastName: true },
+    });
+    for (const t of teachers) {
+      if (t.userId) names.set(t.userId, `${t.firstName} ${t.lastName}`);
+    }
+
+    const remaining = distinct.filter((id) => !names.has(id));
+    if (remaining.length > 0) {
+      const userRoles = await this.prisma.userRole.findMany({
+        where: { userId: { in: remaining } },
+        include: { role: true },
+      });
+      const roleLabels: Record<string, string> = {
+        SUPER_ADMIN: "Super Admin",
+        ORGANIZATION_ADMIN: "Organization Admin",
+        SCHOOL_ADMIN: "School Admin",
+        TEACHER: "Teacher",
+      };
+      for (const ur of userRoles) {
+        if (!names.has(ur.userId)) {
+          names.set(ur.userId, roleLabels[ur.role.name] ?? ur.role.name);
+        }
+      }
+    }
+
+    return names;
   }
 
   // Only APPROVED results — an entered-but-not-yet-approved mark is still a

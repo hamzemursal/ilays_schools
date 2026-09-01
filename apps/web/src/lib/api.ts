@@ -157,6 +157,30 @@ export interface School {
   hasActiveAdmin: boolean;
 }
 
+export interface SchoolDeletionImpact {
+  school: { id: string; name: string; hasActiveAdmin: boolean };
+  counts: {
+    enrollments: number;
+    teachers: number;
+    academicYears: number;
+    classes: number;
+    sections: number;
+    subjects: number;
+    exams: number;
+    examSubjects: number;
+    results: number;
+    attendanceRecords: number;
+    feeStructures: number;
+    invoices: number;
+    payments: number;
+    transfers: number;
+    promotionBatches: number;
+    promotionItems: number;
+    announcements: number;
+  };
+  hasAnyData: boolean;
+}
+
 export interface SystemSummaryAlert {
   severity: "warning" | "info";
   message: string;
@@ -929,6 +953,8 @@ export const api = {
       body: { email },
       accessToken,
     }),
+  getSchoolDeletionImpact: (accessToken: string, schoolId: string) =>
+    request<SchoolDeletionImpact>(`/schools/${schoolId}/deletion-impact`, { accessToken }),
   removeSchool: (accessToken: string, schoolId: string) =>
     request<{ success: boolean }>(`/schools/${schoolId}`, { method: "DELETE", accessToken }),
 

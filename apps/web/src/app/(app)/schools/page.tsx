@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type School, type SchoolType } from "@/lib/api";
+import { api, type School, type SchoolType, type SchoolDeletionImpact } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -51,6 +51,8 @@ export default function SchoolsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<School | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [loadingImpactFor, setLoadingImpactFor] = useState<string | null>(null);
+  const [deletionImpact, setDeletionImpact] = useState<SchoolDeletionImpact | null>(null);
   const { show } = useToast();
 
   useEffect(() => {
@@ -84,7 +86,22 @@ export default function SchoolsPage() {
   const canView = user?.permissions.includes("schools.view") ?? false;
   const canManage = user?.permissions.includes("schools.manage") ?? false;
 
-  async function onDelete() {
+  async function onClickDelete(school: School) {
+    if (!accessToken) return;
+    setLoadingImpactFor(school.id);
+    setDeletionImpact(null);
+    try {
+      const impact = await api.getSchoolDeletionImpact(accessToken, school.id);
+      setDeletionImpact(impact);
+      setDeleteTarget(school);
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to load deletion impact", "danger");
+    } finally {
+      setLoadingImpactFor(null);
+    }
+  }
+
+  async function onConfirmDelete() {
     if (!accessToken || !deleteTarget) return;
     setDeleting(true);
     try {
@@ -92,6 +109,7 @@ export default function SchoolsPage() {
       setSchools((prev) => (prev ? prev.filter((s) => s.id !== deleteTarget.id) : prev));
       show(`${deleteTarget.name} deleted.`);
       setDeleteTarget(null);
+      setDeletionImpact(null);
     } catch (err) {
       show(err instanceof ApiError ? err.message : "Failed to delete school", "danger");
     } finally {
@@ -288,7 +306,8 @@ export default function SchoolsPage() {
                       size="sm"
                       variant="danger"
                       icon={<Trash2 className="size-4" />}
-                      onClick={() => setDeleteTarget(school)}
+                      loading={loadingImpactFor === school.id}
+                      onClick={() => onClickDelete(school)}
                       aria-label={`Delete ${school.name}`}
                     />
                   )}
@@ -302,12 +321,69 @@ export default function SchoolsPage() {
       <ConfirmDialog
         open={!!deleteTarget}
         title={`Delete ${deleteTarget?.name ?? "this school"}?`}
-        description="This permanently deletes the school and everything it owns — academic years, classes, subjects, exams, fee structures, announcements. Blocked if it has any student or teacher on record; deactivate it instead if you just want to stop using it."
+        description={deletionImpact && <DeletionImpactSummary impact={deletionImpact} />}
         confirmLabel="Delete school"
         loading={deleting}
-        onConfirm={onDelete}
-        onCancel={() => setDeleteTarget(null)}
+        requireTypedConfirmation={deleteTarget?.name}
+        onConfirm={onConfirmDelete}
+        onCancel={() => {
+          setDeleteTarget(null);
+          setDeletionImpact(null);
+        }}
       />
+    </div>
+  );
+}
+
+// Every number here is a real count from the impact-preview endpoint — a
+// school is never blocked from deletion just for having history, so this is
+// the one real warning standing between a click and permanently losing it
+// all (students, teachers, classes, years of academic and financial records).
+function DeletionImpactSummary({ impact }: { impact: SchoolDeletionImpact }) {
+  const allRows: Array<[string, number]> = [
+    ["Student enrollments", impact.counts.enrollments],
+    ["Teachers", impact.counts.teachers],
+    ["Academic years", impact.counts.academicYears],
+    ["Classes", impact.counts.classes],
+    ["Sections", impact.counts.sections],
+    ["Subjects", impact.counts.subjects],
+    ["Exams", impact.counts.exams],
+    ["Exam subjects", impact.counts.examSubjects],
+    ["Result records", impact.counts.results],
+    ["Attendance records", impact.counts.attendanceRecords],
+    ["Fee structures", impact.counts.feeStructures],
+    ["Invoices", impact.counts.invoices],
+    ["Payments", impact.counts.payments],
+    ["Transfers", impact.counts.transfers],
+    ["Promotion batches", impact.counts.promotionBatches],
+    ["Promotion records", impact.counts.promotionItems],
+    ["Announcements", impact.counts.announcements],
+  ];
+  const rows = allRows.filter(([, count]) => count > 0);
+
+  return (
+    <div>
+      {rows.length === 0 ? (
+        <p>This school has no related records yet — deleting it is safe.</p>
+      ) : (
+        <>
+          <p className="font-medium text-foreground">
+            This permanently deletes the school and everything below. This action cannot be undone.
+          </p>
+          <ul className="mt-1.5 max-h-48 list-inside list-disc space-y-0.5 overflow-y-auto">
+            {rows.map(([label, count]) => (
+              <li key={label}>
+                {count.toLocaleString()} {label}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {impact.school.hasActiveAdmin && (
+        <p className="mt-2 font-medium text-danger">
+          This school has an active School Admin — deleting it will remove their access to it.
+        </p>
+      )}
     </div>
   );
 }

@@ -48,6 +48,15 @@ export class SchoolsController {
   // schools.manage is only ever granted to SUPER_ADMIN/ORGANIZATION_ADMIN
   // (see seed.ts) — a School Admin can never reach this even for their own
   // school, which is deliberate: deleting a school is an org-wide decision.
+  // Real counts of everything the school owns, shown to the admin before
+  // they can even see the confirm-delete button — see
+  // SchoolsService.getDeletionImpact for exactly what's counted.
+  @RequirePermissions("schools.manage")
+  @Get(":id/deletion-impact")
+  getDeletionImpact(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.schools.getDeletionImpact(user, id);
+  }
+
   @RequirePermissions("schools.manage")
   @Delete(":id")
   remove(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {

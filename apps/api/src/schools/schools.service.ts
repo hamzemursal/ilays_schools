@@ -1,10 +1,9 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomBytes, createHash } from "node:crypto";
 import { Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateSchoolDto } from "./dto/create-school.dto";
-import { isRestrictedForeignKeyError } from "../common/prisma-errors";
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -306,45 +305,172 @@ export class SchoolsService {
     return { email, acceptUrl: `${webOrigin}/accept-invite?token=${rawToken}` };
   }
 
-  // A genuine, permanent delete — not the ACTIVE/INACTIVE status toggle.
-  // StudentEnrollment and Teacher both use onDelete: Restrict against School
-  // (see schema.prisma), so Postgres itself refuses this the moment a school
-  // has ever had a student enrolled or a teacher on record; everything else
-  // the school owns (academic years, divisions/classes/sections, subjects,
-  // exams, fee structures, announcements, invitations, import batches) is
-  // Cascade and disappears with it. That FK, not application code, is what
-  // keeps a populated school's academic/financial history from ever being
-  // wiped out by this endpoint.
+  // Real counts of everything this school owns, shown to the admin before
+  // they can even see the confirm-delete button — see remove() below for
+  // exactly what each of these becomes once confirmed.
+  async getDeletionImpact(actor: AuthenticatedUser, schoolId: string) {
+    const school = await this.findOneAccessibleOrThrow(actor, schoolId);
+
+    const [enrollmentIds, feeStructureIds] = await Promise.all([
+      this.prisma.studentEnrollment.findMany({ where: { schoolId }, select: { id: true } }),
+      this.prisma.feeStructure.findMany({ where: { schoolId }, select: { id: true } }),
+    ]);
+    const enrIds = enrollmentIds.map((e) => e.id);
+    const feeIds = feeStructureIds.map((f) => f.id);
+
+    const [
+      enrollments,
+      teachers,
+      academicYears,
+      classes,
+      sections,
+      subjects,
+      exams,
+      examSubjects,
+      results,
+      attendanceRecords,
+      feeStructures,
+      invoices,
+      payments,
+      transfers,
+      promotionBatches,
+      promotionItems,
+      announcements,
+    ] = await Promise.all([
+      Promise.resolve(enrIds.length),
+      this.prisma.teacher.count({ where: { schoolId } }),
+      this.prisma.academicYear.count({ where: { schoolId } }),
+      this.prisma.class.count({ where: { division: { schoolId } } }),
+      this.prisma.section.count({ where: { class: { division: { schoolId } } } }),
+      this.prisma.subject.count({ where: { schoolId } }),
+      this.prisma.exam.count({ where: { schoolId } }),
+      this.prisma.examSubject.count({ where: { exam: { schoolId } } }),
+      this.prisma.result.count({ where: { enrollment: { schoolId } } }),
+      this.prisma.attendance.count({ where: { enrollment: { schoolId } } }),
+      Promise.resolve(feeIds.length),
+      this.prisma.invoice.count({
+        where: { OR: [{ enrollmentId: { in: enrIds } }, { feeStructureId: { in: feeIds } }] },
+      }),
+      this.prisma.payment.count({
+        where: { invoice: { OR: [{ enrollmentId: { in: enrIds } }, { feeStructureId: { in: feeIds } }] } },
+      }),
+      this.prisma.transfer.count({ where: { fromEnrollmentId: { in: enrIds } } }),
+      this.prisma.promotionBatch.count({ where: { schoolId } }),
+      this.prisma.promotionItem.count({ where: { fromEnrollmentId: { in: enrIds } } }),
+      this.prisma.announcement.count({ where: { schoolId } }),
+    ]);
+
+    const counts = {
+      enrollments,
+      teachers,
+      academicYears,
+      classes,
+      sections,
+      subjects,
+      exams,
+      examSubjects,
+      results,
+      attendanceRecords,
+      feeStructures,
+      invoices,
+      payments,
+      transfers,
+      promotionBatches,
+      promotionItems,
+      announcements,
+    };
+
+    return {
+      school: { id: school.id, name: school.name, hasActiveAdmin: (await this.withCounts([school]))[0].hasActiveAdmin },
+      counts,
+      hasAnyData: Object.values(counts).some((c) => c > 0),
+    };
+  }
+
+  // A genuine, permanent delete — per product decision, a School is never
+  // blocked from deletion just because it has real history (students,
+  // teachers, years of academic/financial records). StudentEnrollment and
+  // Teacher are both onDelete: Restrict against School, and a chain of
+  // further Restrict relations hangs off StudentEnrollment itself
+  // (Invoice's two parents, Transfer, PromotionItem) — every step below
+  // exists only to clear those specific blockers, in the order they'd
+  // actually fail in, before the final delete. Everything else the school
+  // owns (AcademicYear, Division→Class→Section, Subject, Announcement,
+  // Exam→ExamSubject→Result, FeeStructure, UserSchool, Invitation,
+  // ImportBatch) is onDelete: Cascade and needs no manual handling — but
+  // only once StudentEnrollment is gone, since several of those Cascade
+  // chains (AcademicYear, FeeStructure, Class/Section) are themselves
+  // blocked by StudentEnrollment via their own Restrict relations.
+  //
+  // PromotionBatch and TeacherAssignment carry a schoolId column with no
+  // actual foreign key in the schema (a deliberate denormalization elsewhere
+  // in this codebase) — Postgres won't block or cascade on them, so leaving
+  // them alone would silently create orphans. PromotionBatch is deleted
+  // explicitly here for that reason; TeacherAssignment needs no equivalent
+  // step because it's already cascaded away via its own (real) teacherId
+  // relation once that Teacher row is deleted below.
   async remove(actor: AuthenticatedUser, schoolId: string) {
     const school = await this.findOneAccessibleOrThrow(actor, schoolId);
 
-    // Deliberately NOT wrapped in $transaction with the audit log write —
-    // the delete's own FK check is what needs to fail cleanly here, and
-    // keeping it a bare call (same shape as ClassesService.remove, which
-    // this mirrors) avoids any risk of an interactive transaction changing
-    // how the underlying error surfaces.
-    try {
-      await this.prisma.school.delete({ where: { id: schoolId } });
-    } catch (error) {
-      if (isRestrictedForeignKeyError(error)) {
-        throw new BadRequestException(
-          "Cannot delete this school — it still has enrolled students or teachers on record. Remove or transfer them first, or deactivate the school instead.",
-        );
-      }
-      throw error;
-    }
+    await this.prisma.$transaction(
+      async (tx) => {
+        const enrollments = await tx.studentEnrollment.findMany({ where: { schoolId }, select: { id: true } });
+        const feeStructures = await tx.feeStructure.findMany({ where: { schoolId }, select: { id: true } });
+        const enrIds = enrollments.map((e) => e.id);
+        const feeIds = feeStructures.map((f) => f.id);
 
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: school.organizationId,
-        schoolId: school.id,
-        actorUserId: actor.id,
-        action: "school.delete",
-        resource: "School",
-        resourceId: school.id,
-        before: { name: school.name, type: school.type, address: school.address },
+        const invoices = await tx.invoice.findMany({
+          where: { OR: [{ enrollmentId: { in: enrIds } }, { feeStructureId: { in: feeIds } }] },
+          select: { id: true },
+        });
+        const invoiceIds = invoices.map((i) => i.id);
+
+        // Restrict-blockers, cleared in the order they'd otherwise fail:
+        // Payment -> Invoice, then PromotionBatch/PromotionItem and
+        // Transfer -> StudentEnrollment.
+        await tx.payment.deleteMany({ where: { invoiceId: { in: invoiceIds } } });
+        await tx.invoice.deleteMany({ where: { id: { in: invoiceIds } } });
+        // Deletes the school's own PromotionBatch rows and cascades their
+        // PromotionItem children; the second call is a defensive fallback
+        // for any PromotionItem whose batch (if any) doesn't share this
+        // school's id — never leave one dangling on a Restrict FK.
+        await tx.promotionBatch.deleteMany({ where: { schoolId } });
+        await tx.promotionItem.deleteMany({ where: { fromEnrollmentId: { in: enrIds } } });
+        // Only the "from" side — a transfer whose *destination* enrollment
+        // is at this school still belongs to its origin school's history;
+        // toEnrollmentId is onDelete: SetNull, so that transfer survives
+        // with its link cleared, not deleted out from under the other school.
+        await tx.transfer.deleteMany({ where: { fromEnrollmentId: { in: enrIds } } });
+
+        // Clears School -> Teacher; cascades TeacherAssignment automatically.
+        await tx.teacher.deleteMany({ where: { schoolId } });
+
+        // Clears School -> StudentEnrollment; cascades Attendance and Result
+        // automatically. Student itself is org-level and is never touched —
+        // it survives with zero enrollments at this (now-deleted) school,
+        // same as every other student-facing delete in this codebase.
+        await tx.studentEnrollment.deleteMany({ where: { schoolId } });
+
+        // Cascades AcademicYear, Division -> Class -> Section -> ClassSubject,
+        // Subject, Announcement, Exam -> ExamSubject -> Result (already
+        // empty), FeeStructure (now unblocked), UserSchool, Invitation, and
+        // ImportBatch -> ImportRow automatically.
+        await tx.school.delete({ where: { id: schoolId } });
+
+        await tx.auditLog.create({
+          data: {
+            organizationId: school.organizationId,
+            schoolId: school.id,
+            actorUserId: actor.id,
+            action: "school.delete",
+            resource: "School",
+            resourceId: school.id,
+            before: { name: school.name, type: school.type, address: school.address },
+          },
+        });
       },
-    });
+      { timeout: 30_000 },
+    );
 
     return { success: true };
   }

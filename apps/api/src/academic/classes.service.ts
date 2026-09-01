@@ -8,6 +8,7 @@ import { UpdateClassDto } from "./dto/update-class.dto";
 import { CreateSectionDto } from "./dto/create-section.dto";
 import { UpdateSectionDto } from "./dto/update-section.dto";
 import { AssignSubjectDto } from "./dto/assign-subject.dto";
+import { isRestrictedForeignKeyError } from "../common/prisma-errors";
 
 const CLASS_INCLUDE = {
   division: true,
@@ -128,7 +129,7 @@ export class ClassesService {
       await this.prisma.class.delete({ where: { id: classId } });
       return { success: true };
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+      if (isRestrictedForeignKeyError(error)) {
         throw new BadRequestException(
           "Cannot delete this class — it has students enrolled (past or present). Withdraw or transfer them first.",
         );
@@ -225,7 +226,7 @@ export class ClassesService {
       await this.prisma.section.delete({ where: { id: sectionId } });
       return { success: true };
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+      if (isRestrictedForeignKeyError(error)) {
         throw new BadRequestException(
           "Cannot delete this section — it has students enrolled (past or present). Withdraw or transfer them first.",
         );

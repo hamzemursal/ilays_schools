@@ -4,6 +4,7 @@ import { Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateSchoolDto } from "./dto/create-school.dto";
+import { isRestrictedForeignKeyError } from "../common/prisma-errors";
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -321,27 +322,11 @@ export class SchoolsService {
     // the delete's own FK check is what needs to fail cleanly here, and
     // keeping it a bare call (same shape as ClassesService.remove, which
     // this mirrors) avoids any risk of an interactive transaction changing
-    // how the underlying error surfaces. The `code` check is duck-typed
-    // rather than `instanceof Prisma.PrismaClientKnownRequestError` so it
-    // still matches even if this file's Prisma import and the one that threw
-    // ever come from different resolved copies of the generated client.
+    // how the underlying error surfaces.
     try {
       await this.prisma.school.delete({ where: { id: schoolId } });
     } catch (error) {
-      // TEMPORARY diagnostic — production was returning a raw 500 here with
-      // nothing useful in the logs, so this pins down exactly what's being
-      // thrown before deciding how to handle it. Remove once confirmed.
-      // eslint-disable-next-line no-console
-      console.error(
-        "SCHOOL_DELETE_DEBUG",
-        JSON.stringify({
-          name: (error as { name?: string })?.name,
-          code: (error as { code?: string })?.code,
-          message: (error as { message?: string })?.message,
-          stack: (error as { stack?: string })?.stack,
-        }),
-      );
-      if (this.isForeignKeyViolation(error)) {
+      if (isRestrictedForeignKeyError(error)) {
         throw new BadRequestException(
           "Cannot delete this school — it still has enrolled students or teachers on record. Remove or transfer them first, or deactivate the school instead.",
         );
@@ -362,14 +347,5 @@ export class SchoolsService {
     });
 
     return { success: true };
-  }
-
-  private isForeignKeyViolation(error: unknown): boolean {
-    return (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code?: unknown }).code === "P2003"
-    );
   }
 }

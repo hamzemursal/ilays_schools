@@ -64,6 +64,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
 
   const [showTransferForm, setShowTransferForm] = useState(false);
   const [transferYearId, setTransferYearId] = useState("");
+  const [transferFromSectionId, setTransferFromSectionId] = useState("");
   const [transferToClassId, setTransferToClassId] = useState("");
   const [transferToSectionId, setTransferToSectionId] = useState("");
   const [loadingTransferImpact, setLoadingTransferImpact] = useState(false);
@@ -235,12 +236,20 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  const isSameClassTransfer = transferToClassId === classId;
+
   async function onPreviewTransfer() {
     if (!accessToken || !transferYearId || !transferToClassId || !transferToSectionId) return;
     setTransferError(null);
     setLoadingTransferImpact(true);
     try {
-      const impact = await api.getClassBulkTransferImpact(accessToken, schoolId, classId, transferYearId);
+      const impact = await api.getClassBulkTransferImpact(
+        accessToken,
+        schoolId,
+        classId,
+        transferYearId,
+        transferFromSectionId || undefined,
+      );
       setTransferImpact(impact);
     } catch (err) {
       setTransferError(err instanceof ApiError ? err.message : "Failed to load transfer impact");
@@ -255,12 +264,14 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     try {
       const result = await api.bulkTransferClass(accessToken, schoolId, classId, {
         academicYearId: transferYearId,
+        fromSectionId: transferFromSectionId || undefined,
         toClassId: transferToClassId,
         toSectionId: transferToSectionId,
       });
       show(`${result.movedCount} student(s) transferred.`);
       setTransferImpact(null);
       setShowTransferForm(false);
+      setTransferFromSectionId("");
       setTransferToClassId("");
       setTransferToSectionId("");
       await loadAll();
@@ -360,8 +371,11 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
         description={
           <>
             All <strong>{transferImpact?.studentCount ?? 0}</strong> active student(s) in{" "}
-            <strong>{transferImpact?.className}</strong> for academic year{" "}
-            <strong>{transferImpact?.academicYearName}</strong> will move to{" "}
+            <strong>
+              {transferImpact?.className}
+              {transferImpact?.sectionName ? ` - Section ${transferImpact.sectionName}` : ""}
+            </strong>{" "}
+            for academic year <strong>{transferImpact?.academicYearName}</strong> will move to{" "}
             <strong>
               {transferDestinationClass?.name} - Section{" "}
               {transferDestinationClass?.sections.find((s) => s.id === transferToSectionId)?.name}
@@ -416,9 +430,9 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
               <Card>
                 <CardHeader
                   title="Class Transfer"
-                  description="Move every active student in this class, for one academic year, into a different class and section."
+                  description="Move active students, for one academic year, into a different class and section — or reshuffle sections within this same class."
                 />
-                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <FormField label="Academic year" required>
                     <Select
                       value={transferYearId}
@@ -435,6 +449,25 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                       ))}
                     </Select>
                   </FormField>
+                  <FormField
+                    label="Source section"
+                    hint="Leave as “All sections” to move the whole class, or pick one section to reshuffle it — including into another section of this same class."
+                  >
+                    <Select
+                      value={transferFromSectionId}
+                      onChange={(e) => {
+                        setTransferFromSectionId(e.target.value);
+                        setTransferImpact(null);
+                      }}
+                    >
+                      <option value="">All sections (whole class)</option>
+                      {sections.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          Section {s.name} only
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
                   <FormField label="Destination class" required>
                     <Select
                       value={transferToClassId}
@@ -445,13 +478,11 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                       }}
                     >
                       <option value="">Select a class…</option>
-                      {allClasses
-                        ?.filter((c) => c.id !== classId)
-                        .map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} ({c.division.type})
-                          </option>
-                        ))}
+                      {allClasses?.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.id === classId ? `${c.name} (same class)` : `${c.name} (${c.division.type})`}
+                        </option>
+                      ))}
                     </Select>
                   </FormField>
                   <FormField label="Destination section" required>
@@ -464,15 +495,23 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                       disabled={!transferDestinationClass}
                     >
                       <option value="">Select a section…</option>
-                      {transferDestinationClass?.sections.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                          {s.capacity !== null ? ` (${s._count.enrollments}/${s.capacity})` : ""}
-                        </option>
-                      ))}
+                      {transferDestinationClass?.sections
+                        .filter((s) => !isSameClassTransfer || s.id !== transferFromSectionId)
+                        .map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                            {s.capacity !== null ? ` (${s._count.enrollments}/${s.capacity})` : ""}
+                          </option>
+                        ))}
                     </Select>
                   </FormField>
                 </div>
+                {isSameClassTransfer && !transferFromSectionId && (
+                  <Alert tone="warning" className="mt-4">
+                    Moving within the same class requires picking a specific source section above — not
+                    &ldquo;All sections&rdquo;.
+                  </Alert>
+                )}
                 {transferError && (
                   <Alert tone="danger" className="mt-4">
                     {transferError}
@@ -482,7 +521,12 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                   <Button
                     size="sm"
                     loading={loadingTransferImpact}
-                    disabled={!transferYearId || !transferToClassId || !transferToSectionId}
+                    disabled={
+                      !transferYearId ||
+                      !transferToClassId ||
+                      !transferToSectionId ||
+                      (isSameClassTransfer && !transferFromSectionId)
+                    }
                     onClick={onPreviewTransfer}
                   >
                     Preview transfer

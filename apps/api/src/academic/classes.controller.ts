@@ -142,8 +142,9 @@ export class ClassesController {
     @Param("schoolId") schoolId: string,
     @Param("classId") classId: string,
     @Query("academicYearId") academicYearId: string,
+    @Query("fromSectionId") fromSectionId?: string,
   ) {
-    return this.classes.getBulkTransferImpact(user, schoolId, classId, academicYearId);
+    return this.classes.getBulkTransferImpact(user, schoolId, classId, academicYearId, fromSectionId);
   }
 
   @RequirePermissions("academic.manage")

@@ -292,18 +292,31 @@ export class ClassesService {
   // Scoped to one academic year: a Class is a permanent structure reused
   // every year, so "everyone in this class" only makes sense for a specific
   // year's roster, same reasoning as list()/listSections() above.
-  async getBulkTransferImpact(actor: AuthenticatedUser, schoolId: string, classId: string, academicYearId: string) {
+  async getBulkTransferImpact(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    classId: string,
+    academicYearId: string,
+    fromSectionId?: string,
+  ) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     const cls = await this.getClassInSchoolOrThrow(schoolId, classId);
 
     const academicYear = await this.prisma.academicYear.findFirst({ where: { id: academicYearId, schoolId } });
     if (!academicYear) throw new BadRequestException("That academic year does not belong to this school");
 
+    let sectionName: string | null = null;
+    if (fromSectionId) {
+      const section = await this.prisma.section.findFirst({ where: { id: fromSectionId, classId } });
+      if (!section) throw new BadRequestException("That section does not belong to this class");
+      sectionName = section.name;
+    }
+
     const students = await this.prisma.studentEnrollment.count({
-      where: { classId, academicYearId, status: "ACTIVE" },
+      where: { classId, academicYearId, status: "ACTIVE", ...(fromSectionId ? { sectionId: fromSectionId } : {}) },
     });
 
-    return { className: cls.name, academicYearName: academicYear.name, studentCount: students };
+    return { className: cls.name, sectionName, academicYearName: academicYear.name, studentCount: students };
   }
 
   // Moves every currently-active student in this class (across all of its
@@ -325,8 +338,26 @@ export class ClassesService {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     await this.getClassInSchoolOrThrow(schoolId, classId);
 
+    // Moving within the same class (reshuffling sections, e.g. Section A ->
+    // Section B) is allowed, but only when scoped to one real source
+    // section that differs from the destination — "everyone in the class
+    // into one of the class's own sections" is an ambiguous partial no-op
+    // (some of those students are already there) and is rejected instead of
+    // guessed at.
     if (dto.toClassId === classId) {
-      throw new BadRequestException("Destination class must be different from the source class");
+      if (!dto.fromSectionId) {
+        throw new BadRequestException(
+          "Moving within the same class requires picking a specific source section (not the whole class)",
+        );
+      }
+      if (dto.fromSectionId === dto.toSectionId) {
+        throw new BadRequestException("Destination section must be different from the source section");
+      }
+    }
+
+    if (dto.fromSectionId) {
+      const fromSection = await this.prisma.section.findFirst({ where: { id: dto.fromSectionId, classId } });
+      if (!fromSection) throw new BadRequestException("That source section does not belong to this class");
     }
 
     const academicYear = await this.prisma.academicYear.findFirst({
@@ -341,11 +372,16 @@ export class ClassesService {
     if (!toSection) throw new BadRequestException("That section does not belong to the destination class");
 
     const enrollments = await this.prisma.studentEnrollment.findMany({
-      where: { classId, academicYearId: dto.academicYearId, status: "ACTIVE" },
+      where: {
+        classId,
+        academicYearId: dto.academicYearId,
+        status: "ACTIVE",
+        ...(dto.fromSectionId ? { sectionId: dto.fromSectionId } : {}),
+      },
       orderBy: { rollNumber: "asc" },
     });
     if (enrollments.length === 0) {
-      throw new BadRequestException("No active students found in this class for that academic year");
+      throw new BadRequestException("No active students found in that scope for that academic year");
     }
 
     const destinationMax = await this.prisma.studentEnrollment.aggregate({
@@ -380,7 +416,12 @@ export class ClassesService {
             action: "class.bulk_transfer",
             resource: "Class",
             resourceId: classId,
-            before: { fromClassId: classId, academicYearId: dto.academicYearId, studentCount: enrollments.length },
+            before: {
+              fromClassId: classId,
+              fromSectionId: dto.fromSectionId ?? null,
+              academicYearId: dto.academicYearId,
+              studentCount: enrollments.length,
+            },
             after: {
               toClassId: dto.toClassId,
               toSectionId: dto.toSectionId,

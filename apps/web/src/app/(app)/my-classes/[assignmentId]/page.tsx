@@ -19,8 +19,11 @@ import { Button } from "@/components/ui/Button";
 import { Avatar } from "@/components/ui/Avatar";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Input } from "@/components/ui/FormControls";
+import { ShareListButton } from "@/components/ui/ShareListButton";
+import { formatStudentListForShare } from "@/lib/share";
 import { SkeletonCards, SkeletonTable } from "@/components/ui/Skeleton";
-import { ClipboardCheck, PenLine, Users } from "lucide-react";
+import { ClipboardCheck, PenLine, Search, Users } from "lucide-react";
 
 export default function MyAssignmentPage({ params }: { params: Promise<{ assignmentId: string }> }) {
   const { assignmentId } = use(params);
@@ -33,6 +36,7 @@ export default function MyAssignmentPage({ params }: { params: Promise<{ assignm
   const [summary, setSummary] = useState<AttendanceSummaryRow[] | null>(null);
   const [history, setHistory] = useState<AttendanceHistoryRow[] | null>(null);
   const [expandedStudent, setExpandedStudent] = useState<string | null>(null);
+  const [rosterSearch, setRosterSearch] = useState("");
 
   useEffect(() => {
     if (!accessToken) return;
@@ -62,6 +66,13 @@ export default function MyAssignmentPage({ params }: { params: Promise<{ assignm
   if (!data) return <SkeletonCards count={3} />;
 
   const { assignment, students } = data;
+  const filteredStudents = (() => {
+    const q = rosterSearch.trim().toLowerCase();
+    if (!q) return students;
+    return students.filter((s) =>
+      `${s.firstName} ${s.lastName} ${s.studentNumber} ${s.rollNumber}`.toLowerCase().includes(q),
+    );
+  })();
   const today = new Date().toISOString().slice(0, 10);
   const matchingExamSubjects = (exams ?? []).flatMap((exam) =>
     exam.examSubjects
@@ -97,13 +108,26 @@ export default function MyAssignmentPage({ params }: { params: Promise<{ assignm
             title="Students"
             description={`${students.length} active student(s) in this section.`}
             actions={
-              canMarkAttendance && (
-                <Link href={attendanceUrl(today)}>
-                  <Button size="sm" icon={<ClipboardCheck className="size-4" />}>
-                    Mark attendance
-                  </Button>
-                </Link>
-              )
+              <div className="flex items-center gap-2">
+                {students.length > 0 && (
+                  <ShareListButton
+                    title={`${assignment.section.class.name} ${assignment.section.name} - Students`}
+                    text={() =>
+                      formatStudentListForShare(
+                        `${assignment.section.class.name} - Section ${assignment.section.name} — Students`,
+                        filteredStudents,
+                      )
+                    }
+                  />
+                )}
+                {canMarkAttendance && (
+                  <Link href={attendanceUrl(today)}>
+                    <Button size="sm" icon={<ClipboardCheck className="size-4" />}>
+                      Mark attendance
+                    </Button>
+                  </Link>
+                )}
+              </div>
             }
           />
           {students.length === 0 ? (
@@ -111,8 +135,25 @@ export default function MyAssignmentPage({ params }: { params: Promise<{ assignm
               <EmptyState icon={Users} title="No active students" description="This section has no active students yet." />
             </div>
           ) : (
+            <>
+              <div className="border-b border-border p-4">
+                <div className="relative max-w-xs">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-muted" />
+                  <Input
+                    value={rosterSearch}
+                    onChange={(e) => setRosterSearch(e.target.value)}
+                    placeholder="Search by name, ID, or roll no…"
+                    className="pl-9"
+                  />
+                </div>
+              </div>
+              {filteredStudents.length === 0 ? (
+                <div className="p-5">
+                  <EmptyState title="No matches" description="Try a different search term." />
+                </div>
+              ) : (
             <div className="divide-y divide-border">
-              {students.map((s) => (
+              {filteredStudents.map((s) => (
                 <div key={s.enrollmentId} className="p-4 sm:p-5">
                   <div className="flex flex-wrap items-center gap-3">
                     <Avatar name={`${s.firstName} ${s.lastName}`} photoUrl={s.photoUrl} />
@@ -152,6 +193,8 @@ export default function MyAssignmentPage({ params }: { params: Promise<{ assignm
                 </div>
               ))}
             </div>
+              )}
+            </>
           )}
         </Card>
 

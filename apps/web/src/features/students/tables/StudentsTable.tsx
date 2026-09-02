@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import type { StudentListItem } from "@/lib/api";
 import { DataTable, type Column, type TableSelection } from "@/components/ui/DataTable";
+import { ShareListButton } from "@/components/ui/ShareListButton";
+import { formatStudentListForShare } from "@/lib/share";
 import { StudentAvatar } from "../components/StudentAvatar";
 
 export function StudentsTable({
@@ -49,13 +51,25 @@ export function StudentsTable({
       columns={columns}
       rowKey={(s) => s.studentId}
       onRowClick={(s) => router.push(`/schools/${schoolId}/students/${s.studentId}`)}
-      searchPlaceholder="Search students by name or number…"
+      searchPlaceholder="Search by name, ID, roll no, class, or section…"
       searchFilter={(s, q) =>
-        `${s.firstName} ${s.lastName} ${s.studentNumber}`.toLowerCase().includes(q)
+        `${s.firstName} ${s.lastName} ${s.studentNumber} ${s.rollNumber} ${s.className} ${s.sectionName}`
+          .toLowerCase()
+          .includes(q)
       }
       emptyTitle="No students enrolled yet"
       emptyDescription="Add your first student to get started."
       selection={selection}
+      toolbar={
+        students && (
+          <div className="ml-auto flex items-center gap-3">
+            <span className="text-sm text-foreground-muted">
+              {students.length} student{students.length === 1 ? "" : "s"} total
+            </span>
+            <ShareListButton title="Student List" text={() => formatStudentListForShare("Student List", students)} />
+          </div>
+        )
+      }
     />
   );
 }

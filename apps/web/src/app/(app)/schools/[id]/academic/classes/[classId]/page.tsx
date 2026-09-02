@@ -24,6 +24,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ShareListButton } from "@/components/ui/ShareListButton";
+import { formatStudentListForShare } from "@/lib/share";
 import { useToast } from "@/components/ui/Toast";
 import { ArrowLeftRight, ChevronRight, GraduationCap, Pencil, Plus, Search, Trash2, Check, X } from "lucide-react";
 
@@ -37,6 +39,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const [allClasses, setAllClasses] = useState<ClassWithSections[] | null>(null);
   const [sections, setSections] = useState<Section[] | null>(null);
   const [students, setStudents] = useState<StudentListItem[] | null>(null);
+  const [rosterSearch, setRosterSearch] = useState("");
   const [subjects, setSubjects] = useState<ClassSubjectRecord[] | null>(null);
   const [allSubjects, setAllSubjects] = useState<Subject[]>([]);
   const [years, setYears] = useState<AcademicYear[]>([]);
@@ -343,6 +346,14 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
         `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) ||
         s.studentNumber.toLowerCase().includes(q) ||
         String(s.rollNumber).includes(q),
+    );
+  })();
+
+  const filteredRoster = (() => {
+    const q = rosterSearch.trim().toLowerCase();
+    if (!q) return classStudents ?? [];
+    return (classStudents ?? []).filter((s) =>
+      `${s.firstName} ${s.lastName} ${s.studentNumber} ${s.rollNumber} ${s.sectionName}`.toLowerCase().includes(q),
     );
   })();
 
@@ -806,6 +817,15 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                 description={
                   classStudents ? `${classStudents.length} student(s) currently enrolled in this class.` : undefined
                 }
+                actions={
+                  classStudents &&
+                  classStudents.length > 0 && (
+                    <ShareListButton
+                      title={`${cls?.name ?? "Class"} - Students`}
+                      text={() => formatStudentListForShare(`${cls?.name ?? "Class"} — Students`, filteredRoster)}
+                    />
+                  )
+                }
               />
               {!classStudents ? (
                 <div className="p-5">
@@ -816,39 +836,58 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                   <EmptyState icon={GraduationCap} title="No students enrolled in this class yet" />
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[520px] text-left text-sm">
-                    <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
-                      <tr>
-                        <th className="px-5 py-2.5">Roll No</th>
-                        <th className="px-5 py-2.5">Student ID</th>
-                        <th className="px-5 py-2.5">Name</th>
-                        <th className="px-5 py-2.5">Section</th>
-                        <th className="px-5 py-2.5" />
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {classStudents.map((s) => (
-                        <tr key={s.enrollmentId} className="transition-colors hover:bg-surface-hover">
-                          <td className="px-5 py-3 tabular-nums text-foreground-soft">{s.rollNumber}</td>
-                          <td className="px-5 py-3 font-mono text-xs text-foreground-soft">{s.studentNumber}</td>
-                          <td className="px-5 py-3 font-medium text-foreground">
-                            {s.firstName} {s.lastName}
-                          </td>
-                          <td className="px-5 py-3 text-foreground-soft">{s.sectionName}</td>
-                          <td className="px-5 py-3 text-right">
-                            <Link
-                              href={`/schools/${schoolId}/students/${s.studentId}`}
-                              className="inline-flex items-center gap-1 text-sm font-medium text-accent hover:underline"
-                            >
-                              View / Edit <ChevronRight className="size-3.5" />
-                            </Link>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <>
+                  <div className="border-b border-border p-4">
+                    <div className="relative max-w-xs">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-muted" />
+                      <Input
+                        value={rosterSearch}
+                        onChange={(e) => setRosterSearch(e.target.value)}
+                        placeholder="Search by name, ID, roll no, or section…"
+                        className="pl-9"
+                      />
+                    </div>
+                  </div>
+                  {filteredRoster.length === 0 ? (
+                    <div className="p-5">
+                      <EmptyState title="No matches" description="Try a different search term." />
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[520px] text-left text-sm">
+                        <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+                          <tr>
+                            <th className="px-5 py-2.5">Roll No</th>
+                            <th className="px-5 py-2.5">Student ID</th>
+                            <th className="px-5 py-2.5">Name</th>
+                            <th className="px-5 py-2.5">Section</th>
+                            <th className="px-5 py-2.5" />
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {filteredRoster.map((s) => (
+                            <tr key={s.enrollmentId} className="transition-colors hover:bg-surface-hover">
+                              <td className="px-5 py-3 tabular-nums text-foreground-soft">{s.rollNumber}</td>
+                              <td className="px-5 py-3 font-mono text-xs text-foreground-soft">{s.studentNumber}</td>
+                              <td className="px-5 py-3 font-medium text-foreground">
+                                {s.firstName} {s.lastName}
+                              </td>
+                              <td className="px-5 py-3 text-foreground-soft">{s.sectionName}</td>
+                              <td className="px-5 py-3 text-right">
+                                <Link
+                                  href={`/schools/${schoolId}/students/${s.studentId}`}
+                                  className="inline-flex items-center gap-1 text-sm font-medium text-accent hover:underline"
+                                >
+                                  View / Edit <ChevronRight className="size-3.5" />
+                                </Link>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
               )}
             </Card>
 

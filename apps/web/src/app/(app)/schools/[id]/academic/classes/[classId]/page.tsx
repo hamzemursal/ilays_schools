@@ -11,6 +11,7 @@ import {
   type ClassWithSections,
   type Section,
   type SectionTeacherAssignment,
+  type StudentListItem,
   type Subject,
 } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -23,7 +24,7 @@ import { Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
-import { GraduationCap, Pencil, Plus, Trash2, Check, X } from "lucide-react";
+import { ChevronRight, GraduationCap, Pencil, Plus, Trash2, Check, X } from "lucide-react";
 
 export default function ClassDetailPage({ params }: { params: Promise<{ id: string; classId: string }> }) {
   const { id: schoolId, classId } = use(params);
@@ -33,6 +34,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
 
   const [cls, setCls] = useState<ClassWithSections | null>(null);
   const [sections, setSections] = useState<Section[] | null>(null);
+  const [students, setStudents] = useState<StudentListItem[] | null>(null);
   const [subjects, setSubjects] = useState<ClassSubjectRecord[] | null>(null);
   const [allSubjects, setAllSubjects] = useState<Subject[]>([]);
   const [years, setYears] = useState<AcademicYear[]>([]);
@@ -66,8 +68,9 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
       api.listClassSubjects(accessToken, schoolId, classId),
       api.listAcademicYears(accessToken, schoolId),
       api.listSubjects(accessToken, schoolId),
+      api.listStudents(accessToken, schoolId),
     ])
-      .then(([classes, secs, subs, y, allSubj]) => {
+      .then(([classes, secs, subs, y, allSubj, allStudents]) => {
         const found = classes.find((c) => c.id === classId);
         if (!found) {
           setError("Class not found");
@@ -78,6 +81,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
         setSubjects(subs);
         setYears(y);
         setAllSubjects(allSubj);
+        setStudents(allStudents);
         const current = y.find((yr) => yr.isCurrent) ?? y[0];
         if (current) setYearId(current.id);
       })
@@ -212,6 +216,18 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const schoolName = user?.schools.find((s) => s.id === schoolId)?.name ?? "School";
   const canManage = user?.permissions.includes("academic.manage") ?? false;
   const unassignedSubjects = allSubjects.filter((s) => !subjects?.some((cs) => cs.subjectId === s.id));
+
+  // Matched by class name + section membership, not classId — StudentListItem
+  // (from GET /schools/:id/students) only carries denormalized names, same
+  // as everywhere else this endpoint is consumed. Restricting to this
+  // class's own sections (not just a name match) avoids any cross-class
+  // mix-up if another class in a different division happened to share a name.
+  const classStudents =
+    cls && sections
+      ? students
+          ?.filter((s) => s.className === cls.name && sections.some((sec) => sec.name === s.sectionName))
+          .sort((a, b) => a.sectionName.localeCompare(b.sectionName) || a.rollNumber - b.rollNumber)
+      : undefined;
 
   if (error) {
     return (
@@ -415,6 +431,58 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                   </Button>
                   {sectionFormError && <p className="w-full text-sm text-danger">{sectionFormError}</p>}
                 </form>
+              )}
+            </Card>
+
+            <Card padding="none">
+              <CardHeader
+                title="Students"
+                description={
+                  classStudents ? `${classStudents.length} student(s) currently enrolled in this class.` : undefined
+                }
+              />
+              {!classStudents ? (
+                <div className="p-5">
+                  <SkeletonCards count={2} />
+                </div>
+              ) : classStudents.length === 0 ? (
+                <div className="p-5">
+                  <EmptyState icon={GraduationCap} title="No students enrolled in this class yet" />
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[520px] text-left text-sm">
+                    <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+                      <tr>
+                        <th className="px-5 py-2.5">Roll No</th>
+                        <th className="px-5 py-2.5">Student ID</th>
+                        <th className="px-5 py-2.5">Name</th>
+                        <th className="px-5 py-2.5">Section</th>
+                        <th className="px-5 py-2.5" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {classStudents.map((s) => (
+                        <tr key={s.enrollmentId} className="transition-colors hover:bg-surface-hover">
+                          <td className="px-5 py-3 tabular-nums text-foreground-soft">{s.rollNumber}</td>
+                          <td className="px-5 py-3 font-mono text-xs text-foreground-soft">{s.studentNumber}</td>
+                          <td className="px-5 py-3 font-medium text-foreground">
+                            {s.firstName} {s.lastName}
+                          </td>
+                          <td className="px-5 py-3 text-foreground-soft">{s.sectionName}</td>
+                          <td className="px-5 py-3 text-right">
+                            <Link
+                              href={`/schools/${schoolId}/students/${s.studentId}`}
+                              className="inline-flex items-center gap-1 text-sm font-medium text-accent hover:underline"
+                            >
+                              View / Edit <ChevronRight className="size-3.5" />
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </Card>
 

@@ -886,17 +886,31 @@ export interface PromotionBatchResult {
   items: { id: string; studentId: string; outcome: PromotionOutcome }[];
 }
 
-export type TransferStatus = "REQUESTED" | "APPROVED" | "REJECTED" | "EXECUTED";
+export type TransferStatus = "REQUESTED" | "APPROVED" | "REJECTED" | "EXECUTED" | "CANCELLED";
+
+export interface TransferEnrollmentSnapshot {
+  studentNumber: string;
+  class: { name: string };
+  section: { name: string };
+  academicYear: { name: string };
+}
 
 export interface Transfer {
   id: string;
   studentId: string;
   fromSchoolId: string;
+  fromSchoolName: string;
   toSchoolId: string;
+  toSchoolName: string;
   status: TransferStatus;
   reason: string | null;
+  transferDate: string | null;
   createdAt: string;
-  student: { firstName: string; lastName: string };
+  student: { id: string; firstName: string; lastName: string; sex: Sex; dateOfBirth: string };
+  fromEnrollment: TransferEnrollmentSnapshot;
+  toEnrollment: TransferEnrollmentSnapshot | null;
+  requestedByEmail: string;
+  approvedByEmail: string | null;
 }
 
 export type ImportBatchStatus = "PROCESSING" | "NEEDS_REVIEW" | "COMPLETED";
@@ -1257,6 +1271,10 @@ export const api = {
   ) => request<Transfer>(`/transfers/${transferId}/approve`, { method: "POST", body, accessToken }),
   rejectTransfer: (accessToken: string, transferId: string) =>
     request<Transfer>(`/transfers/${transferId}/reject`, { method: "POST", accessToken }),
+  cancelTransfer: (accessToken: string, transferId: string) =>
+    request<Transfer>(`/transfers/${transferId}/cancel`, { method: "POST", accessToken }),
+  getTransfer: (accessToken: string, transferId: string) =>
+    request<Transfer>(`/transfers/${transferId}`, { accessToken }),
 
   myAssignments: (accessToken: string) => request<MyAssignment[]>("/teachers/me/assignments", { accessToken }),
   myAssignmentStudents: (accessToken: string, assignmentId: string) =>

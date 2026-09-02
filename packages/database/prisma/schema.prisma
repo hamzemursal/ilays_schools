@@ -671,6 +671,7 @@ enum TransferStatus {
   APPROVED
   REJECTED
   EXECUTED
+  CANCELLED
 }
 
 model Transfer {

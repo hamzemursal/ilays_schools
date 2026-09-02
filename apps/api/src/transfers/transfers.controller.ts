@@ -33,8 +33,24 @@ export class TransfersController {
   }
 
   @RequirePermissions("transfers.create")
+  @Post("transfers/:id/cancel")
+  cancel(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.transfers.cancel(user, id);
+  }
+
+  @RequirePermissions("transfers.create")
   @Get("schools/:schoolId/transfers")
   listForSchool(@CurrentUser() user: AuthenticatedUser, @Param("schoolId") schoolId: string) {
     return this.transfers.listForSchool(user, schoolId);
+  }
+
+  // Must come after "schools/:schoolId/transfers" — different path shape
+  // (this is single-segment under "transfers/", not nested under a school),
+  // so there's no ambiguity, but keeping detail routes below the list route
+  // matches the convention used everywhere else in this codebase.
+  @RequirePermissions("transfers.create")
+  @Get("transfers/:id")
+  getOne(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.transfers.getOne(user, id);
   }
 }

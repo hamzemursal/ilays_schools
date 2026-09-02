@@ -59,6 +59,8 @@ export function StudentsTable({
       }
       emptyTitle="No students enrolled yet"
       emptyDescription="Add your first student to get started."
+      searchEmptyTitle="No students found"
+      pagination={{ pageSizeOptions: [10, 25, 50], defaultPageSize: 10, itemLabel: "students" }}
       selection={selection}
       toolbar={
         students && (

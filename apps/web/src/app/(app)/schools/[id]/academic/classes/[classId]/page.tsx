@@ -7,6 +7,7 @@ import { useAuth, ApiError } from "@/lib/auth-context";
 import {
   api,
   type AcademicYear,
+  type ClassBulkTransferImpact,
   type ClassSubjectRecord,
   type ClassWithSections,
   type Section,
@@ -20,11 +21,11 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Input, Select } from "@/components/ui/FormControls";
+import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
-import { ChevronRight, GraduationCap, Pencil, Plus, Trash2, Check, X } from "lucide-react";
+import { ArrowLeftRight, ChevronRight, GraduationCap, Pencil, Plus, Trash2, Check, X } from "lucide-react";
 
 export default function ClassDetailPage({ params }: { params: Promise<{ id: string; classId: string }> }) {
   const { id: schoolId, classId } = use(params);
@@ -33,6 +34,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const router = useRouter();
 
   const [cls, setCls] = useState<ClassWithSections | null>(null);
+  const [allClasses, setAllClasses] = useState<ClassWithSections[] | null>(null);
   const [sections, setSections] = useState<Section[] | null>(null);
   const [students, setStudents] = useState<StudentListItem[] | null>(null);
   const [subjects, setSubjects] = useState<ClassSubjectRecord[] | null>(null);
@@ -60,32 +62,52 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const [deleteSectionTarget, setDeleteSectionTarget] = useState<Section | null>(null);
   const [deletingSectionId, setDeletingSectionId] = useState<string | null>(null);
 
-  useEffect(() => {
+  const [showTransferForm, setShowTransferForm] = useState(false);
+  const [transferYearId, setTransferYearId] = useState("");
+  const [transferToClassId, setTransferToClassId] = useState("");
+  const [transferToSectionId, setTransferToSectionId] = useState("");
+  const [loadingTransferImpact, setLoadingTransferImpact] = useState(false);
+  const [transferImpact, setTransferImpact] = useState<ClassBulkTransferImpact | null>(null);
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [transferring, setTransferring] = useState(false);
+
+  async function loadAll() {
     if (!accessToken) return;
-    Promise.all([
-      api.listClasses(accessToken, schoolId),
-      api.listSections(accessToken, schoolId, classId),
-      api.listClassSubjects(accessToken, schoolId, classId),
-      api.listAcademicYears(accessToken, schoolId),
-      api.listSubjects(accessToken, schoolId),
-      api.listStudents(accessToken, schoolId),
-    ])
-      .then(([classes, secs, subs, y, allSubj, allStudents]) => {
-        const found = classes.find((c) => c.id === classId);
-        if (!found) {
-          setError("Class not found");
-          return;
-        }
-        setCls(found);
-        setSections(secs);
-        setSubjects(subs);
-        setYears(y);
-        setAllSubjects(allSubj);
-        setStudents(allStudents);
-        const current = y.find((yr) => yr.isCurrent) ?? y[0];
-        if (current) setYearId(current.id);
-      })
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load class"));
+    try {
+      const [classes, secs, subs, y, allSubj, allStudents] = await Promise.all([
+        api.listClasses(accessToken, schoolId),
+        api.listSections(accessToken, schoolId, classId),
+        api.listClassSubjects(accessToken, schoolId, classId),
+        api.listAcademicYears(accessToken, schoolId),
+        api.listSubjects(accessToken, schoolId),
+        api.listStudents(accessToken, schoolId),
+      ]);
+      const found = classes.find((c) => c.id === classId);
+      if (!found) {
+        setError("Class not found");
+        return;
+      }
+      setCls(found);
+      setAllClasses(classes);
+      setSections(secs);
+      setSubjects(subs);
+      setYears(y);
+      setAllSubjects(allSubj);
+      setStudents(allStudents);
+      setYearId((prev) => prev || (y.find((yr) => yr.isCurrent) ?? y[0])?.id || "");
+      setTransferYearId((prev) => prev || (y.find((yr) => yr.isCurrent) ?? y[0])?.id || "");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to load class");
+    }
+  }
+
+  useEffect(() => {
+    // loadAll is also called imperatively after a successful bulk transfer
+    // (not just here on mount), which is exactly the "named loader" shape
+    // the set-state-in-effect rule can't distinguish from a riskier pattern.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, schoolId, classId]);
 
   useEffect(() => {
@@ -213,6 +235,43 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  async function onPreviewTransfer() {
+    if (!accessToken || !transferYearId || !transferToClassId || !transferToSectionId) return;
+    setTransferError(null);
+    setLoadingTransferImpact(true);
+    try {
+      const impact = await api.getClassBulkTransferImpact(accessToken, schoolId, classId, transferYearId);
+      setTransferImpact(impact);
+    } catch (err) {
+      setTransferError(err instanceof ApiError ? err.message : "Failed to load transfer impact");
+    } finally {
+      setLoadingTransferImpact(false);
+    }
+  }
+
+  async function onConfirmTransfer() {
+    if (!accessToken || !transferYearId || !transferToClassId || !transferToSectionId) return;
+    setTransferring(true);
+    try {
+      const result = await api.bulkTransferClass(accessToken, schoolId, classId, {
+        academicYearId: transferYearId,
+        toClassId: transferToClassId,
+        toSectionId: transferToSectionId,
+      });
+      show(`${result.movedCount} student(s) transferred.`);
+      setTransferImpact(null);
+      setShowTransferForm(false);
+      setTransferToClassId("");
+      setTransferToSectionId("");
+      await loadAll();
+    } catch (err) {
+      setTransferError(err instanceof ApiError ? err.message : "Failed to transfer students");
+    } finally {
+      setTransferring(false);
+    }
+  }
+
+  const transferDestinationClass = allClasses?.find((c) => c.id === transferToClassId);
   const schoolName = user?.schools.find((s) => s.id === schoolId)?.name ?? "School";
   const canManage = user?.permissions.includes("academic.manage") ?? false;
   const unassignedSubjects = allSubjects.filter((s) => !subjects?.some((cs) => cs.subjectId === s.id));
@@ -251,6 +310,14 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
         actions={
           cls && canManage ? (
             <>
+              <Button
+                variant="outline"
+                size="sm"
+                icon={<ArrowLeftRight className="size-4" />}
+                onClick={() => setShowTransferForm((v) => !v)}
+              >
+                Class Transfer
+              </Button>
               <Button variant="outline" size="sm" icon={<Pencil className="size-4" />} onClick={startRenameClass}>
                 Rename
               </Button>
@@ -287,6 +354,28 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
         onCancel={() => setDeleteSectionTarget(null)}
       />
 
+      <ConfirmDialog
+        open={!!transferImpact}
+        title={`Transfer ${transferImpact?.studentCount ?? 0} student(s) to ${transferDestinationClass?.name ?? "…"}?`}
+        description={
+          <>
+            All <strong>{transferImpact?.studentCount ?? 0}</strong> active student(s) in{" "}
+            <strong>{transferImpact?.className}</strong> for academic year{" "}
+            <strong>{transferImpact?.academicYearName}</strong> will move to{" "}
+            <strong>
+              {transferDestinationClass?.name} - Section{" "}
+              {transferDestinationClass?.sections.find((s) => s.id === transferToSectionId)?.name}
+            </strong>
+            . Roll numbers will be reassigned. This cannot be undone.
+          </>
+        }
+        confirmLabel="Transfer all students"
+        loading={transferring}
+        onConfirm={onConfirmTransfer}
+        onCancel={() => setTransferImpact(null)}
+        requireTypedConfirmation={cls?.name}
+      />
+
       <div className="space-y-5 p-4 sm:p-6">
         {!cls || !sections || !subjects ? (
           <SkeletonCards count={3} />
@@ -316,6 +405,95 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                     icon={<X className="size-4" />}
                     onClick={() => setEditingClassName(false)}
                     disabled={savingClassName}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </Card>
+            )}
+
+            {showTransferForm && (
+              <Card>
+                <CardHeader
+                  title="Class Transfer"
+                  description="Move every active student in this class, for one academic year, into a different class and section."
+                />
+                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <FormField label="Academic year" required>
+                    <Select
+                      value={transferYearId}
+                      onChange={(e) => {
+                        setTransferYearId(e.target.value);
+                        setTransferImpact(null);
+                      }}
+                    >
+                      {years.map((y) => (
+                        <option key={y.id} value={y.id}>
+                          {y.name}
+                          {y.isCurrent ? " (Current)" : ""}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  <FormField label="Destination class" required>
+                    <Select
+                      value={transferToClassId}
+                      onChange={(e) => {
+                        setTransferToClassId(e.target.value);
+                        setTransferToSectionId("");
+                        setTransferImpact(null);
+                      }}
+                    >
+                      <option value="">Select a class…</option>
+                      {allClasses
+                        ?.filter((c) => c.id !== classId)
+                        .map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({c.division.type})
+                          </option>
+                        ))}
+                    </Select>
+                  </FormField>
+                  <FormField label="Destination section" required>
+                    <Select
+                      value={transferToSectionId}
+                      onChange={(e) => {
+                        setTransferToSectionId(e.target.value);
+                        setTransferImpact(null);
+                      }}
+                      disabled={!transferDestinationClass}
+                    >
+                      <option value="">Select a section…</option>
+                      {transferDestinationClass?.sections.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                          {s.capacity !== null ? ` (${s._count.enrollments}/${s.capacity})` : ""}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                </div>
+                {transferError && (
+                  <Alert tone="danger" className="mt-4">
+                    {transferError}
+                  </Alert>
+                )}
+                <div className="mt-4 flex gap-2">
+                  <Button
+                    size="sm"
+                    loading={loadingTransferImpact}
+                    disabled={!transferYearId || !transferToClassId || !transferToSectionId}
+                    onClick={onPreviewTransfer}
+                  >
+                    Preview transfer
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setShowTransferForm(false);
+                      setTransferError(null);
+                    }}
                   >
                     Cancel
                   </Button>

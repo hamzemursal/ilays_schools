@@ -8,6 +8,7 @@ import { UpdateClassDto } from "./dto/update-class.dto";
 import { CreateSectionDto } from "./dto/create-section.dto";
 import { UpdateSectionDto } from "./dto/update-section.dto";
 import { AssignSubjectDto } from "./dto/assign-subject.dto";
+import { BulkTransferClassDto } from "./dto/bulk-transfer-class.dto";
 import { isRestrictedForeignKeyError } from "../common/prisma-errors";
 
 const CLASS_INCLUDE = {
@@ -285,5 +286,112 @@ export class ClassesService {
 
     await this.prisma.classSubject.deleteMany({ where: { classId, subjectId } });
     return { success: true };
+  }
+
+  // Real counts only, for the confirm-dialog preview — never fabricated.
+  // Scoped to one academic year: a Class is a permanent structure reused
+  // every year, so "everyone in this class" only makes sense for a specific
+  // year's roster, same reasoning as list()/listSections() above.
+  async getBulkTransferImpact(actor: AuthenticatedUser, schoolId: string, classId: string, academicYearId: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    const cls = await this.getClassInSchoolOrThrow(schoolId, classId);
+
+    const academicYear = await this.prisma.academicYear.findFirst({ where: { id: academicYearId, schoolId } });
+    if (!academicYear) throw new BadRequestException("That academic year does not belong to this school");
+
+    const students = await this.prisma.studentEnrollment.count({
+      where: { classId, academicYearId, status: "ACTIVE" },
+    });
+
+    return { className: cls.name, academicYearName: academicYear.name, studentCount: students };
+  }
+
+  // Moves every currently-active student in this class (across all of its
+  // sections, for one academic year) into a single destination class +
+  // section, in one transaction. This is a same-year reorganization, not an
+  // academic transition — like updateActiveEnrollment, it corrects the
+  // existing enrollment row in place (preserving studentNumber, startDate,
+  // and every attendance/result/invoice tied to the enrollment id) rather
+  // than closing it out and creating a new one, since nothing about the
+  // student's actual academic year or history is changing.
+  //
+  // Roll numbers are never preserved across the move — with many students
+  // landing in one section at once, reusing their old numbers would almost
+  // certainly collide with whatever's already there. Instead every moved
+  // student gets a fresh, sequential number starting right after the
+  // destination's current highest, which by construction can never collide
+  // with an existing row or with another student in this same batch.
+  async bulkTransfer(actor: AuthenticatedUser, schoolId: string, classId: string, dto: BulkTransferClassDto) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    await this.getClassInSchoolOrThrow(schoolId, classId);
+
+    if (dto.toClassId === classId) {
+      throw new BadRequestException("Destination class must be different from the source class");
+    }
+
+    const academicYear = await this.prisma.academicYear.findFirst({
+      where: { id: dto.academicYearId, schoolId },
+    });
+    if (!academicYear) throw new BadRequestException("That academic year does not belong to this school");
+
+    await this.getClassInSchoolOrThrow(schoolId, dto.toClassId);
+    const toSection = await this.prisma.section.findFirst({
+      where: { id: dto.toSectionId, classId: dto.toClassId },
+    });
+    if (!toSection) throw new BadRequestException("That section does not belong to the destination class");
+
+    const enrollments = await this.prisma.studentEnrollment.findMany({
+      where: { classId, academicYearId: dto.academicYearId, status: "ACTIVE" },
+      orderBy: { rollNumber: "asc" },
+    });
+    if (enrollments.length === 0) {
+      throw new BadRequestException("No active students found in this class for that academic year");
+    }
+
+    const destinationMax = await this.prisma.studentEnrollment.aggregate({
+      where: { sectionId: toSection.id, academicYearId: dto.academicYearId, status: "ACTIVE" },
+      _max: { rollNumber: true },
+      _count: true,
+    });
+    const existingCount = destinationMax._count;
+
+    if (toSection.capacity !== null && existingCount + enrollments.length > toSection.capacity) {
+      throw new BadRequestException(
+        `Section ${toSection.name} only has room for ${Math.max(toSection.capacity - existingCount, 0)} more student(s) (capacity ${toSection.capacity}, already has ${existingCount}) — you're trying to move ${enrollments.length}`,
+      );
+    }
+
+    const startingRoll = destinationMax._max.rollNumber ?? 0;
+
+    await this.prisma.$transaction(
+      async (tx) => {
+        for (let i = 0; i < enrollments.length; i++) {
+          await tx.studentEnrollment.update({
+            where: { id: enrollments[i].id },
+            data: { classId: dto.toClassId, sectionId: dto.toSectionId, rollNumber: startingRoll + i + 1 },
+          });
+        }
+
+        await tx.auditLog.create({
+          data: {
+            organizationId: actor.organizationId,
+            schoolId,
+            actorUserId: actor.id,
+            action: "class.bulk_transfer",
+            resource: "Class",
+            resourceId: classId,
+            before: { fromClassId: classId, academicYearId: dto.academicYearId, studentCount: enrollments.length },
+            after: {
+              toClassId: dto.toClassId,
+              toSectionId: dto.toSectionId,
+              studentIds: enrollments.map((e) => e.studentId),
+            },
+          },
+        });
+      },
+      { timeout: 20_000 },
+    );
+
+    return { success: true, movedCount: enrollments.length };
   }
 }

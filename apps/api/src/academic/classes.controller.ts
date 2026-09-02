@@ -5,6 +5,7 @@ import { UpdateClassDto } from "./dto/update-class.dto";
 import { CreateSectionDto } from "./dto/create-section.dto";
 import { UpdateSectionDto } from "./dto/update-section.dto";
 import { AssignSubjectDto } from "./dto/assign-subject.dto";
+import { BulkTransferClassDto } from "./dto/bulk-transfer-class.dto";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { RequirePermissions } from "../auth/decorators/require-permissions.decorator";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
@@ -130,6 +131,30 @@ export class ClassesController {
     @Query("academicYearId") academicYearId: string,
   ) {
     return this.classes.listSectionTeacherAssignments(user, schoolId, classId, sectionId, academicYearId);
+  }
+
+  // Real counts shown before the confirm-dialog's typed-confirmation gate —
+  // see ClassesService.getBulkTransferImpact for exactly what's counted.
+  @RequirePermissions("academic.manage")
+  @Get(":classId/bulk-transfer-impact")
+  getBulkTransferImpact(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("classId") classId: string,
+    @Query("academicYearId") academicYearId: string,
+  ) {
+    return this.classes.getBulkTransferImpact(user, schoolId, classId, academicYearId);
+  }
+
+  @RequirePermissions("academic.manage")
+  @Post(":classId/bulk-transfer")
+  bulkTransfer(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("classId") classId: string,
+    @Body() dto: BulkTransferClassDto,
+  ) {
+    return this.classes.bulkTransfer(user, schoolId, classId, dto);
   }
 
   @RequirePermissions("academic.manage")

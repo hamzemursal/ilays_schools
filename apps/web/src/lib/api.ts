@@ -240,6 +240,12 @@ export interface ClassWithSections {
   _count: { classSubjects: number };
 }
 
+export interface ClassBulkTransferImpact {
+  className: string;
+  academicYearName: string;
+  studentCount: number;
+}
+
 export interface AcademicYear {
   id: string;
   name: string;
@@ -1043,6 +1049,22 @@ export const api = {
   removeSection: (accessToken: string, schoolId: string, classId: string, sectionId: string) =>
     request<{ success: boolean }>(`/schools/${schoolId}/classes/${classId}/sections/${sectionId}`, {
       method: "DELETE",
+      accessToken,
+    }),
+  getClassBulkTransferImpact: (accessToken: string, schoolId: string, classId: string, academicYearId: string) =>
+    request<ClassBulkTransferImpact>(
+      `/schools/${schoolId}/classes/${classId}/bulk-transfer-impact${qs({ academicYearId })}`,
+      { accessToken },
+    ),
+  bulkTransferClass: (
+    accessToken: string,
+    schoolId: string,
+    classId: string,
+    body: { academicYearId: string; toClassId: string; toSectionId: string },
+  ) =>
+    request<{ success: boolean; movedCount: number }>(`/schools/${schoolId}/classes/${classId}/bulk-transfer`, {
+      method: "POST",
+      body,
       accessToken,
     }),
   listClassSubjects: (accessToken: string, schoolId: string, classId: string) =>

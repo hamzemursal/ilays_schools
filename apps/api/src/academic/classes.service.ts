@@ -342,13 +342,6 @@ export class ClassesService {
       throw new BadRequestException("Specify either a source section or specific students, not both");
     }
 
-    // Cherry-picked students are always a same-class move — see the DTO's
-    // own comment for why. This is a hard rule, not the same-class
-    // source-section requirement below, so it's checked unconditionally.
-    if (dto.enrollmentIds && dto.toClassId !== classId) {
-      throw new BadRequestException("Transferring specific students is only supported within the same class");
-    }
-
     // Moving within the same class (reshuffling sections, e.g. Section A ->
     // Section B) is allowed, but only when scoped to one real source
     // section that differs from the destination — "everyone in the class

@@ -240,7 +240,10 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
-  const effectiveToClassId = transferMode === "students" ? classId : transferToClassId;
+  // Kept as its own name (rather than inlining transferToClassId
+  // everywhere) since earlier this was mode-dependent; still handy as one
+  // place to read "the destination class actually in effect."
+  const effectiveToClassId = transferToClassId;
   const isSameClassTransfer = effectiveToClassId === classId;
 
   function toggleSelectedStudent(enrollmentId: string) {
@@ -502,7 +505,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                       type="button"
                       onClick={() => {
                         setTransferMode(tab.key);
-                        setTransferToClassId(tab.key === "students" ? classId : "");
+                        setTransferToClassId("");
                         setTransferToSectionId("");
                         setSelectedEnrollmentIds(new Set());
                         setTransferImpact(null);
@@ -536,7 +539,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                     </Select>
                   </FormField>
 
-                  {transferMode === "section" ? (
+                  {transferMode === "section" && (
                     <FormField
                       label="Source section"
                       hint="Leave as “All sections” to move the whole class, or pick one section to reshuffle it — including into another section of this same class."
@@ -556,31 +559,25 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                         ))}
                       </Select>
                     </FormField>
-                  ) : (
-                    <FormField label="Destination" hint="Selecting specific students only moves them within this class.">
-                      <Input value={`${cls?.name ?? ""} (same class)`} disabled />
-                    </FormField>
                   )}
 
-                  {transferMode === "section" && (
-                    <FormField label="Destination class" required>
-                      <Select
-                        value={transferToClassId}
-                        onChange={(e) => {
-                          setTransferToClassId(e.target.value);
-                          setTransferToSectionId("");
-                          setTransferImpact(null);
-                        }}
-                      >
-                        <option value="">Select a class…</option>
-                        {allClasses?.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.id === classId ? `${c.name} (same class)` : `${c.name} (${c.division.type})`}
-                          </option>
-                        ))}
-                      </Select>
-                    </FormField>
-                  )}
+                  <FormField label="Destination class" required>
+                    <Select
+                      value={transferToClassId}
+                      onChange={(e) => {
+                        setTransferToClassId(e.target.value);
+                        setTransferToSectionId("");
+                        setTransferImpact(null);
+                      }}
+                    >
+                      <option value="">Select a class…</option>
+                      {allClasses?.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.id === classId ? `${c.name} (same class)` : `${c.name} (${c.division.type})`}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
                   <FormField label="Destination section" required>
                     <Select
                       value={transferToSectionId}

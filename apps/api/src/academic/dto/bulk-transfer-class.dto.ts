@@ -13,10 +13,8 @@ export class BulkTransferClassDto {
   fromSectionId?: string;
 
   // Cherry-picked students (found by name/ID/roll number in the UI) instead
-  // of an entire section — restricted to a same-class move only (see
-  // ClassesService.bulkTransfer), since picking individual students across
-  // different classes raises curriculum questions this endpoint isn't
-  // meant to answer. Mutually exclusive with fromSectionId.
+  // of an entire section — can move to any class, same as fromSectionId.
+  // Mutually exclusive with fromSectionId.
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1)

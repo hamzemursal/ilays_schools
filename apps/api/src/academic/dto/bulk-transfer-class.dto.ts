@@ -1,4 +1,4 @@
-import { IsOptional, IsUUID } from "class-validator";
+import { ArrayMinSize, IsArray, IsOptional, IsUUID } from "class-validator";
 
 export class BulkTransferClassDto {
   @IsUUID()
@@ -11,6 +11,17 @@ export class BulkTransferClassDto {
   @IsOptional()
   @IsUUID()
   fromSectionId?: string;
+
+  // Cherry-picked students (found by name/ID/roll number in the UI) instead
+  // of an entire section — restricted to a same-class move only (see
+  // ClassesService.bulkTransfer), since picking individual students across
+  // different classes raises curriculum questions this endpoint isn't
+  // meant to answer. Mutually exclusive with fromSectionId.
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsUUID(undefined, { each: true })
+  enrollmentIds?: string[];
 
   @IsUUID()
   toClassId!: string;

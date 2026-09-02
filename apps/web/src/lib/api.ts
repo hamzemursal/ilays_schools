@@ -1067,7 +1067,13 @@ export const api = {
     accessToken: string,
     schoolId: string,
     classId: string,
-    body: { academicYearId: string; fromSectionId?: string; toClassId: string; toSectionId: string },
+    body: {
+      academicYearId: string;
+      fromSectionId?: string;
+      enrollmentIds?: string[];
+      toClassId: string;
+      toSectionId: string;
+    },
   ) =>
     request<{ success: boolean; movedCount: number }>(`/schools/${schoolId}/classes/${classId}/bulk-transfer`, {
       method: "POST",

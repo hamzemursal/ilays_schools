@@ -25,7 +25,7 @@ import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
-import { ArrowLeftRight, ChevronRight, GraduationCap, Pencil, Plus, Trash2, Check, X } from "lucide-react";
+import { ArrowLeftRight, ChevronRight, GraduationCap, Pencil, Plus, Search, Trash2, Check, X } from "lucide-react";
 
 export default function ClassDetailPage({ params }: { params: Promise<{ id: string; classId: string }> }) {
   const { id: schoolId, classId } = use(params);
@@ -63,12 +63,16 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const [deletingSectionId, setDeletingSectionId] = useState<string | null>(null);
 
   const [showTransferForm, setShowTransferForm] = useState(false);
+  const [transferMode, setTransferMode] = useState<"section" | "students">("section");
   const [transferYearId, setTransferYearId] = useState("");
   const [transferFromSectionId, setTransferFromSectionId] = useState("");
   const [transferToClassId, setTransferToClassId] = useState("");
   const [transferToSectionId, setTransferToSectionId] = useState("");
+  const [studentSearch, setStudentSearch] = useState("");
+  const [selectedEnrollmentIds, setSelectedEnrollmentIds] = useState<Set<string>>(new Set());
   const [loadingTransferImpact, setLoadingTransferImpact] = useState(false);
   const [transferImpact, setTransferImpact] = useState<ClassBulkTransferImpact | null>(null);
+  const [selectedStudentsPreview, setSelectedStudentsPreview] = useState<StudentListItem[]>([]);
   const [transferError, setTransferError] = useState<string | null>(null);
   const [transferring, setTransferring] = useState(false);
 
@@ -236,11 +240,36 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
-  const isSameClassTransfer = transferToClassId === classId;
+  const effectiveToClassId = transferMode === "students" ? classId : transferToClassId;
+  const isSameClassTransfer = effectiveToClassId === classId;
+
+  function toggleSelectedStudent(enrollmentId: string) {
+    setSelectedEnrollmentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(enrollmentId)) next.delete(enrollmentId);
+      else next.add(enrollmentId);
+      return next;
+    });
+    setTransferImpact(null);
+  }
 
   async function onPreviewTransfer() {
-    if (!accessToken || !transferYearId || !transferToClassId || !transferToSectionId) return;
+    if (!accessToken || !transferYearId || !effectiveToClassId || !transferToSectionId) return;
     setTransferError(null);
+
+    if (transferMode === "students") {
+      const chosen = classStudents?.filter((s) => selectedEnrollmentIds.has(s.enrollmentId)) ?? [];
+      if (chosen.length === 0) return;
+      setSelectedStudentsPreview(chosen);
+      setTransferImpact({
+        className: cls?.name ?? "",
+        sectionName: null,
+        academicYearName: years.find((y) => y.id === transferYearId)?.name ?? "",
+        studentCount: chosen.length,
+      });
+      return;
+    }
+
     setLoadingTransferImpact(true);
     try {
       const impact = await api.getClassBulkTransferImpact(
@@ -259,21 +288,25 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   async function onConfirmTransfer() {
-    if (!accessToken || !transferYearId || !transferToClassId || !transferToSectionId) return;
+    if (!accessToken || !transferYearId || !effectiveToClassId || !transferToSectionId) return;
     setTransferring(true);
     try {
       const result = await api.bulkTransferClass(accessToken, schoolId, classId, {
         academicYearId: transferYearId,
-        fromSectionId: transferFromSectionId || undefined,
-        toClassId: transferToClassId,
+        fromSectionId: transferMode === "section" ? transferFromSectionId || undefined : undefined,
+        enrollmentIds: transferMode === "students" ? Array.from(selectedEnrollmentIds) : undefined,
+        toClassId: effectiveToClassId,
         toSectionId: transferToSectionId,
       });
       show(`${result.movedCount} student(s) transferred.`);
       setTransferImpact(null);
+      setSelectedStudentsPreview([]);
       setShowTransferForm(false);
       setTransferFromSectionId("");
       setTransferToClassId("");
       setTransferToSectionId("");
+      setSelectedEnrollmentIds(new Set());
+      setStudentSearch("");
       await loadAll();
     } catch (err) {
       setTransferError(err instanceof ApiError ? err.message : "Failed to transfer students");
@@ -282,7 +315,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
-  const transferDestinationClass = allClasses?.find((c) => c.id === transferToClassId);
+  const transferDestinationClass = allClasses?.find((c) => c.id === effectiveToClassId);
   const schoolName = user?.schools.find((s) => s.id === schoolId)?.name ?? "School";
   const canManage = user?.permissions.includes("academic.manage") ?? false;
   const unassignedSubjects = allSubjects.filter((s) => !subjects?.some((cs) => cs.subjectId === s.id));
@@ -298,6 +331,17 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
           ?.filter((s) => s.className === cls.name && sections.some((sec) => sec.name === s.sectionName))
           .sort((a, b) => a.sectionName.localeCompare(b.sectionName) || a.rollNumber - b.rollNumber)
       : undefined;
+
+  const studentSearchResults = (() => {
+    const q = studentSearch.trim().toLowerCase();
+    if (!q) return classStudents ?? [];
+    return (classStudents ?? []).filter(
+      (s) =>
+        `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) ||
+        s.studentNumber.toLowerCase().includes(q) ||
+        String(s.rollNumber).includes(q),
+    );
+  })();
 
   if (error) {
     return (
@@ -369,21 +413,34 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
         open={!!transferImpact}
         title={`Transfer ${transferImpact?.studentCount ?? 0} student(s) to ${transferDestinationClass?.name ?? "…"}?`}
         description={
-          <>
-            All <strong>{transferImpact?.studentCount ?? 0}</strong> active student(s) in{" "}
-            <strong>
-              {transferImpact?.className}
-              {transferImpact?.sectionName ? ` - Section ${transferImpact.sectionName}` : ""}
-            </strong>{" "}
-            for academic year <strong>{transferImpact?.academicYearName}</strong> will move to{" "}
-            <strong>
-              {transferDestinationClass?.name} - Section{" "}
-              {transferDestinationClass?.sections.find((s) => s.id === transferToSectionId)?.name}
-            </strong>
-            . Roll numbers will be reassigned. This cannot be undone.
-          </>
+          transferMode === "students" ? (
+            <>
+              <strong>{selectedStudentsPreview.length}</strong> selected student(s) —{" "}
+              {selectedStudentsPreview.map((s) => `${s.firstName} ${s.lastName}`).join(", ")} — for academic year{" "}
+              <strong>{transferImpact?.academicYearName}</strong> will move to{" "}
+              <strong>
+                {transferDestinationClass?.name} - Section{" "}
+                {transferDestinationClass?.sections.find((s) => s.id === transferToSectionId)?.name}
+              </strong>
+              . Roll numbers will be reassigned. This cannot be undone.
+            </>
+          ) : (
+            <>
+              All <strong>{transferImpact?.studentCount ?? 0}</strong> active student(s) in{" "}
+              <strong>
+                {transferImpact?.className}
+                {transferImpact?.sectionName ? ` - Section ${transferImpact.sectionName}` : ""}
+              </strong>{" "}
+              for academic year <strong>{transferImpact?.academicYearName}</strong> will move to{" "}
+              <strong>
+                {transferDestinationClass?.name} - Section{" "}
+                {transferDestinationClass?.sections.find((s) => s.id === transferToSectionId)?.name}
+              </strong>
+              . Roll numbers will be reassigned. This cannot be undone.
+            </>
+          )
         }
-        confirmLabel="Transfer all students"
+        confirmLabel={transferMode === "students" ? "Transfer selected students" : "Transfer all students"}
         loading={transferring}
         onConfirm={onConfirmTransfer}
         onCancel={() => setTransferImpact(null)}
@@ -432,6 +489,35 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                   title="Class Transfer"
                   description="Move active students, for one academic year, into a different class and section — or reshuffle sections within this same class."
                 />
+
+                <div className="mt-4 flex gap-1 rounded-lg border border-border bg-surface-soft p-1">
+                  {(
+                    [
+                      { key: "section" as const, label: "By section" },
+                      { key: "students" as const, label: "Select specific students" },
+                    ]
+                  ).map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => {
+                        setTransferMode(tab.key);
+                        setTransferToClassId(tab.key === "students" ? classId : "");
+                        setTransferToSectionId("");
+                        setSelectedEnrollmentIds(new Set());
+                        setTransferImpact(null);
+                      }}
+                      className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                        transferMode === tab.key
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-foreground-soft hover:text-foreground"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <FormField label="Academic year" required>
                     <Select
@@ -449,42 +535,52 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                       ))}
                     </Select>
                   </FormField>
-                  <FormField
-                    label="Source section"
-                    hint="Leave as “All sections” to move the whole class, or pick one section to reshuffle it — including into another section of this same class."
-                  >
-                    <Select
-                      value={transferFromSectionId}
-                      onChange={(e) => {
-                        setTransferFromSectionId(e.target.value);
-                        setTransferImpact(null);
-                      }}
+
+                  {transferMode === "section" ? (
+                    <FormField
+                      label="Source section"
+                      hint="Leave as “All sections” to move the whole class, or pick one section to reshuffle it — including into another section of this same class."
                     >
-                      <option value="">All sections (whole class)</option>
-                      {sections.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          Section {s.name} only
-                        </option>
-                      ))}
-                    </Select>
-                  </FormField>
-                  <FormField label="Destination class" required>
-                    <Select
-                      value={transferToClassId}
-                      onChange={(e) => {
-                        setTransferToClassId(e.target.value);
-                        setTransferToSectionId("");
-                        setTransferImpact(null);
-                      }}
-                    >
-                      <option value="">Select a class…</option>
-                      {allClasses?.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.id === classId ? `${c.name} (same class)` : `${c.name} (${c.division.type})`}
-                        </option>
-                      ))}
-                    </Select>
-                  </FormField>
+                      <Select
+                        value={transferFromSectionId}
+                        onChange={(e) => {
+                          setTransferFromSectionId(e.target.value);
+                          setTransferImpact(null);
+                        }}
+                      >
+                        <option value="">All sections (whole class)</option>
+                        {sections.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            Section {s.name} only
+                          </option>
+                        ))}
+                      </Select>
+                    </FormField>
+                  ) : (
+                    <FormField label="Destination" hint="Selecting specific students only moves them within this class.">
+                      <Input value={`${cls?.name ?? ""} (same class)`} disabled />
+                    </FormField>
+                  )}
+
+                  {transferMode === "section" && (
+                    <FormField label="Destination class" required>
+                      <Select
+                        value={transferToClassId}
+                        onChange={(e) => {
+                          setTransferToClassId(e.target.value);
+                          setTransferToSectionId("");
+                          setTransferImpact(null);
+                        }}
+                      >
+                        <option value="">Select a class…</option>
+                        {allClasses?.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.id === classId ? `${c.name} (same class)` : `${c.name} (${c.division.type})`}
+                          </option>
+                        ))}
+                      </Select>
+                    </FormField>
+                  )}
                   <FormField label="Destination section" required>
                     <Select
                       value={transferToSectionId}
@@ -496,7 +592,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                     >
                       <option value="">Select a section…</option>
                       {transferDestinationClass?.sections
-                        .filter((s) => !isSameClassTransfer || s.id !== transferFromSectionId)
+                        .filter((s) => transferMode === "students" || !isSameClassTransfer || s.id !== transferFromSectionId)
                         .map((s) => (
                           <option key={s.id} value={s.id}>
                             {s.name}
@@ -506,7 +602,57 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                     </Select>
                   </FormField>
                 </div>
-                {isSameClassTransfer && !transferFromSectionId && (
+
+                {transferMode === "students" && (
+                  <div className="mt-4">
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+                      Find students by name, ID, or roll no.
+                    </label>
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-muted" />
+                      <Input
+                        value={studentSearch}
+                        onChange={(e) => setStudentSearch(e.target.value)}
+                        placeholder="e.g. Amina, STU-2027-00003, or 12"
+                        className="pl-9"
+                      />
+                    </div>
+                    <div className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-border">
+                      {studentSearchResults.length === 0 ? (
+                        <p className="p-4 text-center text-sm text-foreground-muted">No matching students.</p>
+                      ) : (
+                        <div className="divide-y divide-border">
+                          {studentSearchResults.map((s) => (
+                            <label
+                              key={s.enrollmentId}
+                              className="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm hover:bg-surface-hover"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedEnrollmentIds.has(s.enrollmentId)}
+                                onChange={() => toggleSelectedStudent(s.enrollmentId)}
+                                className="size-4 rounded border-border"
+                              />
+                              <span className="w-10 shrink-0 tabular-nums text-foreground-muted">{s.rollNumber}</span>
+                              <span className="w-28 shrink-0 truncate font-mono text-xs text-foreground-muted">
+                                {s.studentNumber}
+                              </span>
+                              <span className="flex-1 truncate font-medium text-foreground">
+                                {s.firstName} {s.lastName}
+                              </span>
+                              <span className="shrink-0 text-xs text-foreground-muted">Section {s.sectionName}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <p className="mt-1.5 text-xs text-foreground-muted">
+                      {selectedEnrollmentIds.size} student(s) selected.
+                    </p>
+                  </div>
+                )}
+
+                {transferMode === "section" && isSameClassTransfer && !transferFromSectionId && (
                   <Alert tone="warning" className="mt-4">
                     Moving within the same class requires picking a specific source section above — not
                     &ldquo;All sections&rdquo;.
@@ -523,9 +669,10 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                     loading={loadingTransferImpact}
                     disabled={
                       !transferYearId ||
-                      !transferToClassId ||
+                      !effectiveToClassId ||
                       !transferToSectionId ||
-                      (isSameClassTransfer && !transferFromSectionId)
+                      (transferMode === "section" && isSameClassTransfer && !transferFromSectionId) ||
+                      (transferMode === "students" && selectedEnrollmentIds.size === 0)
                     }
                     onClick={onPreviewTransfer}
                   >

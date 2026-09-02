@@ -338,13 +338,26 @@ export class ClassesService {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     await this.getClassInSchoolOrThrow(schoolId, classId);
 
+    if (dto.fromSectionId && dto.enrollmentIds) {
+      throw new BadRequestException("Specify either a source section or specific students, not both");
+    }
+
+    // Cherry-picked students are always a same-class move — see the DTO's
+    // own comment for why. This is a hard rule, not the same-class
+    // source-section requirement below, so it's checked unconditionally.
+    if (dto.enrollmentIds && dto.toClassId !== classId) {
+      throw new BadRequestException("Transferring specific students is only supported within the same class");
+    }
+
     // Moving within the same class (reshuffling sections, e.g. Section A ->
     // Section B) is allowed, but only when scoped to one real source
     // section that differs from the destination — "everyone in the class
     // into one of the class's own sections" is an ambiguous partial no-op
     // (some of those students are already there) and is rejected instead of
-    // guessed at.
-    if (dto.toClassId === classId) {
+    // guessed at. Doesn't apply when specific students were picked instead
+    // of a section — there, each student's own current section is checked
+    // individually below.
+    if (dto.toClassId === classId && !dto.enrollmentIds) {
       if (!dto.fromSectionId) {
         throw new BadRequestException(
           "Moving within the same class requires picking a specific source section (not the whole class)",
@@ -371,11 +384,29 @@ export class ClassesService {
     });
     if (!toSection) throw new BadRequestException("That section does not belong to the destination class");
 
+    if (dto.enrollmentIds) {
+      const matched = await this.prisma.studentEnrollment.count({
+        where: {
+          id: { in: dto.enrollmentIds },
+          classId,
+          academicYearId: dto.academicYearId,
+          status: "ACTIVE",
+          sectionId: { not: dto.toSectionId },
+        },
+      });
+      if (matched !== dto.enrollmentIds.length) {
+        throw new BadRequestException(
+          "One or more selected students are not active in this class/year, or are already in the destination section",
+        );
+      }
+    }
+
     const enrollments = await this.prisma.studentEnrollment.findMany({
       where: {
         classId,
         academicYearId: dto.academicYearId,
         status: "ACTIVE",
+        ...(dto.enrollmentIds ? { id: { in: dto.enrollmentIds } } : {}),
         ...(dto.fromSectionId ? { sectionId: dto.fromSectionId } : {}),
       },
       orderBy: { rollNumber: "asc" },

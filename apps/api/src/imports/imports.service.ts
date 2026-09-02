@@ -236,6 +236,7 @@ export class ImportsService {
         lastName,
         dateOfBirth,
         sex: sexRaw as Sex,
+        legacyStudentNumber: raw.legacyStudentNumber?.trim() || undefined,
         enrollment: {
           academicYearId: academicYear.id,
           classId: klass.id,

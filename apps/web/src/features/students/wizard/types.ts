@@ -19,6 +19,7 @@ export interface WizardState {
   lastName: string;
   dateOfBirth: string;
   sex: Sex;
+  legacyStudentNumber: string;
   guardians: WizardGuardian[];
   academicYearId: string;
   classId: string;
@@ -33,6 +34,7 @@ export function emptyWizardState(): WizardState {
     lastName: "",
     dateOfBirth: "",
     sex: "MALE",
+    legacyStudentNumber: "",
     guardians: [],
     academicYearId: "",
     classId: "",

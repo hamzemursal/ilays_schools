@@ -305,12 +305,18 @@ export class StudentsService {
     // Duplicate check first — before touching capacity or anything else.
     // Never auto-merge: if a close match exists and the caller hasn't
     // explicitly confirmed, hand back the candidates instead of creating.
-    if (!dto.confirmDespiteDuplicates) {
+    //
+    // Product decision: match on legacyStudentNumber (a real prior/external
+    // ID) only, never on name — many students legitimately share a last
+    // name, and name+DOB was producing too many false-positive warnings in
+    // practice. This means a brand-new student with no prior ID at all
+    // (legacyStudentNumber omitted) gets no duplicate check at all — there
+    // is nothing to compare — which is accepted as the tradeoff.
+    if (!dto.confirmDespiteDuplicates && dto.legacyStudentNumber) {
       const candidates = await this.prisma.student.findMany({
         where: {
           organizationId: actor.organizationId!,
-          dateOfBirth,
-          lastName: { equals: dto.lastName, mode: "insensitive" },
+          legacyStudentNumber: { equals: dto.legacyStudentNumber, mode: "insensitive" },
         },
         take: 5,
       });

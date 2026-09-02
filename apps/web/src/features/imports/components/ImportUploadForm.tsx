@@ -42,8 +42,9 @@ export function ImportUploadForm({
       <h2 className="text-sm font-semibold text-foreground">Import students from CSV</h2>
       <p className="mt-1 text-sm text-foreground-soft">
         Required columns: firstName, lastName, dateOfBirth (YYYY-MM-DD), sex (MALE/FEMALE), academicYear, className,
-        sectionName. Optional: studentNumber, rollNumber, and a single guardian per row (guardianFirstName,
-        guardianLastName, guardianPhone, guardianEmail, guardianRelationship).
+        sectionName. Optional: studentNumber, rollNumber, legacyStudentNumber (a prior/external student ID — if
+        provided, it&apos;s used to catch duplicates instead of comparing names), and a single guardian per row
+        (guardianFirstName, guardianLastName, guardianPhone, guardianEmail, guardianRelationship).
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">

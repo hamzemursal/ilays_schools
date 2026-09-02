@@ -72,6 +72,7 @@ export function StudentWizard({ schoolId }: { schoolId: string }) {
         lastName: state.lastName,
         dateOfBirth: state.dateOfBirth,
         sex: state.sex,
+        legacyStudentNumber: state.legacyStudentNumber.trim() || undefined,
         enrollment: {
           academicYearId: state.academicYearId,
           classId: state.classId,
@@ -160,7 +161,7 @@ export function StudentWizard({ schoolId }: { schoolId: string }) {
           {duplicates.length} similar student{duplicates.length > 1 ? "s" : ""} already exist
         </h2>
         <p className="mt-2 text-sm text-foreground-soft">
-          Same last name and date of birth as someone already in the system. Review before continuing — this is
+          Same prior/external student ID as someone already in the system. Review before continuing — this is
           never merged automatically.
         </p>
         <ul className="mt-4 space-y-2">
@@ -169,7 +170,9 @@ export function StudentWizard({ schoolId }: { schoolId: string }) {
               <p className="font-medium text-foreground">
                 {d.firstName} {d.lastName}
               </p>
-              <p className="text-sm text-foreground-soft">Born {new Date(d.dateOfBirth).toLocaleDateString()}</p>
+              <p className="text-sm text-foreground-soft">
+                ID {d.legacyStudentNumber} · Born {new Date(d.dateOfBirth).toLocaleDateString()}
+              </p>
             </li>
           ))}
         </ul>

@@ -304,6 +304,7 @@ export interface DuplicateCandidate {
   firstName: string;
   lastName: string;
   dateOfBirth: string;
+  legacyStudentNumber: string | null;
 }
 
 export type StudentStatus = "ACTIVE" | "COMPLETED" | "GRADUATED" | "TRANSFERRED" | "WITHDRAWN" | "ARCHIVED";

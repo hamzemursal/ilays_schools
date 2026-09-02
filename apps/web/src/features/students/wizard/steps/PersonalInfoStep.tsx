@@ -84,6 +84,16 @@ export function PersonalInfoStep({
             <option value="FEMALE">Female</option>
           </Select>
         </FormField>
+        <FormField
+          label="Prior / external student ID"
+          hint="Optional — from a previous school or system. If provided, it's used to catch duplicate records."
+          className="sm:col-span-2"
+        >
+          <Input
+            value={state.legacyStudentNumber}
+            onChange={(e) => onChange({ legacyStudentNumber: e.target.value })}
+          />
+        </FormField>
       </div>
     </div>
   );

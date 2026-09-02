@@ -8,8 +8,8 @@ export const importsApi = {
 };
 
 export const STUDENTS_IMPORT_TEMPLATE = [
-  "firstName,lastName,dateOfBirth,sex,academicYear,className,sectionName,studentNumber,rollNumber,guardianFirstName,guardianLastName,guardianPhone,guardianEmail,guardianRelationship",
-  "Amina,Warsame,2015-03-12,FEMALE,2027,Class 7,A,,,Hassan,Warsame,0611234567,,FATHER",
+  "firstName,lastName,dateOfBirth,sex,academicYear,className,sectionName,studentNumber,rollNumber,legacyStudentNumber,guardianFirstName,guardianLastName,guardianPhone,guardianEmail,guardianRelationship",
+  "Amina,Warsame,2015-03-12,FEMALE,2027,Class 7,A,,,,Hassan,Warsame,0611234567,,FATHER",
 ].join("\r\n");
 
 export function downloadImportTemplate() {

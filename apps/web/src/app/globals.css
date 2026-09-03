@@ -21,9 +21,15 @@
   --danger: #c22e2e;
   --danger-soft: #fbe9e9;
   --sidebar-bg: #ffffff;
-  --shadow-sm: 0 1px 2px 0 rgb(20 33 61 / 0.05);
-  --shadow-md: 0 4px 16px -4px rgb(20 33 61 / 0.10), 0 1px 3px 0 rgb(20 33 61 / 0.06);
-  --shadow-lg: 0 12px 32px -8px rgb(20 33 61 / 0.16), 0 2px 6px 0 rgb(20 33 61 / 0.06);
+  /* Diffused rather than hard-edged: generous blur + negative spread, low
+     opacity, tinted with the same dark-blue foreground color instead of
+     pure black — a gentle "floating" look rather than a harsh drop shadow.
+     Previously defined here but never actually wired into Tailwind's shadow
+     scale below, so every shadow-sm/md/lg in the app was silently falling
+     back to Tailwind's plain default shadows instead of this. */
+  --shadow-sm: 0 2px 8px -2px rgb(20 33 61 / 0.06), 0 1px 2px 0 rgb(20 33 61 / 0.04);
+  --shadow-md: 0 8px 24px -6px rgb(20 33 61 / 0.10), 0 2px 6px -1px rgb(20 33 61 / 0.05);
+  --shadow-lg: 0 20px 48px -12px rgb(20 33 61 / 0.16), 0 4px 10px -2px rgb(20 33 61 / 0.06);
 }
 
 @theme inline {
@@ -48,6 +54,13 @@
   --color-sidebar-bg: var(--sidebar-bg);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* Tailwind's box-shadow theme namespace — this is what actually makes
+     the shadow-sm/md/lg utility classes used all over the app (Card,
+     StatCard, dropdown menus, dialogs) resolve to the soft values above. */
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
 }
 
 /* This platform stays on the light/white palette always, by explicit

@@ -32,6 +32,17 @@ export class AttendanceController {
     return this.attendance.mark(user, schoolId, sectionId, dto);
   }
 
+  @RequirePermissions("attendance.mark")
+  @Post("schools/:schoolId/sections/:sectionId/attendance/draft")
+  saveDraft(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("sectionId") sectionId: string,
+    @Body() dto: MarkAttendanceDto,
+  ) {
+    return this.attendance.saveDraft(user, schoolId, sectionId, dto);
+  }
+
   @RequirePermissions("attendance.view")
   @Get("schools/:schoolId/sections/:sectionId/attendance/history")
   history(

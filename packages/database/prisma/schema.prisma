@@ -268,13 +268,14 @@ model StudentEnrollment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  transfersOut  Transfer[]      @relation("TransferFrom")
-  transfersIn   Transfer[]      @relation("TransferTo")
-  promotionFrom PromotionItem[] @relation("PromotionFrom")
-  promotionTo   PromotionItem[] @relation("PromotionTo")
-  attendances   Attendance[]
-  results       Result[]
-  invoices      Invoice[]
+  transfersOut     Transfer[]        @relation("TransferFrom")
+  transfersIn      Transfer[]        @relation("TransferTo")
+  promotionFrom    PromotionItem[]   @relation("PromotionFrom")
+  promotionTo      PromotionItem[]   @relation("PromotionTo")
+  attendances      Attendance[]
+  attendanceDrafts AttendanceDraft[]
+  results          Result[]
+  invoices         Invoice[]
 
   // Roll number is unique per school+year+class+section — but only among
   // rows sharing the same `status`. Including status in the tuple (rather
@@ -502,6 +503,31 @@ model Attendance {
 
   @@unique([enrollmentId, date])
   @@map("attendance_records")
+}
+
+// A teacher's in-progress, unfinished attendance for one section+day —
+// deliberately a separate table from Attendance, not a status flag on it.
+// Every dashboard/report/parent/student-portal query already reads
+// Attendance directly as "real, finalized attendance"; keeping drafts out
+// of that table entirely means none of those call sites need to remember
+// to filter drafts out — they simply never see them. AttendanceService.mark
+// (the real "Save attendance") deletes the matching draft rows once it
+// writes the real Attendance rows, so a draft never outlives its submission.
+model AttendanceDraft {
+  id           String            @id @default(uuid())
+  enrollmentId String
+  enrollment   StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  date          DateTime         @db.Date
+  status        AttendanceStatus
+  note          String?
+  savedByUserId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([enrollmentId, date])
+  @@map("attendance_drafts")
 }
 
 // ---------------------------------------------------------------------------

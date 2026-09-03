@@ -640,6 +640,9 @@ export interface AttendanceRow {
   rollNumber: number;
   status: AttendanceStatus | null;
   note: string | null;
+  // True only when this status came from a saved-but-not-submitted draft —
+  // there's no finalized attendance for this student/day yet.
+  isDraft: boolean;
 }
 
 export type ExamType = "QUIZ" | "MIDTERM" | "FINAL" | "ASSIGNMENT" | "OTHER";
@@ -1344,6 +1347,18 @@ export const api = {
     entries: { enrollmentId: string; status: AttendanceStatus }[],
   ) =>
     request<AttendanceRow[]>(`/schools/${schoolId}/sections/${sectionId}/attendance`, {
+      method: "POST",
+      body: { date, entries },
+      accessToken,
+    }),
+  saveAttendanceDraft: (
+    accessToken: string,
+    schoolId: string,
+    sectionId: string,
+    date: string,
+    entries: { enrollmentId: string; status: AttendanceStatus }[],
+  ) =>
+    request<AttendanceRow[]>(`/schools/${schoolId}/sections/${sectionId}/attendance/draft`, {
       method: "POST",
       body: { date, entries },
       accessToken,

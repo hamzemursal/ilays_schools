@@ -66,19 +66,74 @@ export class AttendanceService {
 
     const enrollments = await this.prisma.studentEnrollment.findMany({
       where: { sectionId, status: "ACTIVE" },
-      include: { student: true, attendances: { where: { date: new Date(date) } } },
+      include: {
+        student: true,
+        attendances: { where: { date: new Date(date) } },
+        attendanceDrafts: { where: { date: new Date(date) } },
+      },
       orderBy: { rollNumber: "asc" },
     });
 
-    return enrollments.map((e) => ({
-      enrollmentId: e.id,
-      studentId: e.studentId,
-      firstName: e.student.firstName,
-      lastName: e.student.lastName,
-      rollNumber: e.rollNumber,
-      status: e.attendances[0]?.status ?? null,
-      note: e.attendances[0]?.note ?? null,
-    }));
+    // A submitted (Attendance) row always wins over a draft for the same
+    // day — once finalized, the draft is stale even if mark() somehow left
+    // it behind. isDraft only ever true when there's a draft AND no
+    // submitted row yet, which is exactly "resume where you left off."
+    return enrollments.map((e) => {
+      const submitted = e.attendances[0];
+      const draft = e.attendanceDrafts[0];
+      return {
+        enrollmentId: e.id,
+        studentId: e.studentId,
+        firstName: e.student.firstName,
+        lastName: e.student.lastName,
+        rollNumber: e.rollNumber,
+        status: submitted?.status ?? draft?.status ?? null,
+        note: submitted?.note ?? draft?.note ?? null,
+        isDraft: !submitted && !!draft,
+      };
+    });
+  }
+
+  // "Save as Draft" — used when a teacher wants to leave partway through
+  // marking without losing what they've entered so far, but isn't ready to
+  // finalize it as the section's real attendance for the day. Deliberately
+  // never touches the real Attendance table, so nothing that reads
+  // Attendance directly (dashboard, reports, parent/student portals) can
+  // ever see an unfinished day as if it were real attendance.
+  async saveDraft(actor: AuthenticatedUser, schoolId: string, sectionId: string, dto: MarkAttendanceDto) {
+    await this.assertCanAccessSection(actor, schoolId, sectionId);
+    await this.getSectionInSchoolOrThrow(schoolId, sectionId);
+
+    const enrollmentIds = dto.entries.map((e) => e.enrollmentId);
+    const validEnrollments = await this.prisma.studentEnrollment.findMany({
+      where: { id: { in: enrollmentIds }, sectionId, status: "ACTIVE" },
+      select: { id: true },
+    });
+    const validIds = new Set(validEnrollments.map((e) => e.id));
+    const invalid = enrollmentIds.filter((id) => !validIds.has(id));
+    if (invalid.length > 0) {
+      throw new BadRequestException(`These enrollments aren't active in this section: ${invalid.join(", ")}`);
+    }
+
+    const date = new Date(dto.date);
+
+    await this.prisma.$transaction(
+      dto.entries.map((e) =>
+        this.prisma.attendanceDraft.upsert({
+          where: { enrollmentId_date: { enrollmentId: e.enrollmentId, date } },
+          update: { status: e.status, note: e.note, savedByUserId: actor.id },
+          create: {
+            enrollmentId: e.enrollmentId,
+            date,
+            status: e.status,
+            note: e.note,
+            savedByUserId: actor.id,
+          },
+        }),
+      ),
+    );
+
+    return this.getForSectionAndDate(actor, schoolId, sectionId, dto.date);
   }
 
   async mark(actor: AuthenticatedUser, schoolId: string, sectionId: string, dto: MarkAttendanceDto) {
@@ -98,8 +153,8 @@ export class AttendanceService {
 
     const date = new Date(dto.date);
 
-    await this.prisma.$transaction(
-      dto.entries.map((e) =>
+    await this.prisma.$transaction([
+      ...dto.entries.map((e) =>
         this.prisma.attendance.upsert({
           where: { enrollmentId_date: { enrollmentId: e.enrollmentId, date } },
           update: { status: e.status, note: e.note, markedByUserId: actor.id },
@@ -112,7 +167,11 @@ export class AttendanceService {
           },
         }),
       ),
-    );
+      // Finalizing supersedes whatever draft got it here — leaving the draft
+      // behind would make the section look like it still had unfinished
+      // attendance for a day that's now actually submitted.
+      this.prisma.attendanceDraft.deleteMany({ where: { enrollmentId: { in: enrollmentIds }, date } }),
+    ]);
 
     return this.getForSectionAndDate(actor, schoolId, sectionId, dto.date);
   }

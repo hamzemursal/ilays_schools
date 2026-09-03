@@ -133,7 +133,7 @@ export class InvoicesService {
       );
 
       return payment;
-    });
+    }, { timeout: 30_000 });
   }
 
   async listPayments(actor: AuthenticatedUser, invoiceId: string) {

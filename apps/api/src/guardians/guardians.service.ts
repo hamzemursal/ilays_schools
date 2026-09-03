@@ -280,7 +280,7 @@ export class GuardiansService {
         },
         tx,
       );
-    });
+    }, { timeout: 30_000 });
 
     return { success: true };
   }
@@ -389,7 +389,7 @@ export class GuardiansService {
         },
         tx,
       );
-    });
+    }, { timeout: 30_000 });
 
     const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3010";
     return { email: targetEmail, acceptUrl: `${webOrigin}/accept-invite?token=${rawToken}` };

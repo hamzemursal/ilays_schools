@@ -8,6 +8,18 @@ function qs(params: Record<string, string | undefined>): string {
   return `?${entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&")}`;
 }
 
+// Same idea as qs() but for AuditLogFilters specifically, whose page/pageSize
+// are numbers rather than strings.
+function auditLogQs(filters: object): string {
+  return qs(
+    Object.fromEntries(
+      Object.entries(filters)
+        .filter((e): e is [string, string | number] => e[1] !== undefined)
+        .map(([k, v]) => [k, String(v)]),
+    ),
+  );
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -763,6 +775,59 @@ export interface AuditLogEntry {
   createdAt: string;
 }
 
+export type AuditStatus = "SUCCESS" | "FAILED" | "DENIED";
+export type AuditSeverity = "INFO" | "WARNING" | "CRITICAL";
+
+// The professional audit surface's row shape — richer than AuditLogEntry
+// above (which the original per-school page still uses unchanged). Every
+// field here already exists on the same underlying AuditLog table; this
+// just reads more of it.
+export interface AuditEvent {
+  id: string;
+  organizationId: string | null;
+  schoolId: string | null;
+  actorUserId: string | null;
+  actorNameSnapshot: string | null;
+  actorEmailSnapshot: string | null;
+  actorRoleSnapshot: string | null;
+  action: string;
+  module: string | null;
+  resource: string;
+  resourceId: string | null;
+  resourceNameSnapshot: string | null;
+  status: AuditStatus;
+  severity: AuditSeverity;
+  before: unknown;
+  after: unknown;
+  reason: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  requestId: string | null;
+  createdAt: string;
+}
+
+export interface AuditLogFilters {
+  schoolId?: string;
+  actorUserId?: string;
+  module?: string;
+  action?: string;
+  status?: AuditStatus;
+  severity?: AuditSeverity;
+  resourceType?: string;
+  search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+  pageSize?: number;
+  sortDir?: "asc" | "desc";
+}
+
+export interface AuditEventListResponse {
+  data: AuditEvent[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  summary: { total: number; successful: number; failed: number; critical: number };
+}
+
 export type TeacherStatus = "ACTIVE" | "ON_LEAVE" | "INACTIVE";
 
 export interface TeacherAssignmentRecord {
@@ -1445,6 +1510,11 @@ export const api = {
       `/schools/${schoolId}/audit-logs${action ? `?action=${encodeURIComponent(action)}` : ""}`,
       { accessToken },
     ),
+
+  listAuditEvents: (accessToken: string, filters: AuditLogFilters) =>
+    request<AuditEventListResponse>(`/audit-logs${auditLogQs(filters)}`, { accessToken }),
+  exportAuditEvents: (accessToken: string, filters: AuditLogFilters) =>
+    downloadFile(`/audit-logs/export${auditLogQs(filters)}`, accessToken, "audit-log.csv"),
 
   uploadStudentPhoto: (accessToken: string, studentId: string, file: File) =>
     uploadFile<{ id: string }>(`/students/${studentId}/photo`, file, "photo", accessToken),

@@ -231,7 +231,7 @@ export class TeachersService {
       );
 
       return files;
-    });
+    }, { timeout: 30_000 });
 
     await Promise.all(mediaFiles.map((f) => this.storage.delete(f.storageKey, f.mimeType).catch(() => undefined)));
 
@@ -301,7 +301,7 @@ export class TeachersService {
           where: { id: teacher.id },
           include: { assignments: { include: { subject: true, section: true } } },
         });
-      });
+      }, { timeout: 30_000 });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("A teacher with this employee number already exists in this school");
@@ -422,7 +422,7 @@ export class TeachersService {
       );
 
       return user;
-    });
+    }, { timeout: 30_000 });
 
     const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3010";
     return { email: result.email, acceptUrl: `${webOrigin}/accept-invite?token=${rawToken}` };

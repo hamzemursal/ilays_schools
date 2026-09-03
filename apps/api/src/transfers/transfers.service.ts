@@ -142,7 +142,7 @@ export class TransfersService {
         },
         tx,
       );
-    });
+    }, { timeout: 30_000 });
 
     return this.getOne(actor, transferId);
   }

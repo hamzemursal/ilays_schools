@@ -84,6 +84,13 @@ export function orgNavItems(user: Profile): NavItem[] {
   if (user.permissions.includes("schools.view")) {
     items.push({ label: "Schools", href: "/schools", icon: Building2 });
   }
+  // Org-wide audit history — only ever reachable by an account with no
+  // single-school restriction (Super Admin/Organization Admin; see
+  // schoolNavItems' own per-school "Audit log" entry for a School Admin's
+  // equivalent, scoped to just their school).
+  if (user.permissions.includes("schools.view") && user.permissions.includes("audit.view")) {
+    items.push({ label: "Audit Log", href: "/audit-log", icon: ScrollText });
+  }
   return items;
 }
 

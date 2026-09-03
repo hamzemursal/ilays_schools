@@ -309,7 +309,7 @@ export function DataTable<T>({
 // Keeps the page-number row from growing unbounded on a large list: always
 // shows the first and last page, the current page and its immediate
 // neighbors, and collapses the rest behind "…".
-function pageNumbersFor(current: number, total: number): (number | "…")[] {
+export function pageNumbersFor(current: number, total: number): (number | "…")[] {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
 
   const pages = new Set<number>([1, total, current, current - 1, current + 1]);

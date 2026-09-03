@@ -63,7 +63,7 @@ export class StudentsService {
         if (dto.enrollment) {
           await this.updateActiveEnrollment(tx, actor, studentId, dto.enrollment);
         }
-      });
+      }, { timeout: 30_000 });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("That roll number is already in use in the selected class, section, and year");
@@ -192,7 +192,7 @@ export class StudentsService {
         },
         tx,
       );
-    });
+    }, { timeout: 30_000 });
 
     return this.getFullDetail(actor, studentId);
   }
@@ -408,7 +408,7 @@ export class StudentsService {
         );
 
         return { student, enrollment, guardians: linkedGuardians };
-      });
+      }, { timeout: 30_000 });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("That roll number or student number is already in use in this school");
@@ -514,7 +514,7 @@ export class StudentsService {
         },
         tx,
       );
-    });
+    }, { timeout: 30_000 });
 
     return { loginId: enrollment.studentNumber, temporaryPassword };
   }

@@ -247,7 +247,7 @@ export class SchoolsService {
         );
 
         return school;
-      });
+      }, { timeout: 30_000 });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("A school with this name already exists in your organization");

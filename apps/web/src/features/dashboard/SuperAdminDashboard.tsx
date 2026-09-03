@@ -52,8 +52,8 @@ export function SuperAdminDashboard() {
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         <StatCard icon={Building2} label="Total schools" value={totals.schools} />
-        <StatCard icon={SchoolIcon} label="Primary schools" value={totals.primarySchools} />
-        <StatCard icon={SchoolIcon} label="Secondary schools" value={totals.secondarySchools} />
+        <StatCard icon={SchoolIcon} label="Primary schools" value={totals.primarySchools} tone="teal" />
+        <StatCard icon={SchoolIcon} label="Secondary schools" value={totals.secondarySchools} tone="violet" />
         <StatCard
           icon={CheckCircle2}
           label="Active schools"
@@ -62,10 +62,10 @@ export function SuperAdminDashboard() {
           hint={totals.inactiveSchools > 0 ? `${totals.inactiveSchools} inactive` : undefined}
         />
         <StatCard icon={Users} label="Total students" value={totals.students} />
-        <StatCard icon={Users} label="Male students" value={totals.maleStudents} />
-        <StatCard icon={Users} label="Female students" value={totals.femaleStudents} />
-        <StatCard icon={BookUser} label="Total teachers" value={totals.teachers} />
-        <StatCard icon={UserSquare2} label="Parents / guardians" value={totals.guardians} />
+        <StatCard icon={Users} label="Male students" value={totals.maleStudents} tone="teal" />
+        <StatCard icon={Users} label="Female students" value={totals.femaleStudents} tone="violet" />
+        <StatCard icon={BookUser} label="Total teachers" value={totals.teachers} tone="amber" />
+        <StatCard icon={UserSquare2} label="Parents / guardians" value={totals.guardians} tone="violet" />
         <StatCard icon={ShieldAlert} label="Total staff" value={totals.staff} hint="Teachers — no separate staff records yet" />
       </div>
 

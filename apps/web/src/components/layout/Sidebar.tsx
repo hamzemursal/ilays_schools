@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { GraduationCap } from "lucide-react";
 import type { Profile } from "@/lib/api";
 import { orgNavItems, parentNavItems, schoolNavItems, studentNavItems, type NavItem } from "./nav-config";
 
@@ -43,12 +42,12 @@ export function Sidebar({ user, onNavigate }: { user: Profile; onNavigate?: () =
 
   return (
     <div className="flex h-full flex-col bg-sidebar-bg">
-      <div className="flex h-16 shrink-0 items-center gap-2 border-b border-border px-5">
-        <div className="flex size-8 items-center justify-center rounded-lg bg-accent text-white">
-          <GraduationCap className="size-4.5" />
-        </div>
-        <span className="truncate font-semibold text-foreground">Ilays Schools</span>
-      </div>
+      {/* Empty spacer, not removed outright — keeps this row the same h-16
+          height as Topbar so the nav below lines up with the main content
+          below Topbar. The actual branding (logo + school name) lives in
+          Topbar now; having it here too just duplicated it right next to
+          itself. */}
+      <div className="h-16 shrink-0 border-b border-border" />
 
       <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
         {currentSchool && schoolItems.length > 0 && (

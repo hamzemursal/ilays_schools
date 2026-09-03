@@ -112,8 +112,8 @@ export default function DashboardPage() {
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
                 <StatCard icon={Users} label="Students" value={summary.counts.students} />
-                <StatCard icon={BookUser} label="Teachers" value={summary.counts.teachers} />
-                <StatCard icon={GraduationCap} label="Classes" value={summary.counts.classes} />
+                <StatCard icon={BookUser} label="Teachers" value={summary.counts.teachers} tone="amber" />
+                <StatCard icon={GraduationCap} label="Classes" value={summary.counts.classes} tone="teal" />
                 <StatCard
                   icon={ShieldCheck}
                   label="Attendance today"

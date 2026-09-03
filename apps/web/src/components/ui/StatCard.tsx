@@ -1,12 +1,21 @@
 import type { LucideIcon } from "lucide-react";
 
-type Tone = "neutral" | "success" | "warning" | "danger";
+// success/warning/danger stay reserved for actual status meaning (good/
+// caution/bad) — never repurposed just for decoration. violet/teal/amber
+// are purely categorical, for telling apart stat cards that have no real
+// status to report (e.g. "Total students" vs "Total teachers" are neither
+// good nor bad, just different things), so a dashboard of 8+ cards doesn't
+// read as one undifferentiated wall of the same blue icon.
+type Tone = "neutral" | "success" | "warning" | "danger" | "violet" | "teal" | "amber";
 
 const toneClasses: Record<Tone, string> = {
   neutral: "bg-accent-soft text-accent",
   success: "bg-success-soft text-success",
   warning: "bg-warning-soft text-warning",
   danger: "bg-danger-soft text-danger",
+  violet: "bg-violet-50 text-violet-600",
+  teal: "bg-teal-50 text-teal-600",
+  amber: "bg-amber-50 text-amber-600",
 };
 
 export function StatCard({

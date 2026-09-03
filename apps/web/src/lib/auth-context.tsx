@@ -7,7 +7,7 @@ interface AuthState {
   user: Profile | null;
   accessToken: string | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<Profile>;
   logout: () => Promise<void>;
   acceptInvite: (token: string, password: string) => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -30,6 +30,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loadProfile = useCallback(async (token: string) => {
     const profile = await api.me(token);
     setUser(profile);
+    return profile;
   }, []);
 
   // Concurrent 401s (e.g. a dashboard firing several requests at once right
@@ -100,7 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (email: string, password: string) => {
       const { accessToken: token } = await api.login(email, password);
       setAccessToken(token);
-      await loadProfile(token);
+      return loadProfile(token);
     },
     [loadProfile],
   );

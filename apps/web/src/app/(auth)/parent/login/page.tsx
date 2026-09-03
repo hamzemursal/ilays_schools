@@ -7,7 +7,13 @@ export default function ParentLoginPage() {
   return (
     <div>
       <PortalBrandHeader subtitle="Parent Portal" icon={Users} />
-      <LoginForm identifierLabel="Email" identifierPlaceholder="you@school.com" redirectTo="/parent" />
+      <LoginForm
+        identifierLabel="Email"
+        identifierPlaceholder="you@school.com"
+        redirectTo="/parent"
+        allowedRoles={["PARENT"]}
+        wrongRoleMessage="This account isn't a Parent account."
+      />
       <Link href="/portal" className="mt-4 block text-center text-sm text-foreground-muted hover:text-accent hover:underline">
         ← Back to School Portal
       </Link>

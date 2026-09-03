@@ -899,6 +899,7 @@ model Invitation {
 enum MediaOwnerType {
   STUDENT
   TEACHER
+  SCHOOL
 }
 
 // PHOTO is always "the latest one wins" (see DocumentsService.getPhotoUrl).

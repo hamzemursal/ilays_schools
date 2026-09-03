@@ -115,13 +115,69 @@ export class DocumentsService {
   // Owner-agnostic photo lookup that never throws — for embedding a photo
   // URL inline while listing many owners at once (e.g. a class roster),
   // where a 404 for "no photo yet" is expected, not exceptional.
-  async tryGetPhotoUrl(ownerType: "STUDENT" | "TEACHER", ownerId: string): Promise<string | null> {
+  async tryGetPhotoUrl(ownerType: "STUDENT" | "TEACHER" | "SCHOOL", ownerId: string): Promise<string | null> {
     const latest = await this.prisma.mediaFile.findFirst({
       where: { ownerType, ownerId, kind: "PHOTO" },
       orderBy: { createdAt: "desc" },
     });
     if (!latest) return null;
     return this.storage.getSignedDownloadUrl(latest.storageKey);
+  }
+
+  async uploadSchoolLogo(actor: AuthenticatedUser, schoolId: string, file: Express.Multer.File) {
+    const school = await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    this.assertValidImage(file);
+    const extension = file.mimetype.split("/")[1];
+    const storageKey = `schools/${schoolId}/${randomUUID()}.${extension}`;
+    await this.storage.upload(storageKey, file.buffer, file.mimetype);
+
+    return this.prisma.mediaFile.create({
+      data: {
+        organizationId: school.organizationId,
+        schoolId,
+        ownerType: "SCHOOL",
+        ownerId: schoolId,
+        kind: "PHOTO",
+        storageKey,
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+        uploadedByUserId: actor.id,
+      },
+    });
+  }
+
+  // Doesn't delete the Cloudinary asset or prior MediaFile rows — same
+  // Mirrors StudentsService/TeachersService's own delete cleanup: the
+  // MediaFile rows AND their underlying Cloudinary assets both go, so
+  // removing a logo doesn't leave an orphaned upload behind. Ownership is
+  // re-checked here even though the controller already required
+  // settings.manage, since that permission alone doesn't prove *this*
+  // school is one the actor is allowed to touch.
+  async removeSchoolLogo(actor: AuthenticatedUser, schoolId: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    const files = await this.prisma.mediaFile.findMany({
+      where: { ownerType: "SCHOOL", ownerId: schoolId, kind: "PHOTO" },
+    });
+    await this.prisma.mediaFile.deleteMany({ where: { ownerType: "SCHOOL", ownerId: schoolId, kind: "PHOTO" } });
+    await Promise.all(files.map((f) => this.storage.delete(f.storageKey, f.mimeType).catch(() => undefined)));
+    return { success: true };
+  }
+
+  // Batch variant of tryGetPhotoUrl for the /auth/me payload, which resolves
+  // every school a user belongs to at once — avoids an N+1 query per school.
+  async getSchoolLogoUrls(schoolIds: string[]): Promise<Record<string, string>> {
+    if (schoolIds.length === 0) return {};
+    const rows = await this.prisma.mediaFile.findMany({
+      where: { ownerType: "SCHOOL", ownerId: { in: schoolIds }, kind: "PHOTO" },
+      orderBy: { createdAt: "desc" },
+    });
+    const result: Record<string, string> = {};
+    for (const row of rows) {
+      if (!(row.ownerId in result)) {
+        result[row.ownerId] = await this.storage.getSignedDownloadUrl(row.storageKey);
+      }
+    }
+    return result;
   }
 
   private async getSelfTeacherOrThrow(actor: AuthenticatedUser) {

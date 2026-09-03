@@ -12,7 +12,7 @@ export function useCurrentSchool(user: Profile | null) {
   const urlSchoolId = match?.[1];
   const knownSchool = user?.schools.find((s) => s.id === urlSchoolId);
   if (knownSchool) return knownSchool;
-  if (urlSchoolId) return { id: urlSchoolId, name: "This school" };
+  if (urlSchoolId) return { id: urlSchoolId, name: "This school", logoUrl: null };
   return user?.schools[0] ?? null;
 }
 

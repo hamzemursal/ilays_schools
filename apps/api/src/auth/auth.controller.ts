@@ -7,6 +7,7 @@ import { ChangePasswordDto } from "./dto/change-password.dto";
 import { Public } from "./decorators/public.decorator";
 import { CurrentUser } from "./decorators/current-user.decorator";
 import { PrismaService } from "../prisma/prisma.service";
+import { DocumentsService } from "../documents/documents.service";
 import type { AuthenticatedUser } from "./types/authenticated-user";
 
 const REFRESH_COOKIE = "refresh_token";
@@ -33,6 +34,7 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly prisma: PrismaService,
+    private readonly documents: DocumentsService,
   ) {}
 
   @Public()
@@ -75,7 +77,7 @@ export class AuthController {
 
   @Get("me")
   async me(@CurrentUser() user: AuthenticatedUser) {
-    const [schools, teacher, guardian, student, self] = await Promise.all([
+    const [schools, teacher, guardian, student, self, logoUrls] = await Promise.all([
       this.prisma.school.findMany({
         where: { id: { in: user.schoolIds } },
         select: { id: true, name: true },
@@ -84,10 +86,11 @@ export class AuthController {
       this.prisma.guardian.findFirst({ where: { userId: user.id }, select: { id: true } }),
       this.prisma.student.findFirst({ where: { userId: user.id }, select: { id: true } }),
       this.prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { mustChangePassword: true } }),
+      this.documents.getSchoolLogoUrls(user.schoolIds),
     ]);
     return {
       ...user,
-      schools,
+      schools: schools.map((s) => ({ ...s, logoUrl: logoUrls[s.id] ?? null })),
       teacherId: teacher?.id ?? null,
       guardianId: guardian?.id ?? null,
       studentId: student?.id ?? null,

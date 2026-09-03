@@ -3,16 +3,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Bell, KeyRound, LogOut, Menu, Search, UserCircle, X } from "lucide-react";
+import { Bell, Camera, GraduationCap, KeyRound, Loader2, LogOut, Menu, Search, Trash2, UserCircle, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { Avatar } from "@/components/ui/Avatar";
+import { useToast } from "@/components/ui/Toast";
+import { api } from "@/lib/api";
 import { useCurrentSchool } from "./Sidebar";
 import { orgNavItems, schoolNavItems, type NavItem } from "./nav-config";
 
 export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   const router = useRouter();
-  const { user, logout } = useAuth();
+  const { user, accessToken, logout, refreshProfile } = useAuth();
   const currentSchool = useCurrentSchool(user);
+  const canManageBranding = !!user?.permissions.includes("settings.manage") && !!currentSchool;
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -61,7 +64,7 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border bg-background/95 px-4 backdrop-blur sm:px-6">
+    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b border-accent/15 bg-accent-soft/90 px-4 backdrop-blur sm:px-6">
       <button
         onClick={onMenuClick}
         className="rounded-lg p-2 text-foreground-soft hover:bg-surface-hover lg:hidden"
@@ -69,6 +72,25 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
       >
         <Menu className="size-5" />
       </button>
+
+      <div className="flex shrink-0 items-center gap-2.5">
+        {accessToken && currentSchool ? (
+          <SchoolBrandingEditor
+            accessToken={accessToken}
+            schoolId={currentSchool.id}
+            logoUrl={currentSchool.logoUrl}
+            editable={canManageBranding}
+            onChanged={refreshProfile}
+          />
+        ) : (
+          <div className="flex size-9 items-center justify-center rounded-full bg-accent text-white">
+            <GraduationCap className="size-4.5" />
+          </div>
+        )}
+        <span className="max-w-[110px] truncate font-semibold text-foreground sm:max-w-[220px]">
+          {currentSchool?.name ?? "Ilays Schools"}
+        </span>
+      </div>
 
       <div className="relative flex-1 max-w-md">
         {searchOpen ? (
@@ -197,5 +219,119 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
         </div>
       </div>
     </header>
+  );
+}
+
+// A circular logo with an edit affordance overlaid — only rendered as
+// editable for a user with settings.manage (currently School Admin, Super
+// Admin, Organization Admin; see seed.ts). Change and remove both re-fetch
+// the profile via onChanged so every open tab's header reflects the new
+// logo without a full reload.
+function SchoolBrandingEditor({
+  accessToken,
+  schoolId,
+  logoUrl,
+  editable,
+  onChanged,
+}: {
+  accessToken: string;
+  schoolId: string;
+  logoUrl: string | null;
+  editable: boolean;
+  onChanged: () => Promise<void>;
+}) {
+  const { show } = useToast();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setMenuOpen(false);
+    setBusy(true);
+    try {
+      await api.uploadSchoolLogo(accessToken, schoolId, file);
+      await onChanged();
+      show("School logo updated.");
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Couldn't upload the logo.", "danger");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRemove() {
+    setMenuOpen(false);
+    setBusy(true);
+    try {
+      await api.removeSchoolLogo(accessToken, schoolId);
+      await onChanged();
+      show("School logo removed.");
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Couldn't remove the logo.", "danger");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="relative">
+      <div className="flex size-9 items-center justify-center overflow-hidden rounded-full bg-accent text-white">
+        {busy ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- Cloudinary URL, not a local/static asset
+          <img src={logoUrl} alt="" className="size-full object-cover" />
+        ) : (
+          <GraduationCap className="size-4.5" />
+        )}
+      </div>
+
+      {editable && !busy && (
+        <>
+          <button
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label="Edit school logo"
+            className="absolute -right-1 -bottom-1 flex size-4.5 items-center justify-center rounded-full border-2 border-accent-soft bg-accent text-white hover:bg-accent-hover"
+          >
+            <Camera className="size-2.5" />
+          </button>
+
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+              <div className="absolute left-0 z-50 mt-2 w-44 rounded-xl border border-border bg-background p-1 shadow-lg">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-foreground-soft hover:bg-surface-hover hover:text-foreground"
+                >
+                  <Camera className="size-4" />
+                  {logoUrl ? "Change logo" : "Upload logo"}
+                </button>
+                {logoUrl && (
+                  <button
+                    onClick={handleRemove}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-danger hover:bg-danger-soft"
+                  >
+                    <Trash2 className="size-4" />
+                    Remove logo
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={handleFile}
+      />
+    </div>
   );
 }

@@ -134,7 +134,7 @@ export interface Profile {
   roles: string[];
   permissions: string[];
   schoolIds: string[];
-  schools: { id: string; name: string }[];
+  schools: { id: string; name: string; logoUrl: string | null }[];
   teacherId: string | null;
   guardianId: string | null;
   studentId: string | null;
@@ -1273,6 +1273,11 @@ export const api = {
     uploadFile<{ id: string }>(`/schools/${schoolId}/teachers/${teacherId}/photo`, file, "photo", accessToken),
   getTeacherPhotoUrl: (accessToken: string, schoolId: string, teacherId: string) =>
     request<{ url: string; uploadedAt: string }>(`/schools/${schoolId}/teachers/${teacherId}/photo`, { accessToken }),
+
+  uploadSchoolLogo: (accessToken: string, schoolId: string, file: File) =>
+    uploadFile<{ id: string }>(`/schools/${schoolId}/logo`, file, "logo", accessToken),
+  removeSchoolLogo: (accessToken: string, schoolId: string) =>
+    request<{ success: boolean }>(`/schools/${schoolId}/logo`, { method: "DELETE", accessToken }),
 
   previewPromotion: (
     accessToken: string,

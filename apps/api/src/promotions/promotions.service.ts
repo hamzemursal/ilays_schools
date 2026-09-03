@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
+import { AuditService } from "../audit/audit.service";
+import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { PromoteSectionDto } from "./dto/promote-section.dto";
 
@@ -11,6 +13,7 @@ export class PromotionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly schools: SchoolsService,
+    private readonly audit: AuditService,
   ) {}
 
   private async resolvePlan(schoolId: string, sectionId: string) {
@@ -124,6 +127,9 @@ export class PromotionsService {
       }
     }
 
+    // Explicit timeout for the same reason as the other multi-step delete/
+    // bulk transactions in this codebase: a per-enrollment loop can run
+    // past Prisma's 5s interactive-transaction default for a large section.
     return this.prisma.$transaction(async (tx) => {
       const batch = await tx.promotionBatch.create({
         data: {
@@ -187,13 +193,14 @@ export class PromotionsService {
         });
       }
 
-      await tx.auditLog.create({
-        data: {
+      await this.audit.record(
+        {
+          actor,
           organizationId: actor.organizationId,
           schoolId,
-          actorUserId: actor.id,
-          action: "promotion.confirm",
-          resource: "PromotionBatch",
+          action: AuditAction.PROMOTION_CONFIRMED,
+          module: AuditModuleName.PROMOTIONS,
+          resourceType: "PromotionBatch",
           resourceId: batch.id,
           after: {
             outcome,
@@ -202,9 +209,10 @@ export class PromotionsService {
             toClass: nextClass?.name ?? null,
           },
         },
-      });
+        tx,
+      );
 
       return tx.promotionBatch.findUniqueOrThrow({ where: { id: batch.id }, include: { items: true } });
-    });
+    }, { timeout: 30_000 });
   }
 }

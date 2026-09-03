@@ -960,23 +960,60 @@ model MediaFile {
 // Audit log — append-only. No update/delete path is ever exposed for this.
 // ---------------------------------------------------------------------------
 
+enum AuditStatus {
+  SUCCESS
+  FAILED
+  DENIED
+}
+
+enum AuditSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
 model AuditLog {
   id             String  @id @default(uuid())
   organizationId String?
   schoolId       String?
   actorUserId    String?
 
-  action     String // e.g. "school.create", "student.transfer"
-  resource   String // e.g. "School", "Student"
-  resourceId String?
-  before     Json?
-  after      Json?
-  ipAddress  String?
+  // Snapshots, not relations — deliberately duplicated so a historical
+  // record stays readable even after the actor's own profile changes or
+  // the account is gone (actorUserId already worked this way; these three
+  // extend the same idea to name/email/role).
+  actorNameSnapshot  String?
+  actorEmailSnapshot String?
+  actorRoleSnapshot  String?
+
+  action String // e.g. "STUDENT_CREATED" — legacy rows keep their old "school.create"-style values
+  module String? // e.g. "Students", "Academic", "Finance" — groups actions for filtering
+
+  resource             String // e.g. "School", "Student"
+  resourceId           String?
+  resourceNameSnapshot String?
+
+  status   AuditStatus   @default(SUCCESS)
+  severity AuditSeverity @default(INFO)
+
+  before Json?
+  after  Json?
+  reason String?
+
+  ipAddress String?
+  userAgent String?
+  requestId String?
 
   createdAt DateTime @default(now())
 
+  @@index([organizationId, createdAt])
   @@index([schoolId, createdAt])
+  @@index([actorUserId, createdAt])
   @@index([resource, resourceId])
+  @@index([action])
+  @@index([module])
+  @@index([status])
+  @@index([severity])
   @@map("audit_logs")
 }
 

@@ -6,6 +6,8 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import { GuardiansService } from "../guardians/guardians.service";
 import { StorageService } from "../storage/storage.service";
+import { AuditService } from "../audit/audit.service";
+import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateStudentDto } from "./dto/create-student.dto";
 import { UpdateStudentDto } from "./dto/update-student.dto";
@@ -20,6 +22,7 @@ export class StudentsService {
     private readonly schools: SchoolsService,
     private readonly guardians: GuardiansService,
     private readonly storage: StorageService,
+    private readonly audit: AuditService,
   ) {}
 
   // A student is visible to an actor if either they're org-wide (no
@@ -126,13 +129,14 @@ export class StudentsService {
       },
     });
 
-    await tx.auditLog.create({
-      data: {
+    await this.audit.record(
+      {
+        actor,
         organizationId: actor.organizationId,
         schoolId: active.schoolId,
-        actorUserId: actor.id,
-        action: "student.enrollment.update",
-        resource: "StudentEnrollment",
+        action: AuditAction.STUDENT_UPDATED,
+        module: AuditModuleName.STUDENTS,
+        resourceType: "StudentEnrollment",
         resourceId: active.id,
         before: {
           academicYearId: active.academicYearId,
@@ -142,7 +146,8 @@ export class StudentsService {
         },
         after: { academicYearId: input.academicYearId, classId: input.classId, sectionId: input.sectionId, rollNumber },
       },
-    });
+      tx,
+    );
   }
 
   // Archiving never deletes the student — it withdraws the active enrollment
@@ -172,18 +177,21 @@ export class StudentsService {
         data: { currentStatus: "ARCHIVED" },
       });
 
-      await tx.auditLog.create({
-        data: {
+      await this.audit.record(
+        {
+          actor,
           organizationId: actor.organizationId,
           schoolId: activeEnrollment?.schoolId,
-          actorUserId: actor.id,
-          action: "student.archive",
-          resource: "Student",
+          action: AuditAction.STUDENT_ARCHIVED,
+          module: AuditModuleName.STUDENTS,
+          resourceType: "Student",
           resourceId: studentId,
+          resourceName: `${student.firstName} ${student.lastName}`,
           before: { currentStatus: student.currentStatus },
           after: { currentStatus: "ARCHIVED" },
         },
-      });
+        tx,
+      );
     });
 
     return this.getFullDetail(actor, studentId);
@@ -199,6 +207,10 @@ export class StudentsService {
   async remove(actor: AuthenticatedUser, studentId: string) {
     const student = await this.assertAccessibleStudent(actor, studentId);
 
+    // Explicit timeout for the same reason as SchoolsService.remove()/
+    // AcademicYearsService.remove(): a per-enrollment loop of sequential
+    // deletes can run past Prisma's 5s interactive-transaction default,
+    // especially for a student with several past enrollments/invoices.
     const mediaFiles = await this.prisma.$transaction(async (tx) => {
       const enrollments = await tx.studentEnrollment.findMany({ where: { studentId } });
 
@@ -221,20 +233,24 @@ export class StudentsService {
 
       await tx.student.delete({ where: { id: studentId } });
 
-      await tx.auditLog.create({
-        data: {
+      await this.audit.record(
+        {
+          actor,
           organizationId: actor.organizationId,
           schoolId: enrollments[0]?.schoolId,
-          actorUserId: actor.id,
-          action: "student.delete",
-          resource: "Student",
+          action: AuditAction.STUDENT_DELETED,
+          module: AuditModuleName.STUDENTS,
+          resourceType: "Student",
           resourceId: studentId,
+          resourceName: `${student.firstName} ${student.lastName}`,
+          severity: "WARNING",
           before: { firstName: student.firstName, lastName: student.lastName, currentStatus: student.currentStatus },
         },
-      });
+        tx,
+      );
 
       return files;
-    });
+    }, { timeout: 30_000 });
 
     await Promise.all(mediaFiles.map((f) => this.storage.delete(f.storageKey, f.mimeType).catch(() => undefined)));
 
@@ -376,17 +392,20 @@ export class StudentsService {
           linkedGuardians.push(guardian);
         }
 
-        await tx.auditLog.create({
-          data: {
+        await this.audit.record(
+          {
+            actor,
             organizationId: actor.organizationId,
             schoolId,
-            actorUserId: actor.id,
-            action: "student.create",
-            resource: "Student",
+            action: AuditAction.STUDENT_CREATED,
+            module: AuditModuleName.STUDENTS,
+            resourceType: "Student",
             resourceId: student.id,
+            resourceName: `${student.firstName} ${student.lastName}`,
             after: { firstName: student.firstName, lastName: student.lastName, studentNumber, rollNumber },
           },
-        });
+          tx,
+        );
 
         return { student, enrollment, guardians: linkedGuardians };
       });
@@ -481,17 +500,20 @@ export class StudentsService {
       await tx.userRole.create({ data: { userId: user.id, roleId: role.id } });
       await tx.userSchool.create({ data: { userId: user.id, schoolId: enrollment.schoolId } });
 
-      await tx.auditLog.create({
-        data: {
+      await this.audit.record(
+        {
+          actor,
           organizationId: student.organizationId,
           schoolId: enrollment.schoolId,
-          actorUserId: actor.id,
-          action: "student.portal_account.create",
-          resource: "Student",
+          action: AuditAction.STUDENT_PORTAL_ACCOUNT_CREATED,
+          module: AuditModuleName.STUDENTS,
+          resourceType: "Student",
           resourceId: studentId,
+          resourceName: `${student.firstName} ${student.lastName}`,
           after: { loginId: enrollment.studentNumber },
         },
-      });
+        tx,
+      );
     });
 
     return { loginId: enrollment.studentNumber, temporaryPassword };

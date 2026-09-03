@@ -2,6 +2,8 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
+import { AuditService } from "../audit/audit.service";
+import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateExamDto } from "./dto/create-exam.dto";
 import { CreateExamSubjectDto } from "./dto/create-exam-subject.dto";
@@ -12,6 +14,7 @@ export class ExamsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly schools: SchoolsService,
+    private readonly audit: AuditService,
   ) {}
 
   async listExams(actor: AuthenticatedUser, schoolId: string) {
@@ -153,6 +156,17 @@ export class ExamsService {
       ),
     );
 
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId,
+      action: AuditAction.RESULTS_ENTERED,
+      module: AuditModuleName.RESULTS,
+      resourceType: "ExamSubject",
+      resourceId: examSubjectId,
+      after: { enteredCount: dto.entries.length },
+    });
+
     return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
   }
 
@@ -165,16 +179,15 @@ export class ExamsService {
       data: { status: "APPROVED", approvedByUserId: actor.id },
     });
 
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: actor.organizationId,
-        schoolId,
-        actorUserId: actor.id,
-        action: "results.approve",
-        resource: "ExamSubject",
-        resourceId: examSubjectId,
-        after: { approvedCount: result.count },
-      },
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId,
+      action: AuditAction.RESULTS_APPROVED,
+      module: AuditModuleName.RESULTS,
+      resourceType: "ExamSubject",
+      resourceId: examSubjectId,
+      after: { approvedCount: result.count },
     });
 
     return { approvedCount: result.count };

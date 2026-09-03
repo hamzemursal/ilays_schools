@@ -3,6 +3,9 @@ import { JwtService } from "@nestjs/jwt";
 import * as argon2 from "argon2";
 import { randomBytes, createHash } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
+import { AuditAction, AuditModuleName } from "../audit/audit-actions";
+import { resolveAuthenticatedUser } from "./resolve-authenticated-user";
 
 const ACCESS_TOKEN_TTL = "15m";
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -22,21 +25,78 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
+    private readonly audit: AuditService,
   ) {}
 
   async login(identifier: string, password: string): Promise<TokenPair> {
     const user = await this.resolveLoginUser(identifier);
     if (!user || !user.passwordHash) {
+      // No real account to snapshot as an actor — the identifier itself
+      // isn't a secret (it's an email or a Student Login ID, never a
+      // password), so it's safe to keep as the resource name for an admin
+      // reviewing repeated failed attempts.
+      await this.audit.record({
+        actor: null,
+        action: AuditAction.LOGIN_FAILED,
+        module: AuditModuleName.AUTHENTICATION,
+        resourceType: "User",
+        resourceName: identifier,
+        status: "FAILED",
+        severity: "WARNING",
+        reason: "No matching account for this identifier",
+      });
       throw new UnauthorizedException("Invalid email or password");
     }
+
+    const actor = await resolveAuthenticatedUser(this.prisma, user.id);
+
+    const schoolId = actor && actor.schoolIds.length > 0 ? actor.schoolIds[0] : null;
+
     if (user.status !== "ACTIVE") {
+      await this.audit.record({
+        actor,
+        organizationId: user.organizationId,
+        schoolId,
+        action: AuditAction.LOGIN_FAILED,
+        module: AuditModuleName.AUTHENTICATION,
+        resourceType: "User",
+        resourceId: user.id,
+        resourceName: user.email,
+        status: "FAILED",
+        severity: "WARNING",
+        reason: "Account is not active yet",
+      });
       throw new UnauthorizedException("Account is not active yet");
     }
 
     const valid = await argon2.verify(user.passwordHash, password);
     if (!valid) {
+      await this.audit.record({
+        actor,
+        organizationId: user.organizationId,
+        schoolId,
+        action: AuditAction.LOGIN_FAILED,
+        module: AuditModuleName.AUTHENTICATION,
+        resourceType: "User",
+        resourceId: user.id,
+        resourceName: user.email,
+        status: "FAILED",
+        severity: "WARNING",
+        reason: "Incorrect password",
+      });
       throw new UnauthorizedException("Invalid email or password");
     }
+
+    await this.audit.record({
+      actor,
+      organizationId: user.organizationId,
+      schoolId,
+      action: AuditAction.LOGIN,
+      module: AuditModuleName.AUTHENTICATION,
+      resourceType: "User",
+      resourceId: user.id,
+      resourceName: user.email,
+    });
 
     return this.issueTokenPair(user.id);
   }
@@ -102,9 +162,21 @@ export class AuthService {
 
   async logout(rawRefreshToken: string): Promise<void> {
     const tokenHash = hashToken(rawRefreshToken);
-    await this.prisma.refreshToken.updateMany({
-      where: { tokenHash, revoked: false },
-      data: { revoked: true },
+    const existing = await this.prisma.refreshToken.findUnique({ where: { tokenHash } });
+    if (!existing || existing.revoked) return;
+
+    await this.prisma.refreshToken.update({ where: { id: existing.id }, data: { revoked: true } });
+
+    const actor = await resolveAuthenticatedUser(this.prisma, existing.userId);
+    await this.audit.record({
+      actor,
+      organizationId: actor?.organizationId,
+      schoolId: actor && actor.schoolIds.length > 0 ? actor.schoolIds[0] : null,
+      action: AuditAction.LOGOUT,
+      module: AuditModuleName.AUTHENTICATION,
+      resourceType: "User",
+      resourceId: existing.userId,
+      resourceName: actor?.email,
     });
   }
 
@@ -150,6 +222,18 @@ export class AuthService {
     if (!valid) {
       throw new UnauthorizedException("Current password is incorrect");
     }
+
+    const actor = await resolveAuthenticatedUser(this.prisma, userId);
+    await this.audit.record({
+      actor,
+      organizationId: user.organizationId,
+      schoolId: actor && actor.schoolIds.length > 0 ? actor.schoolIds[0] : null,
+      action: AuditAction.PASSWORD_CHANGED,
+      module: AuditModuleName.AUTHENTICATION,
+      resourceType: "User",
+      resourceId: userId,
+      resourceName: user.email,
+    });
 
     const passwordHash = await argon2.hash(newPassword, { type: argon2.argon2id });
     await this.prisma.user.update({

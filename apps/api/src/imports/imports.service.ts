@@ -4,6 +4,8 @@ import { GuardianRelationship, Sex, type Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import { StudentsService } from "../students/students.service";
+import { AuditService } from "../audit/audit.service";
+import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import type { CreateStudentDto } from "../students/dto/create-student.dto";
 
@@ -22,6 +24,7 @@ export class ImportsService {
     private readonly prisma: PrismaService,
     private readonly schools: SchoolsService,
     private readonly students: StudentsService,
+    private readonly audit: AuditService,
   ) {}
 
   async uploadStudentsCsv(actor: AuthenticatedUser, schoolId: string, file: Express.Multer.File) {
@@ -272,16 +275,16 @@ export class ImportsService {
     });
 
     if (status === "COMPLETED") {
-      await this.prisma.auditLog.create({
-        data: {
-          organizationId: actor.organizationId,
-          schoolId,
-          actorUserId: actor.id,
-          action: "students.import",
-          resource: "ImportBatch",
-          resourceId: batchId,
-          after: { createdCount, errorCount, skippedCount, totalRows: batch.totalRows },
-        },
+      await this.audit.record({
+        actor,
+        organizationId: actor.organizationId,
+        schoolId,
+        action: AuditAction.STUDENT_IMPORTED,
+        module: AuditModuleName.STUDENTS,
+        resourceType: "ImportBatch",
+        resourceId: batchId,
+        severity: errorCount > 0 ? "WARNING" : "INFO",
+        after: { createdCount, errorCount, skippedCount, totalRows: batch.totalRows },
       });
     }
 

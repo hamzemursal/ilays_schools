@@ -2,6 +2,8 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import { StudentsService } from "../students/students.service";
+import { AuditService } from "../audit/audit.service";
+import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { MarkAttendanceDto } from "./dto/mark-attendance.dto";
 
@@ -11,6 +13,7 @@ export class AttendanceService {
     private readonly prisma: PrismaService,
     private readonly schools: SchoolsService,
     private readonly students: StudentsService,
+    private readonly audit: AuditService,
   ) {}
 
   // A teacher (identified by a Teacher profile linked to this actor) may
@@ -133,6 +136,17 @@ export class AttendanceService {
       ),
     );
 
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId,
+      action: AuditAction.ATTENDANCE_DRAFT_SAVED,
+      module: AuditModuleName.ATTENDANCE,
+      resourceType: "Section",
+      resourceId: sectionId,
+      after: { date: dto.date, studentCount: dto.entries.length },
+    });
+
     return this.getForSectionAndDate(actor, schoolId, sectionId, dto.date);
   }
 
@@ -172,6 +186,22 @@ export class AttendanceService {
       // attendance for a day that's now actually submitted.
       this.prisma.attendanceDraft.deleteMany({ where: { enrollmentId: { in: enrollmentIds }, date } }),
     ]);
+
+    // Not inside the transaction above — that one uses $transaction's array
+    // form (a fixed list of promises built up front), which has no `tx`
+    // handle to hand the audit write. Attendance is already durably saved
+    // by the time this runs; a failure here would only cost this one
+    // event's own audit trail, not the attendance itself.
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId,
+      action: AuditAction.ATTENDANCE_MARKED,
+      module: AuditModuleName.ATTENDANCE,
+      resourceType: "Section",
+      resourceId: sectionId,
+      after: { date: dto.date, studentCount: dto.entries.length },
+    });
 
     return this.getForSectionAndDate(actor, schoolId, sectionId, dto.date);
   }

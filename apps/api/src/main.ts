@@ -1,13 +1,20 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe } from "@nestjs/common";
+import type { NestExpressApplication } from "@nestjs/platform-express";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import { AppModule } from "./app.module";
+import { requestContextMiddleware } from "./audit/request-context";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
+  // Render sits behind a reverse proxy — without this, req.ip and
+  // X-Forwarded-For can't be trusted to reflect the real client, which the
+  // audit log's IP capture (see audit/request-context.ts) depends on.
+  app.set("trust proxy", 1);
+  app.use(requestContextMiddleware);
   app.use(helmet());
   app.use(cookieParser());
   app.enableCors({

@@ -2,6 +2,8 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
+import { AuditService } from "../audit/audit.service";
+import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateClassDto } from "./dto/create-class.dto";
 import { UpdateClassDto } from "./dto/update-class.dto";
@@ -22,6 +24,7 @@ export class ClassesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly schools: SchoolsService,
+    private readonly audit: AuditService,
   ) {}
 
   // Class/Section are permanent structures reused every year (see schema
@@ -432,13 +435,14 @@ export class ClassesService {
           });
         }
 
-        await tx.auditLog.create({
-          data: {
+        await this.audit.record(
+          {
+            actor,
             organizationId: actor.organizationId,
             schoolId,
-            actorUserId: actor.id,
-            action: "class.bulk_transfer",
-            resource: "Class",
+            action: AuditAction.CLASS_BULK_TRANSFERRED,
+            module: AuditModuleName.ACADEMIC,
+            resourceType: "Class",
             resourceId: classId,
             before: {
               fromClassId: classId,
@@ -452,7 +456,8 @@ export class ClassesService {
               studentIds: enrollments.map((e) => e.studentId),
             },
           },
-        });
+          tx,
+        );
       },
       { timeout: 20_000 },
     );

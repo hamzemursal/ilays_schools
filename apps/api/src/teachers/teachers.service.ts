@@ -6,6 +6,8 @@ import { SchoolsService } from "../schools/schools.service";
 import { GuardiansService } from "../guardians/guardians.service";
 import { DocumentsService } from "../documents/documents.service";
 import { StorageService } from "../storage/storage.service";
+import { AuditService } from "../audit/audit.service";
+import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateTeacherDto } from "./dto/create-teacher.dto";
 import { CreateTeacherAssignmentInputDto } from "./dto/create-teacher-assignment-input.dto";
@@ -32,6 +34,7 @@ export class TeachersService {
     private readonly guardians: GuardiansService,
     private readonly documents: DocumentsService,
     private readonly storage: StorageService,
+    private readonly audit: AuditService,
   ) {}
 
   // "My own classes" — no permission gate beyond authentication, same as
@@ -176,16 +179,16 @@ export class TeachersService {
       include: { assignments: { include: ASSIGNMENT_INCLUDE } },
     });
 
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: actor.organizationId,
-        schoolId,
-        actorUserId: actor.id,
-        action: "teacher.update",
-        resource: "Teacher",
-        resourceId: teacherId,
-        after: { ...dto },
-      },
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId,
+      action: AuditAction.TEACHER_UPDATED,
+      module: AuditModuleName.TEACHERS,
+      resourceType: "Teacher",
+      resourceId: teacherId,
+      resourceName: `${updated.firstName} ${updated.lastName}`,
+      after: { ...dto },
     });
 
     return updated;
@@ -211,17 +214,21 @@ export class TeachersService {
         await tx.user.delete({ where: { id: teacher.userId } });
       }
 
-      await tx.auditLog.create({
-        data: {
+      await this.audit.record(
+        {
+          actor,
           organizationId: actor.organizationId,
           schoolId,
-          actorUserId: actor.id,
-          action: "teacher.delete",
-          resource: "Teacher",
+          action: AuditAction.TEACHER_DELETED,
+          module: AuditModuleName.TEACHERS,
+          resourceType: "Teacher",
           resourceId: teacherId,
+          resourceName: `${teacher.firstName} ${teacher.lastName}`,
+          severity: "WARNING",
           before: { firstName: teacher.firstName, lastName: teacher.lastName, employeeNumber: teacher.employeeNumber },
         },
-      });
+        tx,
+      );
 
       return files;
     });
@@ -275,17 +282,20 @@ export class TeachersService {
           });
         }
 
-        await tx.auditLog.create({
-          data: {
+        await this.audit.record(
+          {
+            actor,
             organizationId: actor.organizationId,
             schoolId,
-            actorUserId: actor.id,
-            action: "teacher.create",
-            resource: "Teacher",
+            action: AuditAction.TEACHER_CREATED,
+            module: AuditModuleName.TEACHERS,
+            resourceType: "Teacher",
             resourceId: teacher.id,
+            resourceName: `${teacher.firstName} ${teacher.lastName}`,
             after: { firstName: teacher.firstName, lastName: teacher.lastName, employeeNumber: teacher.employeeNumber },
           },
-        });
+          tx,
+        );
 
         return tx.teacher.findUniqueOrThrow({
           where: { id: teacher.id },
@@ -396,17 +406,20 @@ export class TeachersService {
         },
       });
 
-      await tx.auditLog.create({
-        data: {
+      await this.audit.record(
+        {
+          actor,
           organizationId: school.organizationId,
           schoolId,
-          actorUserId: actor.id,
-          action: "teacher_login.invite",
-          resource: "Teacher",
+          action: AuditAction.TEACHER_LOGIN_INVITED,
+          module: AuditModuleName.TEACHERS,
+          resourceType: "Teacher",
           resourceId: teacher.id,
+          resourceName: `${teacher.firstName} ${teacher.lastName}`,
           after: { email: targetEmail },
         },
-      });
+        tx,
+      );
 
       return user;
     });

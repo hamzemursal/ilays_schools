@@ -2,6 +2,8 @@ import { ConflictException, Injectable, NotFoundException } from "@nestjs/common
 import { Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
+import { AuditService } from "../audit/audit.service";
+import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateAcademicYearDto } from "./dto/create-academic-year.dto";
 import { UpdateAcademicYearDto } from "./dto/update-academic-year.dto";
@@ -11,6 +13,7 @@ export class AcademicYearsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly schools: SchoolsService,
+    private readonly audit: AuditService,
   ) {}
 
   async list(actor: AuthenticatedUser, schoolId: string) {
@@ -152,6 +155,10 @@ export class AcademicYearsService {
   async remove(actor: AuthenticatedUser, schoolId: string, id: string) {
     const year = await this.getOwnedYearOrThrow(actor, schoolId, id);
 
+    // Same reasoning as SchoolsService.remove()'s explicit timeout: this
+    // clears several Restrict-blockers in sequence before the final delete,
+    // and Prisma's 5s interactive-transaction default has been observed to
+    // be too tight for that many round trips.
     await this.prisma.$transaction(async (tx) => {
       const enrollments = await tx.studentEnrollment.findMany({ where: { academicYearId: id }, select: { id: true } });
       const feeStructures = await tx.feeStructure.findMany({ where: { academicYearId: id }, select: { id: true } });
@@ -178,18 +185,22 @@ export class AcademicYearsService {
       // FeeStructure (now unblocked) automatically.
       await tx.academicYear.delete({ where: { id } });
 
-      await tx.auditLog.create({
-        data: {
+      await this.audit.record(
+        {
+          actor,
           organizationId: actor.organizationId,
           schoolId,
-          actorUserId: actor.id,
-          action: "academic_year.delete",
-          resource: "AcademicYear",
+          action: AuditAction.ACADEMIC_YEAR_DELETED,
+          module: AuditModuleName.ACADEMIC,
+          resourceType: "AcademicYear",
           resourceId: id,
+          resourceName: year.name,
+          severity: "CRITICAL",
           before: { name: year.name, isCurrent: year.isCurrent },
         },
-      });
-    });
+        tx,
+      );
+    }, { timeout: 30_000 });
 
     return { success: true };
   }

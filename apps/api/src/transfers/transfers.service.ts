@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import { Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
+import { AuditService } from "../audit/audit.service";
+import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { RequestTransferDto } from "./dto/request-transfer.dto";
 import { ApproveTransferDto } from "./dto/approve-transfer.dto";
@@ -11,6 +13,7 @@ export class TransfersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly schools: SchoolsService,
+    private readonly audit: AuditService,
   ) {}
 
   async request(actor: AuthenticatedUser, studentId: string, dto: RequestTransferDto) {
@@ -50,16 +53,15 @@ export class TransfersService {
       },
     });
 
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: actor.organizationId,
-        schoolId: activeEnrollment.schoolId,
-        actorUserId: actor.id,
-        action: "transfer.request",
-        resource: "Transfer",
-        resourceId: transfer.id,
-        after: { toSchoolId: dto.toSchoolId, reason: dto.reason },
-      },
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId: activeEnrollment.schoolId,
+      action: AuditAction.TRANSFER_REQUESTED,
+      module: AuditModuleName.TRANSFERS,
+      resourceType: "Transfer",
+      resourceId: transfer.id,
+      after: { toSchoolId: dto.toSchoolId, reason: dto.reason },
     });
 
     return this.getOne(actor, transfer.id);
@@ -127,17 +129,19 @@ export class TransfersService {
         },
       });
 
-      await tx.auditLog.create({
-        data: {
+      await this.audit.record(
+        {
+          actor,
           organizationId: actor.organizationId,
           schoolId: transfer.toSchoolId,
-          actorUserId: actor.id,
-          action: "transfer.approve",
-          resource: "Transfer",
+          action: AuditAction.TRANSFER_APPROVED,
+          module: AuditModuleName.TRANSFERS,
+          resourceType: "Transfer",
           resourceId: transferId,
           after: { newEnrollmentId: newEnrollment.id, studentNumber, rollNumber },
         },
-      });
+        tx,
+      );
     });
 
     return this.getOne(actor, transferId);
@@ -156,14 +160,14 @@ export class TransfersService {
 
     await this.prisma.transfer.update({ where: { id: transferId }, data: { status: "REJECTED" } });
 
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: actor.organizationId,
-        actorUserId: actor.id,
-        action: "transfer.reject",
-        resource: "Transfer",
-        resourceId: transferId,
-      },
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId: transfer.toSchoolId,
+      action: AuditAction.TRANSFER_REJECTED,
+      module: AuditModuleName.TRANSFERS,
+      resourceType: "Transfer",
+      resourceId: transferId,
     });
 
     return this.getOne(actor, transferId);
@@ -183,14 +187,14 @@ export class TransfersService {
 
     await this.prisma.transfer.update({ where: { id: transferId }, data: { status: "CANCELLED" } });
 
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: actor.organizationId,
-        actorUserId: actor.id,
-        action: "transfer.cancel",
-        resource: "Transfer",
-        resourceId: transferId,
-      },
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId: transfer.fromSchoolId,
+      action: AuditAction.TRANSFER_CANCELLED,
+      module: AuditModuleName.TRANSFERS,
+      resourceType: "Transfer",
+      resourceId: transferId,
     });
 
     return this.getOne(actor, transferId);

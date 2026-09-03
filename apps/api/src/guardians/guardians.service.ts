@@ -3,6 +3,8 @@ import { randomBytes, createHash } from "node:crypto";
 import type { Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
+import { AuditService } from "../audit/audit.service";
+import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { GuardianInputDto } from "./dto/guardian-input.dto";
 import { CreateGuardianDto } from "./dto/create-guardian.dto";
@@ -27,6 +29,7 @@ export class GuardiansService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly schools: SchoolsService,
+    private readonly audit: AuditService,
   ) {}
 
   // Resolves a guardian for a student link: an explicit existingGuardianId
@@ -262,17 +265,21 @@ export class GuardiansService {
         await tx.user.delete({ where: { id: guardian.userId } });
       }
 
-      await tx.auditLog.create({
-        data: {
+      await this.audit.record(
+        {
+          actor,
           organizationId: actor.organizationId,
           schoolId,
-          actorUserId: actor.id,
-          action: "guardian.delete",
-          resource: "Guardian",
+          action: AuditAction.PARENT_DELETED,
+          module: AuditModuleName.PARENTS,
+          resourceType: "Guardian",
           resourceId: guardianId,
+          resourceName: `${guardian.firstName} ${guardian.lastName}`,
+          severity: "WARNING",
           before: { firstName: guardian.firstName, lastName: guardian.lastName, guardianCode: guardian.guardianCode },
         },
-      });
+        tx,
+      );
     });
 
     return { success: true };
@@ -368,17 +375,20 @@ export class GuardiansService {
         },
       });
 
-      await tx.auditLog.create({
-        data: {
+      await this.audit.record(
+        {
+          actor,
           organizationId: school.organizationId,
           schoolId,
-          actorUserId: actor.id,
-          action: "guardian_login.invite",
-          resource: "Guardian",
+          action: AuditAction.PARENT_LOGIN_INVITED,
+          module: AuditModuleName.PARENTS,
+          resourceType: "Guardian",
           resourceId: guardian.id,
+          resourceName: `${guardian.firstName} ${guardian.lastName}`,
           after: { email: targetEmail },
         },
-      });
+        tx,
+      );
     });
 
     const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3010";

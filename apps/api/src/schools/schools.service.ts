@@ -1,7 +1,9 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, forwardRef, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { randomBytes, createHash } from "node:crypto";
 import { Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
+import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateSchoolDto } from "./dto/create-school.dto";
 
@@ -13,7 +15,10 @@ function hashToken(raw: string): string {
 
 @Injectable()
 export class SchoolsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => AuditService)) private readonly audit: AuditService,
+  ) {}
 
   // Every query here is scoped to the caller's organization, and further
   // restricted to their specific schools when they have any — this is the
@@ -226,17 +231,20 @@ export class SchoolsService {
           data: divisionTypes.map((type) => ({ schoolId: school.id, type })),
         });
 
-        await tx.auditLog.create({
-          data: {
+        await this.audit.record(
+          {
+            actor,
             organizationId: actor.organizationId,
             schoolId: school.id,
-            actorUserId: actor.id,
-            action: "school.create",
-            resource: "School",
+            action: AuditAction.SCHOOL_CREATED,
+            module: AuditModuleName.SCHOOL,
+            resourceType: "School",
             resourceId: school.id,
+            resourceName: school.name,
             after: { name: school.name, type: school.type },
           },
-        });
+          tx,
+        );
 
         return school;
       });
@@ -289,16 +297,16 @@ export class SchoolsService {
       },
     });
 
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: school.organizationId,
-        schoolId: school.id,
-        actorUserId: actor.id,
-        action: "school_admin.invite",
-        resource: "User",
-        resourceId: user.id,
-        after: { email },
-      },
+    await this.audit.record({
+      actor,
+      organizationId: school.organizationId,
+      schoolId: school.id,
+      action: AuditAction.SCHOOL_ADMIN_INVITED,
+      module: AuditModuleName.SCHOOL,
+      resourceType: "User",
+      resourceId: user.id,
+      resourceName: email,
+      after: { email },
     });
 
     const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3010";
@@ -457,17 +465,21 @@ export class SchoolsService {
         // ImportBatch -> ImportRow automatically.
         await tx.school.delete({ where: { id: schoolId } });
 
-        await tx.auditLog.create({
-          data: {
+        await this.audit.record(
+          {
+            actor,
             organizationId: school.organizationId,
             schoolId: school.id,
-            actorUserId: actor.id,
-            action: "school.delete",
-            resource: "School",
+            action: AuditAction.SCHOOL_DELETED,
+            module: AuditModuleName.SCHOOL,
+            resourceType: "School",
             resourceId: school.id,
+            resourceName: school.name,
+            severity: "CRITICAL",
             before: { name: school.name, type: school.type, address: school.address },
           },
-        });
+          tx,
+        );
       },
       { timeout: 30_000 },
     );

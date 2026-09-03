@@ -5,9 +5,10 @@ import { AuthService } from "./auth.service";
 import { JwtAuthGuard } from "./guards/jwt-auth.guard";
 import { PermissionsGuard } from "./guards/permissions.guard";
 import { DocumentsModule } from "../documents/documents.module";
+import { AuditModule } from "../audit/audit.module";
 
 @Module({
-  imports: [JwtModule.register({}), DocumentsModule],
+  imports: [JwtModule.register({}), DocumentsModule, AuditModule],
   controllers: [AuthController],
   providers: [AuthService, JwtAuthGuard, PermissionsGuard],
   exports: [JwtModule, AuthService, JwtAuthGuard, PermissionsGuard],

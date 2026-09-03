@@ -5,6 +5,8 @@ import { StorageService } from "../storage/storage.service";
 import { StudentsService } from "../students/students.service";
 import { SchoolsService } from "../schools/schools.service";
 import { GuardiansService } from "../guardians/guardians.service";
+import { AuditService } from "../audit/audit.service";
+import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -20,6 +22,7 @@ export class DocumentsService {
     private readonly students: StudentsService,
     private readonly schools: SchoolsService,
     private readonly guardians: GuardiansService,
+    private readonly audit: AuditService,
   ) {}
 
   // Parent-portal variant — ownership is "this guardian is linked to this
@@ -131,7 +134,7 @@ export class DocumentsService {
     const storageKey = `schools/${schoolId}/${randomUUID()}.${extension}`;
     await this.storage.upload(storageKey, file.buffer, file.mimetype);
 
-    return this.prisma.mediaFile.create({
+    const mediaFile = await this.prisma.mediaFile.create({
       data: {
         organizationId: school.organizationId,
         schoolId,
@@ -144,9 +147,21 @@ export class DocumentsService {
         uploadedByUserId: actor.id,
       },
     });
+
+    await this.audit.record({
+      actor,
+      organizationId: school.organizationId,
+      schoolId,
+      action: AuditAction.SCHOOL_LOGO_CHANGED,
+      module: AuditModuleName.SCHOOL,
+      resourceType: "School",
+      resourceId: schoolId,
+      resourceName: school.name,
+    });
+
+    return mediaFile;
   }
 
-  // Doesn't delete the Cloudinary asset or prior MediaFile rows — same
   // Mirrors StudentsService/TeachersService's own delete cleanup: the
   // MediaFile rows AND their underlying Cloudinary assets both go, so
   // removing a logo doesn't leave an orphaned upload behind. Ownership is
@@ -154,12 +169,26 @@ export class DocumentsService {
   // settings.manage, since that permission alone doesn't prove *this*
   // school is one the actor is allowed to touch.
   async removeSchoolLogo(actor: AuthenticatedUser, schoolId: string) {
-    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    const school = await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     const files = await this.prisma.mediaFile.findMany({
       where: { ownerType: "SCHOOL", ownerId: schoolId, kind: "PHOTO" },
     });
     await this.prisma.mediaFile.deleteMany({ where: { ownerType: "SCHOOL", ownerId: schoolId, kind: "PHOTO" } });
     await Promise.all(files.map((f) => this.storage.delete(f.storageKey, f.mimeType).catch(() => undefined)));
+
+    if (files.length > 0) {
+      await this.audit.record({
+        actor,
+        organizationId: school.organizationId,
+        schoolId,
+        action: AuditAction.SCHOOL_LOGO_REMOVED,
+        module: AuditModuleName.SCHOOL,
+        resourceType: "School",
+        resourceId: schoolId,
+        resourceName: school.name,
+      });
+    }
+
     return { success: true };
   }
 

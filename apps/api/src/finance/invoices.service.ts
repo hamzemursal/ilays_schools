@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import { StudentsService } from "../students/students.service";
+import { AuditService } from "../audit/audit.service";
+import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { RecordPaymentDto } from "./dto/record-payment.dto";
 import type { Prisma } from "@school-erp/database";
@@ -14,6 +16,7 @@ export class InvoicesService {
     private readonly prisma: PrismaService,
     private readonly schools: SchoolsService,
     private readonly students: StudentsService,
+    private readonly audit: AuditService,
   ) {}
 
   async generateForFeeStructure(actor: AuthenticatedUser, schoolId: string, feeStructureId: string) {
@@ -41,16 +44,15 @@ export class InvoicesService {
       skipDuplicates: true, // an enrollment that already has this invoice is left untouched
     });
 
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: actor.organizationId,
-        schoolId,
-        actorUserId: actor.id,
-        action: "invoices.generate",
-        resource: "FeeStructure",
-        resourceId: feeStructureId,
-        after: { createdCount: result.count, eligibleEnrollments: enrollments.length },
-      },
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId,
+      action: AuditAction.INVOICES_GENERATED,
+      module: AuditModuleName.FINANCE,
+      resourceType: "FeeStructure",
+      resourceId: feeStructureId,
+      after: { createdCount: result.count, eligibleEnrollments: enrollments.length },
     });
 
     return { createdCount: result.count, eligibleEnrollments: enrollments.length };
@@ -116,16 +118,19 @@ export class InvoicesService {
       const newStatus = newTotal >= Number(invoice.amount) ? "PAID" : "PARTIALLY_PAID";
       await tx.invoice.update({ where: { id: invoiceId }, data: { status: newStatus } });
 
-      await tx.auditLog.create({
-        data: {
+      await this.audit.record(
+        {
+          actor,
           organizationId: actor.organizationId,
-          actorUserId: actor.id,
-          action: "payment.record",
-          resource: "Invoice",
+          schoolId: invoice.enrollment.schoolId,
+          action: AuditAction.PAYMENT_RECORDED,
+          module: AuditModuleName.FINANCE,
+          resourceType: "Invoice",
           resourceId: invoiceId,
           after: { amount: dto.amount, method: dto.method ?? "CASH", newStatus },
         },
-      });
+        tx,
+      );
 
       return payment;
     });

@@ -7,21 +7,14 @@ import { ApiError, useAuth } from "@/lib/auth-context";
 import { api, type Transfer, type TransferEnrollmentSnapshot } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { ApproveTransferForm } from "@/features/transfers/components/ApproveTransferForm";
-
-const STATUS_TONE: Record<Transfer["status"], "warning" | "success" | "danger" | "accent" | "neutral"> = {
-  REQUESTED: "warning",
-  APPROVED: "accent",
-  EXECUTED: "success",
-  REJECTED: "danger",
-  CANCELLED: "neutral",
-};
+import { RejectTransferDialog } from "@/features/transfers/components/RejectTransferDialog";
+import { TransferStatusBadge } from "@/features/transfers/TransferBadges";
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -71,11 +64,11 @@ export default function TransferDetailsPage({ params }: { params: Promise<{ id: 
   const canApprove = user?.permissions.includes("transfers.approve") ?? false;
   const canCreate = user?.permissions.includes("transfers.create") ?? false;
 
-  async function onReject() {
+  async function onReject(reason: string) {
     if (!accessToken || !transfer) return;
     setRejecting(true);
     try {
-      const updated = await api.rejectTransfer(accessToken, transfer.id);
+      const updated = await api.rejectTransfer(accessToken, transfer.id, { reason });
       setTransfer(updated);
       show("Transfer rejected.");
     } catch (err) {
@@ -120,7 +113,7 @@ export default function TransferDetailsPage({ params }: { params: Promise<{ id: 
               {canApprove && isIncomingPending && !approving && (
                 <>
                   <Button size="sm" icon={<Check className="size-4" />} onClick={() => setApproving(true)}>
-                    Approve
+                    Accept
                   </Button>
                   <Button size="sm" variant="outline" icon={<X className="size-4" />} onClick={() => setRejectConfirming(true)}>
                     Reject
@@ -145,10 +138,7 @@ export default function TransferDetailsPage({ params }: { params: Promise<{ id: 
         ) : (
           <>
             <Card padding="none">
-              <CardHeader
-                title="Student Information"
-                actions={<Badge tone={STATUS_TONE[transfer.status]}>{transfer.status}</Badge>}
-              />
+              <CardHeader title="Student Information" actions={<TransferStatusBadge status={transfer.status} />} />
               <div className="grid grid-cols-2 gap-4 p-5 sm:grid-cols-4">
                 <Field label="Full name" value={`${transfer.student.firstName} ${transfer.student.lastName}`} />
                 <Field label="Gender" value={transfer.student.sex === "MALE" ? "Male" : "Female"} />
@@ -168,38 +158,46 @@ export default function TransferDetailsPage({ params }: { params: Promise<{ id: 
               <div className="h-px flex-1 bg-border" />
             </div>
 
-            <EnrollmentCard title="Previous Enrollment" snapshot={transfer.fromEnrollment} schoolName={transfer.fromSchoolName} />
+            <EnrollmentCard title="Previous Enrollment (Origin)" snapshot={transfer.fromEnrollment} schoolName={transfer.fromSchoolName} />
             {transfer.toEnrollment ? (
-              <EnrollmentCard title="Current Enrollment" snapshot={transfer.toEnrollment} schoolName={transfer.toSchoolName} />
+              <EnrollmentCard title="Current Enrollment (Destination)" snapshot={transfer.toEnrollment} schoolName={transfer.toSchoolName} />
             ) : (
               <Card>
                 <p className="text-sm text-foreground-soft">
-                  No enrollment has been created at {transfer.toSchoolName} yet — this transfer is still {transfer.status.toLowerCase()}.
+                  No enrollment has been created at {transfer.toSchoolName} yet — this transfer is still{" "}
+                  {transfer.status === "REQUESTED" ? "pending" : transfer.status.toLowerCase()}.
                 </p>
               </Card>
             )}
 
             <Card padding="none">
-              <CardHeader title="Transfer Information" />
+              <CardHeader title="Request" />
               <div className="grid grid-cols-2 gap-4 p-5 sm:grid-cols-4">
-                <Field label="From school" value={transfer.fromSchoolName} />
-                <Field label="To school" value={transfer.toSchoolName} />
+                <Field label="Requested by" value={transfer.requestedByEmail} />
+                <Field label="Requested" value={new Date(transfer.createdAt).toLocaleString()} />
+                <Field label="Reason" value={transfer.reason ?? <span className="text-foreground-muted">Not provided</span>} />
+              </div>
+            </Card>
+
+            <Card padding="none">
+              <CardHeader title="Destination Decision" />
+              <div className="grid grid-cols-2 gap-4 p-5 sm:grid-cols-4">
+                <Field label="Status" value={<TransferStatusBadge status={transfer.status} />} />
+                <Field label="Decision by" value={transfer.approvedByEmail ?? <span className="text-foreground-muted">—</span>} />
                 <Field
-                  label="Transfer date"
-                  value={
-                    transfer.transferDate ? (
-                      new Date(transfer.transferDate).toLocaleDateString()
-                    ) : (
-                      <span className="text-foreground-muted">Not yet completed</span>
-                    )
-                  }
+                  label="Decision date"
+                  value={transfer.transferDate ? new Date(transfer.transferDate).toLocaleString() : <span className="text-foreground-muted">—</span>}
                 />
-                <Field label="Status" value={<Badge tone={STATUS_TONE[transfer.status]}>{transfer.status}</Badge>} />
                 <Field
-                  label="Reason"
-                  value={transfer.reason ?? <span className="text-foreground-muted">Not provided</span>}
+                  label="Rejection reason"
+                  value={transfer.rejectionReason ?? <span className="text-foreground-muted">—</span>}
                 />
               </div>
+              {transfer.status === "REQUESTED" && (
+                <p className="border-t border-border px-5 py-3 text-sm text-foreground-soft">
+                  Waiting for {transfer.toSchoolName} to accept or reject this request.
+                </p>
+              )}
             </Card>
 
             <Card padding="none">
@@ -214,13 +212,15 @@ export default function TransferDetailsPage({ params }: { params: Promise<{ id: 
             </Card>
 
             <Card padding="none">
-              <CardHeader title="Audit Timeline" />
+              <CardHeader title="Timeline" />
               <div className="space-y-4 p-5">
                 <TimelineRow icon={FileText} label="Requested" by={transfer.requestedByEmail} at={transfer.createdAt} />
                 {transfer.status === "EXECUTED" && transfer.approvedByEmail && (
-                  <TimelineRow icon={GraduationCap} label="Approved & completed" by={transfer.approvedByEmail} at={transfer.transferDate} />
+                  <TimelineRow icon={GraduationCap} label="Accepted & completed" by={transfer.approvedByEmail} at={transfer.transferDate} />
                 )}
-                {transfer.status === "REJECTED" && <TimelineRow icon={XCircle} label="Rejected" by={null} at={null} />}
+                {transfer.status === "REJECTED" && (
+                  <TimelineRow icon={XCircle} label={`Rejected${transfer.rejectionReason ? `: ${transfer.rejectionReason}` : ""}`} by={null} at={null} />
+                )}
                 {transfer.status === "CANCELLED" && <TimelineRow icon={XCircle} label="Cancelled by requester" by={null} at={null} />}
               </div>
             </Card>
@@ -234,7 +234,7 @@ export default function TransferDetailsPage({ params }: { params: Promise<{ id: 
                   onDone={(updated) => {
                     setTransfer(updated);
                     setApproving(false);
-                    show("Transfer approved.");
+                    show("Transfer accepted — student enrolled.");
                   }}
                 />
               </Card>
@@ -243,11 +243,9 @@ export default function TransferDetailsPage({ params }: { params: Promise<{ id: 
         )}
       </div>
 
-      <ConfirmDialog
+      <RejectTransferDialog
         open={rejectConfirming}
-        title="Reject this transfer?"
-        description="The student stays enrolled at their current school. This can't be undone."
-        confirmLabel="Reject"
+        studentName={transfer ? `${transfer.student.firstName} ${transfer.student.lastName}` : "This student"}
         loading={rejecting}
         onConfirm={onReject}
         onCancel={() => setRejectConfirming(false)}

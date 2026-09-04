@@ -79,8 +79,8 @@ export function StudentLifecycleOverview({
   useEffect(() => {
     if (!accessToken || !schoolId) return;
     api
-      .listTransfers(accessToken, schoolId)
-      .then((rows) => setPendingTransfers(rows.filter((t) => t.status === "REQUESTED").length))
+      .getTransferSummary(accessToken, schoolId)
+      .then((s) => setPendingTransfers(s.incoming.pending + s.outgoing.pending))
       .catch(() => setPendingTransfers(null));
   }, [accessToken, schoolId]);
 

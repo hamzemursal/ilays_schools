@@ -101,7 +101,7 @@ export function ApproveTransferForm({
       {error && <Alert tone="danger">{error}</Alert>}
       <div className="flex gap-2">
         <Button type="submit" size="sm" loading={submitting}>
-          Approve transfer
+          Accept &amp; Enroll
         </Button>
         <Button type="button" variant="outline" size="sm" onClick={onCancel}>
           Cancel

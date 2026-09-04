@@ -1003,6 +1003,7 @@ export interface Transfer {
   toSchoolName: string;
   status: TransferStatus;
   reason: string | null;
+  rejectionReason: string | null;
   transferDate: string | null;
   createdAt: string;
   student: { id: string; firstName: string; lastName: string; sex: Sex; dateOfBirth: string };
@@ -1010,6 +1011,39 @@ export interface Transfer {
   toEnrollment: TransferEnrollmentSnapshot | null;
   requestedByEmail: string;
   approvedByEmail: string | null;
+}
+
+export type TransferDirection = "incoming" | "outgoing";
+
+export interface TransferListFilters {
+  schoolId?: string;
+  direction?: TransferDirection;
+  originSchoolId?: string;
+  destinationSchoolId?: string;
+  status?: TransferStatus;
+  academicYearId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface TransferListResponse {
+  data: Transfer[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+export interface TransferDirectionSummary {
+  pending: number;
+  rejected: number;
+  completed: number;
+  cancelled: number;
+}
+
+export interface TransferSummary {
+  incoming: TransferDirectionSummary;
+  outgoing: TransferDirectionSummary;
 }
 
 // Student Lifecycle — every field here is derived by the backend from
@@ -1494,15 +1528,25 @@ export const api = {
 
   requestTransfer: (accessToken: string, studentId: string, body: { toSchoolId: string; reason?: string }) =>
     request<Transfer>(`/students/${studentId}/transfers`, { method: "POST", body, accessToken }),
-  listTransfers: (accessToken: string, schoolId: string) =>
-    request<Transfer[]>(`/schools/${schoolId}/transfers`, { accessToken }),
+  // schoolId present -> that school's incoming/outgoing view; omitted ->
+  // org-wide (Super/Org Admin; a School Admin without one is auto-scoped
+  // to their own school(s) server-side) — see TransfersService.list.
+  listTransfers: (accessToken: string, filters: TransferListFilters) =>
+    request<TransferListResponse>(
+      filters.schoolId
+        ? `/schools/${filters.schoolId}/transfers${auditLogQs({ ...filters, schoolId: undefined })}`
+        : `/transfers${auditLogQs(filters)}`,
+      { accessToken },
+    ),
+  getTransferSummary: (accessToken: string, schoolId?: string) =>
+    request<TransferSummary>(`/transfers/summary${qs({ schoolId })}`, { accessToken }),
   approveTransfer: (
     accessToken: string,
     transferId: string,
     body: { academicYearId: string; classId: string; sectionId: string; studentNumber?: string; rollNumber?: number },
   ) => request<Transfer>(`/transfers/${transferId}/approve`, { method: "POST", body, accessToken }),
-  rejectTransfer: (accessToken: string, transferId: string) =>
-    request<Transfer>(`/transfers/${transferId}/reject`, { method: "POST", accessToken }),
+  rejectTransfer: (accessToken: string, transferId: string, body: { reason: string }) =>
+    request<Transfer>(`/transfers/${transferId}/reject`, { method: "POST", body, accessToken }),
   cancelTransfer: (accessToken: string, transferId: string) =>
     request<Transfer>(`/transfers/${transferId}/cancel`, { method: "POST", accessToken }),
 

@@ -101,6 +101,11 @@ export function orgNavItems(user: Profile): NavItem[] {
   if (user.permissions.includes("schools.view") && user.permissions.includes("students.view")) {
     items.push({ label: "Student Lifecycle", href: "/student-lifecycle", icon: Milestone });
   }
+  // Org-wide Transfers — same audience as the two entries above; a School
+  // Admin's equivalent is schoolNavItems' own per-school "Transfers" entry.
+  if (user.permissions.includes("schools.view") && user.permissions.includes("transfers.create")) {
+    items.push({ label: "Transfers", href: "/transfers", icon: ArrowLeftRight });
+  }
   return items;
 }
 

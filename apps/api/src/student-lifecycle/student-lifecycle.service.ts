@@ -13,6 +13,13 @@ const MAX_PAGE_SIZE = 100;
 export interface LifecycleListFilters {
   schoolId?: string;
   academicYearId?: string;
+  // Cross-school alternative to academicYearId — AcademicYear rows are
+  // per-school, so there's no single id that means "2027" across every
+  // school. When no specific school is selected, the frontend sends this
+  // instead, and it's matched against the AcademicYear relation's own
+  // name field, correctly aggregating every school's "2027" together.
+  // academicYearId always wins if both are somehow present.
+  academicYearName?: string;
   search?: string;
   status?: string;
   page?: number;
@@ -59,28 +66,77 @@ export class StudentLifecycleService {
     return actor.organizationId;
   }
 
+  // academicYearId is an exact match against one school's own row — used
+  // whenever a specific school is selected. academicYearName matches the
+  // AcademicYear relation's name field instead, which is how the same
+  // "2027" is aggregated correctly across every school's own distinct
+  // AcademicYear row when the actor is looking at more than one school.
+  private academicYearWhere(academicYearId?: string, academicYearName?: string): Prisma.StudentEnrollmentWhereInput {
+    if (academicYearId) return { academicYearId };
+    if (academicYearName) return { academicYear: { name: academicYearName } };
+    return {};
+  }
+
+  // Real, DB-backed year options for the "All Schools" case — every
+  // distinct AcademicYear.name across the actor's accessible schools (or
+  // just one, if schoolId is given), never a hardcoded list. isCurrentHere
+  // is true if any matching row across those schools is currently marked
+  // current, so the frontend can still show a "(current)" hint.
+  async listAcademicYearNames(actor: AuthenticatedUser, schoolId?: string) {
+    const organizationId = this.requireOrganizationId(actor);
+    const schoolIds = await this.resolveSchoolIds(actor, schoolId);
+
+    const years = await this.prisma.academicYear.findMany({
+      where: { school: { organizationId, ...(schoolIds ? { id: { in: schoolIds } } : {}) } },
+      select: { name: true, isCurrent: true, startDate: true },
+    });
+
+    const byName = new Map<string, { name: string; isCurrentAnywhere: boolean; latestStartDate: Date }>();
+    for (const y of years) {
+      const existing = byName.get(y.name);
+      if (!existing) {
+        byName.set(y.name, { name: y.name, isCurrentAnywhere: y.isCurrent, latestStartDate: y.startDate });
+      } else {
+        existing.isCurrentAnywhere = existing.isCurrentAnywhere || y.isCurrent;
+        if (y.startDate > existing.latestStartDate) existing.latestStartDate = y.startDate;
+      }
+    }
+
+    return [...byName.values()]
+      .sort((a, b) => b.latestStartDate.getTime() - a.latestStartDate.getTime())
+      .map(({ name, isCurrentAnywhere }) => ({ name, isCurrentAnywhere }));
+  }
+
   // ---------------------------------------------------------------------
   // Summary — the two-card (Primary / Secondary) numbers for the Overview
   // page. Every count is computed fresh from StudentEnrollment/Student,
   // never cached or denormalized.
   // ---------------------------------------------------------------------
-  async getSummary(actor: AuthenticatedUser, filters: { schoolId?: string; academicYearId?: string }) {
+  async getSummary(
+    actor: AuthenticatedUser,
+    filters: { schoolId?: string; academicYearId?: string; academicYearName?: string },
+  ) {
     const organizationId = this.requireOrganizationId(actor);
     const schoolIds = await this.resolveSchoolIds(actor, filters.schoolId);
 
     const [primary, secondary] = await Promise.all([
-      this.computePrimarySummary(organizationId, schoolIds, filters.academicYearId),
-      this.computeSecondarySummary(organizationId, schoolIds, filters.academicYearId),
+      this.computePrimarySummary(organizationId, schoolIds, filters.academicYearId, filters.academicYearName),
+      this.computeSecondarySummary(organizationId, schoolIds, filters.academicYearId, filters.academicYearName),
     ]);
 
     return { primary, secondary };
   }
 
-  private async computePrimarySummary(organizationId: string, schoolIds: string[] | undefined, academicYearId?: string) {
+  private async computePrimarySummary(
+    organizationId: string,
+    schoolIds: string[] | undefined,
+    academicYearId?: string,
+    academicYearName?: string,
+  ) {
     const base: Prisma.StudentEnrollmentWhereInput = {
       organizationId,
       ...(schoolIds ? { schoolId: { in: schoolIds } } : {}),
-      ...(academicYearId ? { academicYearId } : {}),
+      ...this.academicYearWhere(academicYearId, academicYearName),
       class: { division: { type: "PRIMARY" } },
     };
 
@@ -115,11 +171,12 @@ export class StudentLifecycleService {
     organizationId: string,
     schoolIds: string[] | undefined,
     academicYearId?: string,
+    academicYearName?: string,
   ) {
     const base: Prisma.StudentEnrollmentWhereInput = {
       organizationId,
       ...(schoolIds ? { schoolId: { in: schoolIds } } : {}),
-      ...(academicYearId ? { academicYearId } : {}),
+      ...this.academicYearWhere(academicYearId, academicYearName),
       class: { division: { type: "SECONDARY" } },
     };
 
@@ -135,7 +192,7 @@ export class StudentLifecycleService {
         where: {
           organizationId,
           ...(schoolIds ? { schoolId: { in: schoolIds } } : {}),
-          ...(academicYearId ? { academicYearId } : {}),
+          ...this.academicYearWhere(academicYearId, academicYearName),
           status: "ACTIVE",
           classId: { in: finalClassIds },
         },
@@ -194,7 +251,7 @@ export class StudentLifecycleService {
     const scopeWhere: Prisma.StudentEnrollmentWhereInput = {
       organizationId,
       ...(schoolIds ? { schoolId: { in: schoolIds } } : {}),
-      ...(filters.academicYearId ? { academicYearId: filters.academicYearId } : {}),
+      ...this.academicYearWhere(filters.academicYearId, filters.academicYearName),
       class: { division: { type: "PRIMARY" } },
     };
 
@@ -219,7 +276,7 @@ export class StudentLifecycleService {
           {
             organizationId,
             ...(schoolIds ? { schoolId: { in: schoolIds } } : {}),
-            ...(filters.academicYearId ? { academicYearId: filters.academicYearId } : {}),
+            ...this.academicYearWhere(filters.academicYearId, filters.academicYearName),
             status: "ACTIVE",
             classId: { in: finalClassIds },
           },
@@ -232,7 +289,7 @@ export class StudentLifecycleService {
     const scopeWhere: Prisma.StudentEnrollmentWhereInput = {
       organizationId,
       ...(schoolIds ? { schoolId: { in: schoolIds } } : {}),
-      ...(filters.academicYearId ? { academicYearId: filters.academicYearId } : {}),
+      ...this.academicYearWhere(filters.academicYearId, filters.academicYearName),
       class: { division: { type: "SECONDARY" } },
     };
     const statusWhere = this.secondaryStatusWhere(filters.status);

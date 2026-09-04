@@ -3,22 +3,23 @@
 import { RotateCcw, Search, X } from "lucide-react";
 import { Input, Select } from "@/components/ui/FormControls";
 import { Button } from "@/components/ui/Button";
-import type { AcademicYear } from "@/lib/api";
+import type { LifecycleYearOption } from "./useLifecycleYearFilter";
 
 // School filter is omitted entirely on a fixed-school page (School Admin) —
-// same convention as AuditFilterBar. Academic Year only becomes a real
-// dropdown once a specific school is selected: AcademicYear rows are
-// per-school (see schema), so there's no single cross-school list of years
-// to offer while "All Schools" is active — the control reflects that real
-// constraint instead of faking a merged year list.
+// same convention as AuditFilterBar. Academic Year stays enabled either
+// way: while "All Schools" is active, its options are the real distinct
+// AcademicYear names across every accessible school (see
+// useLifecycleYearFilter), so the control never looks broken or disabled —
+// it just switches what "the year" means, from one school's own row to a
+// name shared across schools.
 export function LifecycleFilterBar({
   search,
   onSearchChange,
   schools,
   schoolId,
   onSchoolChange,
-  academicYears,
-  academicYearId,
+  academicYearOptions,
+  academicYearValue,
   onAcademicYearChange,
   onReset,
 }: {
@@ -27,9 +28,9 @@ export function LifecycleFilterBar({
   schools?: { id: string; name: string }[];
   schoolId: string;
   onSchoolChange: (id: string) => void;
-  academicYears: AcademicYear[];
-  academicYearId: string;
-  onAcademicYearChange: (id: string) => void;
+  academicYearOptions: LifecycleYearOption[];
+  academicYearValue: string;
+  onAcademicYearChange: (value: string) => void;
   onReset: () => void;
 }) {
   return (
@@ -72,21 +73,14 @@ export function LifecycleFilterBar({
 
       <div>
         <label className="mb-1 block text-xs font-medium text-foreground-soft">Academic Year</label>
-        <Select
-          value={academicYearId}
-          onChange={(e) => onAcademicYearChange(e.target.value)}
-          className="w-40"
-          disabled={!schoolId}
-        >
+        <Select value={academicYearValue} onChange={(e) => onAcademicYearChange(e.target.value)} className="w-40">
           <option value="">All academic years</option>
-          {academicYears.map((y) => (
-            <option key={y.id} value={y.id}>
-              {y.name}
-              {y.isCurrent ? " (current)" : ""}
+          {academicYearOptions.map((y) => (
+            <option key={y.value} value={y.value}>
+              {y.label}
             </option>
           ))}
         </Select>
-        {!schoolId && schools && <p className="mt-1 text-xs text-foreground-muted">Pick a school to filter by year</p>}
       </div>
 
       <Button size="sm" variant="outline" icon={<RotateCcw className="size-4" />} onClick={onReset}>

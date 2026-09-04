@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowUpCircle } from "lucide-react";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type AcademicYear, type LifecycleEnrollmentRow, type LifecycleListResponse, type School } from "@/lib/api";
+import { api, type LifecycleEnrollmentRow, type LifecycleListResponse, type School } from "@/lib/api";
 import { PageHeader, type Crumb } from "@/components/ui/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -15,6 +15,7 @@ import { LifecycleFilterBar } from "./LifecycleFilterBar";
 import { LifecycleTable, type LifecycleColumn, type LifecycleTableSelection } from "./LifecycleTable";
 import { LifecycleStatusBadge } from "./LifecycleBadges";
 import { resolvePrimaryRowState, resolveSecondaryRowState, formatLifecycleDate } from "./state";
+import { useLifecycleYearFilter } from "./useLifecycleYearFilter";
 
 export type LifecycleListKind = "primary-completed" | "secondary-graduated" | "awaiting-enrollment" | "alumni";
 
@@ -91,8 +92,14 @@ export function LifecycleListExplorer({
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [schools, setSchools] = useState<School[]>([]);
   const [schoolId, setSchoolId] = useState(fixedSchoolId ?? searchParams.get("schoolId") ?? "");
-  const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
-  const [academicYearId, setAcademicYearId] = useState(searchParams.get("academicYearId") ?? "");
+  // Seeded from whichever query param matches the initial school mode — a
+  // link built while "All Schools" was active carries academicYearName,
+  // one built for a specific school carries academicYearId.
+  const year = useLifecycleYearFilter(
+    accessToken,
+    schoolId,
+    schoolId ? (searchParams.get("academicYearId") ?? "") : (searchParams.get("academicYearName") ?? ""),
+  );
   const [status, setStatus] = useState(searchParams.get("status") ?? DEFAULT_STATUS[kind] ?? "");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -114,25 +121,7 @@ export function LifecycleListExplorer({
       .catch(() => undefined);
   }, [accessToken, fixedSchoolId]);
 
-  // A new schoolId invalidates the previous one's academic-year options —
-  // reset during render (React's own recommended pattern for "adjust state
-  // when a value changes") rather than synchronously inside the effect
-  // below, which only ever calls setState from its async callbacks.
-  const [prevSchoolId, setPrevSchoolId] = useState(schoolId);
-  if (schoolId !== prevSchoolId) {
-    setPrevSchoolId(schoolId);
-    if (!schoolId) setAcademicYears([]);
-  }
-
-  useEffect(() => {
-    if (!accessToken || !schoolId) return;
-    api
-      .listAcademicYears(accessToken, schoolId)
-      .then(setAcademicYears)
-      .catch(() => setAcademicYears([]));
-  }, [accessToken, schoolId]);
-
-  const filterKey = JSON.stringify({ schoolId, academicYearId, status, search: debouncedSearch, pageSize, kind });
+  const filterKey = JSON.stringify({ schoolId, year: year.value, status, search: debouncedSearch, pageSize, kind });
   const fetchKey = `${filterKey}:${page}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
   const [prevFetchKey, setPrevFetchKey] = useState(fetchKey);
@@ -151,7 +140,7 @@ export function LifecycleListExplorer({
     if (!accessToken) return;
     FETCHERS[kind](accessToken, {
       schoolId: schoolId || undefined,
-      academicYearId: academicYearId || undefined,
+      ...year.asFilters,
       status: status || undefined,
       search: debouncedSearch || undefined,
       page,
@@ -160,14 +149,14 @@ export function LifecycleListExplorer({
       .then(setResult)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load this list"))
       .finally(() => setLoading(false));
-    // filterKey already captures schoolId/academicYearId/status/search/pageSize.
+    // filterKey already captures schoolId/year.value/status/search/pageSize.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, filterKey, page]);
 
   function handleReset() {
     setSearch("");
     if (!fixedSchoolId) setSchoolId("");
-    setAcademicYearId("");
+    year.setValue("");
     setStatus(DEFAULT_STATUS[kind] ?? "");
   }
 
@@ -317,9 +306,9 @@ export function LifecycleListExplorer({
             schools={fixedSchoolId ? undefined : schools.map((s) => ({ id: s.id, name: s.name }))}
             schoolId={schoolId}
             onSchoolChange={setSchoolId}
-            academicYears={academicYears}
-            academicYearId={academicYearId}
-            onAcademicYearChange={setAcademicYearId}
+            academicYearOptions={year.options}
+            academicYearValue={year.value}
+            onAcademicYearChange={year.setValue}
             onReset={handleReset}
           />
           {statusOptions && (

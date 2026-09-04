@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Hourglass, GraduationCap, ArrowLeftRight, CheckCircle2, Award, Users } from "lucide-react";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type AcademicYear, type LifecycleSummary, type School } from "@/lib/api";
+import { api, type LifecycleSummary, type School } from "@/lib/api";
 import { PageHeader, type Crumb } from "@/components/ui/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { SkeletonCards } from "@/components/ui/Skeleton";
@@ -12,6 +12,7 @@ import { WorkflowDiagram } from "./WorkflowDiagram";
 import { LifecycleFilterBar } from "./LifecycleFilterBar";
 import { PrimarySummaryCard, SecondarySummaryCard } from "./LifecycleSummaryCards";
 import { AttentionRequired, type AttentionItem } from "./AttentionRequired";
+import { useLifecycleYearFilter } from "./useLifecycleYearFilter";
 
 function basePath(fixedSchoolId?: string) {
   return fixedSchoolId ? `/schools/${fixedSchoolId}/student-lifecycle` : "/student-lifecycle";
@@ -30,8 +31,7 @@ export function StudentLifecycleOverview({
 
   const [schools, setSchools] = useState<School[]>([]);
   const [schoolId, setSchoolId] = useState(fixedSchoolId ?? "");
-  const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
-  const [academicYearId, setAcademicYearId] = useState("");
+  const year = useLifecycleYearFilter(accessToken, schoolId);
   const [summary, setSummary] = useState<LifecycleSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [pendingTransfers, setPendingTransfers] = useState<number | null>(null);
@@ -45,19 +45,16 @@ export function StudentLifecycleOverview({
       .catch(() => undefined);
   }, [accessToken, fixedSchoolId]);
 
-  // A new schoolId invalidates whatever academic-year list and summary
-  // loading/error state was showing for the previous one — reset during
-  // render (React's own recommended pattern for "adjust state when a value
-  // changes") rather than synchronously inside the effects below, which
-  // only ever call setState from their async .then()/.catch() callbacks.
+  // A new schoolId invalidates the previous pending-transfer count — reset
+  // during render (React's own recommended pattern for "adjust state when a
+  // value changes") rather than synchronously inside the effect below.
   const [prevSchoolId, setPrevSchoolId] = useState(schoolId);
   if (schoolId !== prevSchoolId) {
     setPrevSchoolId(schoolId);
-    if (!schoolId) setAcademicYears([]);
     if (!schoolId) setPendingTransfers(null);
   }
 
-  const summaryKey = `${schoolId}:${academicYearId}`;
+  const summaryKey = `${schoolId}:${year.value}`;
   const [prevSummaryKey, setPrevSummaryKey] = useState(summaryKey);
   if (summaryKey !== prevSummaryKey) {
     setPrevSummaryKey(summaryKey);
@@ -66,21 +63,15 @@ export function StudentLifecycleOverview({
   }
 
   useEffect(() => {
-    if (!accessToken || !schoolId) return;
-    api
-      .listAcademicYears(accessToken, schoolId)
-      .then(setAcademicYears)
-      .catch(() => setAcademicYears([]));
-  }, [accessToken, schoolId]);
-
-  useEffect(() => {
     if (!accessToken) return;
     api
-      .getLifecycleSummary(accessToken, { schoolId: schoolId || undefined, academicYearId: academicYearId || undefined })
+      .getLifecycleSummary(accessToken, { schoolId: schoolId || undefined, ...year.asFilters })
       .then(setSummary)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load Student Lifecycle summary"))
       .finally(() => setLoading(false));
-  }, [accessToken, schoolId, academicYearId]);
+    // year.asFilters is derived from year.value, already captured in summaryKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken, schoolId, year.value]);
 
   // Pending-transfer counts are only meaningful for one school at a time —
   // there's no cross-school aggregate endpoint, so "All Schools" simply
@@ -95,13 +86,16 @@ export function StudentLifecycleOverview({
 
   function handleReset() {
     if (!fixedSchoolId) setSchoolId("");
-    setAcademicYearId("");
+    year.setValue("");
   }
 
   const qsFor = (path: string) => {
     const params = new URLSearchParams();
     if (!fixedSchoolId && schoolId) params.set("schoolId", schoolId);
-    if (academicYearId) params.set("academicYearId", academicYearId);
+    if (year.value) {
+      if (schoolId) params.set("academicYearId", year.value);
+      else params.set("academicYearName", year.value);
+    }
     const q = params.toString();
     return `${basePath(fixedSchoolId)}/${path}${q ? `?${q}` : ""}`;
   };
@@ -142,9 +136,9 @@ export function StudentLifecycleOverview({
           schools={fixedSchoolId ? undefined : schools.map((s) => ({ id: s.id, name: s.name }))}
           schoolId={schoolId}
           onSchoolChange={setSchoolId}
-          academicYears={academicYears}
-          academicYearId={academicYearId}
-          onAcademicYearChange={setAcademicYearId}
+          academicYearOptions={year.options}
+          academicYearValue={year.value}
+          onAcademicYearChange={year.setValue}
           onReset={handleReset}
         />
 

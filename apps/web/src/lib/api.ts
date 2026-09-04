@@ -1041,10 +1041,21 @@ export interface LifecycleListResponse {
 export interface LifecycleListFilters {
   schoolId?: string;
   academicYearId?: string;
+  // Cross-school alternative to academicYearId, used whenever no single
+  // school is selected — see StudentLifecycleService.academicYearWhere.
+  academicYearName?: string;
   search?: string;
   status?: string;
   page?: number;
   pageSize?: number;
+}
+
+// One entry per distinct AcademicYear.name across the actor's accessible
+// schools — real DB data, never hardcoded. isCurrentAnywhere is true if any
+// matching row across those schools is the school's current year.
+export interface LifecycleAcademicYearName {
+  name: string;
+  isCurrentAnywhere: boolean;
 }
 
 export interface Form1TransitionPreview {
@@ -1476,8 +1487,12 @@ export const api = {
   // see" (the backend itself scopes a School Admin to their own school; see
   // StudentLifecycleService.resolveSchoolIds), same convention as the
   // Audit Log's org-wide vs per-school pages.
-  getLifecycleSummary: (accessToken: string, filters: { schoolId?: string; academicYearId?: string }) =>
-    request<LifecycleSummary>(`/student-lifecycle/summary${auditLogQs(filters)}`, { accessToken }),
+  getLifecycleSummary: (
+    accessToken: string,
+    filters: { schoolId?: string; academicYearId?: string; academicYearName?: string },
+  ) => request<LifecycleSummary>(`/student-lifecycle/summary${auditLogQs(filters)}`, { accessToken }),
+  listLifecycleAcademicYearNames: (accessToken: string, schoolId?: string) =>
+    request<LifecycleAcademicYearName[]>(`/student-lifecycle/academic-years${qs({ schoolId })}`, { accessToken }),
   listPrimaryCompleted: (accessToken: string, filters: LifecycleListFilters) =>
     request<LifecycleListResponse>(`/student-lifecycle/primary-completed${auditLogQs(filters)}`, { accessToken }),
   listAwaitingEnrollment: (accessToken: string, filters: LifecycleListFilters) =>

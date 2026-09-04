@@ -9,6 +9,7 @@ import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 interface LifecycleListQuery {
   schoolId?: string;
   academicYearId?: string;
+  academicYearName?: string;
   search?: string;
   status?: string;
   page?: string;
@@ -19,6 +20,7 @@ function parseListFilters(query: LifecycleListQuery): LifecycleListFilters {
   return {
     schoolId: query.schoolId,
     academicYearId: query.academicYearId,
+    academicYearName: query.academicYearName,
     search: query.search,
     status: query.status,
     page: query.page ? Number(query.page) : undefined,
@@ -39,7 +41,19 @@ export class StudentLifecycleController {
   @RequirePermissions("students.view")
   @Get("student-lifecycle/summary")
   getSummary(@CurrentUser() user: AuthenticatedUser, @Query() query: LifecycleListQuery) {
-    return this.lifecycle.getSummary(user, { schoolId: query.schoolId, academicYearId: query.academicYearId });
+    return this.lifecycle.getSummary(user, {
+      schoolId: query.schoolId,
+      academicYearId: query.academicYearId,
+      academicYearName: query.academicYearName,
+    });
+  }
+
+  // Real, DB-backed year options for the Academic Year filter when no
+  // single school is selected — see StudentLifecycleService.listAcademicYearNames.
+  @RequirePermissions("students.view")
+  @Get("student-lifecycle/academic-years")
+  listAcademicYearNames(@CurrentUser() user: AuthenticatedUser, @Query("schoolId") schoolId?: string) {
+    return this.lifecycle.listAcademicYearNames(user, schoolId);
   }
 
   @RequirePermissions("students.view")

@@ -1013,6 +1013,43 @@ export interface Transfer {
   approvedByEmail: string | null;
 }
 
+export interface BulkTransferEligibleStudent {
+  studentId: string;
+  enrollmentId: string;
+  firstName: string;
+  lastName: string;
+  studentNumber: string;
+  rollNumber: number;
+  fromClass: string;
+  fromSection: string;
+}
+
+export interface BulkTransferIneligibleStudent {
+  studentId: string;
+  reason: string;
+}
+
+export interface BulkTransferPreview {
+  eligible: BulkTransferEligibleStudent[];
+  ineligible: BulkTransferIneligibleStudent[];
+}
+
+export interface BulkTransferResult {
+  fromSchoolId: string;
+  toSchoolId: string;
+  toClassId: string;
+  toAcademicYearId: string;
+  results: {
+    studentId: string;
+    transferId: string;
+    fromEnrollmentId: string;
+    toEnrollmentId: string;
+    sectionId: string;
+    studentNumber: string;
+    rollNumber: number;
+  }[];
+}
+
 export type TransferDirection = "incoming" | "outgoing";
 
 export interface TransferListFilters {
@@ -1549,6 +1586,23 @@ export const api = {
     request<Transfer>(`/transfers/${transferId}/reject`, { method: "POST", body, accessToken }),
   cancelTransfer: (accessToken: string, transferId: string) =>
     request<Transfer>(`/transfers/${transferId}/cancel`, { method: "POST", accessToken }),
+
+  // Bulk (one-admin, one-step) transfer — only succeeds when the actor has
+  // access to both schoolId (origin, from the path) and body.toSchoolId
+  // (destination) — see TransfersService.previewBulkTransfer/confirmBulkTransfer.
+  previewBulkTransfer: (accessToken: string, schoolId: string, body: { toSchoolId: string; studentIds: string[] }) =>
+    request<BulkTransferPreview>(`/schools/${schoolId}/students/bulk-transfer/preview`, { method: "POST", body, accessToken }),
+  confirmBulkTransfer: (
+    accessToken: string,
+    schoolId: string,
+    body: {
+      toSchoolId: string;
+      toAcademicYearId: string;
+      toClassId: string;
+      reason?: string;
+      assignments: { studentId: string; sectionId: string }[];
+    },
+  ) => request<BulkTransferResult>(`/schools/${schoolId}/students/bulk-transfer/confirm`, { method: "POST", body, accessToken }),
 
   // Student Lifecycle — schoolId omitted means "every school the actor can
   // see" (the backend itself scopes a School Admin to their own school; see

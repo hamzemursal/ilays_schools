@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type StudentListItem } from "@/lib/api";
 import { studentsApi } from "@/features/students/api";
@@ -13,12 +14,13 @@ import { BulkActionBar } from "@/components/ui/BulkActionBar";
 import { useToast } from "@/components/ui/Toast";
 import { runBulkAction, summarizeBulkResult } from "@/lib/bulkAction";
 import { StudentsTable } from "@/features/students/tables/StudentsTable";
-import { Archive, Download, Upload, UserPlus } from "lucide-react";
+import { Archive, ArrowLeftRight, Download, Upload, UserPlus } from "lucide-react";
 
 export default function StudentsListPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: schoolId } = use(params);
   const { user, accessToken } = useAuth();
   const { show } = useToast();
+  const router = useRouter();
 
   const [students, setStudents] = useState<StudentListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +68,12 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
   const canArchive = user?.permissions.includes("students.archive") ?? false;
   const canImport = user?.permissions.includes("imports.create") ?? false;
   const canExport = user?.permissions.includes("exports.create") ?? false;
+  // Bulk transfer requires both permissions since it self-approves — see
+  // TransfersService.confirmBulkTransfer. Having both here doesn't
+  // guarantee the destination school is also accessible; that's checked
+  // server-side the moment a destination is picked in the wizard.
+  const canBulkTransfer = (user?.permissions.includes("transfers.create") && user?.permissions.includes("transfers.approve")) ?? false;
+  const canSelect = canArchive || canBulkTransfer;
   const schoolName = user?.schools.find((s) => s.id === schoolId)?.name ?? "School";
 
   return (
@@ -102,11 +110,23 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
         ) : (
           accessToken && (
             <>
-              {canArchive && (
+              {canSelect && (
                 <BulkActionBar count={selectedIds.size} onClear={() => setSelectedIds(new Set())}>
-                  <Button size="sm" variant="danger" icon={<Archive className="size-4" />} onClick={() => setShowBulkConfirm(true)}>
-                    Archive selected
-                  </Button>
+                  {canArchive && (
+                    <Button size="sm" variant="danger" icon={<Archive className="size-4" />} onClick={() => setShowBulkConfirm(true)}>
+                      Archive selected
+                    </Button>
+                  )}
+                  {canBulkTransfer && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      icon={<ArrowLeftRight className="size-4" />}
+                      onClick={() => router.push(`/schools/${schoolId}/students/bulk-transfer?studentIds=${[...selectedIds].join(",")}`)}
+                    >
+                      Bulk Transfer
+                    </Button>
+                  )}
                 </BulkActionBar>
               )}
               <StudentsTable
@@ -114,7 +134,7 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
                 accessToken={accessToken}
                 students={students}
                 selection={
-                  canArchive
+                  canSelect
                     ? {
                         selectedKeys: selectedIds,
                         onToggle: (key, checked) =>

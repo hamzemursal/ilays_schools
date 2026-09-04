@@ -719,6 +719,10 @@ model Transfer {
   toEnrollment     StudentEnrollment? @relation("TransferTo", fields: [toEnrollmentId], references: [id], onDelete: SetNull)
 
   reason            String?
+  // Kept separate from `reason` (the requester's own reason for asking)
+  // so a rejection never overwrites why the transfer was requested in the
+  // first place — both survive on the same row.
+  rejectionReason   String?
   status            TransferStatus @default(REQUESTED)
   requestedByUserId String
   approvedByUserId  String?

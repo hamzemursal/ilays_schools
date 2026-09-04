@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@school-erp/database";
+import { Prisma, type TransferStatus } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import { AuditService } from "../audit/audit.service";
@@ -7,6 +7,7 @@ import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { RequestTransferDto } from "./dto/request-transfer.dto";
 import { ApproveTransferDto } from "./dto/approve-transfer.dto";
+import { RejectTransferDto } from "./dto/reject-transfer.dto";
 
 // A student can be transferred from an ACTIVE enrollment (the ordinary
 // case) or a COMPLETED/GRADUATED one — a student currently awaiting their
@@ -16,6 +17,28 @@ import { ApproveTransferDto } from "./dto/approve-transfer.dto";
 // (PROMOTED, TRANSFERRED_OUT, WITHDRAWN) is already-resolved history with
 // its own successor enrollment recorded elsewhere.
 const TRANSFERABLE_ENROLLMENT_STATUSES = new Set(["ACTIVE", "COMPLETED", "GRADUATED"]);
+
+const MAX_PAGE_SIZE = 100;
+
+export interface TransferListFilters {
+  // The school whose inbox/outbox this list represents — required to make
+  // "direction" meaningful. Omitted entirely means org-wide (Super/Org
+  // Admin only; a School Admin with no schoolId falls back to their own
+  // school(s) instead, same as every other org-wide-capable list in this
+  // app — see StudentLifecycleService.resolveSchoolIds for the identical
+  // pattern).
+  schoolId?: string;
+  direction?: "incoming" | "outgoing";
+  originSchoolId?: string;
+  destinationSchoolId?: string;
+  status?: TransferStatus;
+  academicYearId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
 
 @Injectable()
 export class TransfersService {
@@ -49,6 +72,15 @@ export class TransfersService {
       where: { id: dto.toSchoolId, organizationId: actor.organizationId },
     });
     if (!destSchool) throw new BadRequestException("Destination school not found in this organization");
+
+    const existingPending = await this.prisma.transfer.findFirst({
+      where: { studentId, status: "REQUESTED" },
+    });
+    if (existingPending) {
+      throw new BadRequestException(
+        "This student already has a pending transfer request — cancel it before requesting another",
+      );
+    }
 
     const transfer = await this.prisma.transfer.create({
       data: {
@@ -164,18 +196,19 @@ export class TransfersService {
     return this.getOne(actor, transferId);
   }
 
-  async reject(actor: AuthenticatedUser, transferId: string) {
+  async reject(actor: AuthenticatedUser, transferId: string, dto: RejectTransferDto) {
     const transfer = await this.prisma.transfer.findUnique({ where: { id: transferId } });
     if (!transfer) throw new NotFoundException("Transfer not found");
     if (transfer.status !== "REQUESTED") throw new BadRequestException("Transfer is not pending");
 
-    const hasAccess =
-      actor.schoolIds.length === 0 ||
-      actor.schoolIds.includes(transfer.fromSchoolId) ||
-      actor.schoolIds.includes(transfer.toSchoolId);
-    if (!hasAccess) throw new NotFoundException("Transfer not found");
+    // Only the destination school decides accept/reject — same access rule
+    // as approve(), tighter than getOne()'s "either side can view."
+    await this.schools.findOneAccessibleOrThrow(actor, transfer.toSchoolId);
 
-    await this.prisma.transfer.update({ where: { id: transferId }, data: { status: "REJECTED" } });
+    await this.prisma.transfer.update({
+      where: { id: transferId },
+      data: { status: "REJECTED", rejectionReason: dto.reason },
+    });
 
     await this.audit.record({
       actor,
@@ -185,6 +218,7 @@ export class TransfersService {
       module: AuditModuleName.TRANSFERS,
       resourceType: "Transfer",
       resourceId: transferId,
+      after: { reason: dto.reason },
     });
 
     return this.getOne(actor, transferId);
@@ -217,14 +251,99 @@ export class TransfersService {
     return this.getOne(actor, transferId);
   }
 
-  async listForSchool(actor: AuthenticatedUser, schoolId: string) {
-    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    const transfers = await this.prisma.transfer.findMany({
-      where: { OR: [{ fromSchoolId: schoolId }, { toSchoolId: schoolId }] },
-      include: this.fullInclude(),
-      orderBy: { createdAt: "desc" },
-    });
-    return this.enrich(transfers);
+  // Same scoping shape as StudentLifecycleService.resolveSchoolIds: an
+  // explicit schoolId is validated via findOneAccessibleOrThrow (never
+  // leaks another school's data); no schoolId means "every school the
+  // actor can see" — every school in the org for Super/Org Admin, or
+  // exactly their own school(s) for a School Admin.
+  private async resolveViewpointSchoolIds(actor: AuthenticatedUser, schoolId?: string): Promise<string[] | undefined> {
+    if (schoolId) {
+      await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+      return [schoolId];
+    }
+    if (actor.schoolIds.length > 0) return actor.schoolIds;
+    return undefined;
+  }
+
+  async list(actor: AuthenticatedUser, filters: TransferListFilters) {
+    const schoolIds = await this.resolveViewpointSchoolIds(actor, filters.schoolId);
+
+    const scopeWhere: Prisma.TransferWhereInput = schoolIds
+      ? filters.direction === "incoming"
+        ? { toSchoolId: { in: schoolIds } }
+        : filters.direction === "outgoing"
+          ? { fromSchoolId: { in: schoolIds } }
+          : { OR: [{ fromSchoolId: { in: schoolIds } }, { toSchoolId: { in: schoolIds } }] }
+      : { student: { organizationId: actor.organizationId! } };
+
+    const where: Prisma.TransferWhereInput = {
+      AND: [
+        scopeWhere,
+        filters.originSchoolId ? { fromSchoolId: filters.originSchoolId } : {},
+        filters.destinationSchoolId ? { toSchoolId: filters.destinationSchoolId } : {},
+        filters.status ? { status: filters.status } : {},
+        filters.academicYearId
+          ? { OR: [{ fromEnrollment: { academicYearId: filters.academicYearId } }, { toEnrollment: { academicYearId: filters.academicYearId } }] }
+          : {},
+        filters.dateFrom ? { createdAt: { gte: new Date(filters.dateFrom) } } : {},
+        filters.dateTo ? { createdAt: { lte: new Date(filters.dateTo) } } : {},
+        filters.search
+          ? {
+              OR: [
+                { student: { firstName: { contains: filters.search, mode: "insensitive" } } },
+                { student: { lastName: { contains: filters.search, mode: "insensitive" } } },
+                { fromEnrollment: { studentNumber: { contains: filters.search, mode: "insensitive" } } },
+                { toEnrollment: { studentNumber: { contains: filters.search, mode: "insensitive" } } },
+              ],
+            }
+          : {},
+      ],
+    };
+
+    const page = Math.max(1, filters.page ?? 1);
+    const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, filters.pageSize ?? 25));
+
+    const [total, rows] = await Promise.all([
+      this.prisma.transfer.count({ where }),
+      this.prisma.transfer.findMany({
+        where,
+        include: this.fullInclude(),
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+
+    return {
+      data: await this.enrich(rows),
+      pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+    };
+  }
+
+  // The Incoming/Outgoing summary cards — always split by direction, even
+  // for a Super Admin's org-wide view (every transfer is simultaneously
+  // "outgoing" from one school and "incoming" to another, so without a
+  // specific viewpoint school the two sides are necessarily the same set;
+  // the split is still returned for a consistent response shape, but the
+  // frontend's org-wide page reads it as one combined total instead).
+  async getSummary(actor: AuthenticatedUser, schoolId?: string) {
+    const schoolIds = await this.resolveViewpointSchoolIds(actor, schoolId);
+    const base: Prisma.TransferWhereInput = schoolIds ? {} : { student: { organizationId: actor.organizationId! } };
+    const incomingBase: Prisma.TransferWhereInput = schoolIds ? { toSchoolId: { in: schoolIds } } : base;
+    const outgoingBase: Prisma.TransferWhereInput = schoolIds ? { fromSchoolId: { in: schoolIds } } : base;
+
+    const countByStatus = async (scopeWhere: Prisma.TransferWhereInput) => {
+      const [pending, rejected, completed, cancelled] = await Promise.all([
+        this.prisma.transfer.count({ where: { ...scopeWhere, status: "REQUESTED" } }),
+        this.prisma.transfer.count({ where: { ...scopeWhere, status: "REJECTED" } }),
+        this.prisma.transfer.count({ where: { ...scopeWhere, status: "EXECUTED" } }),
+        this.prisma.transfer.count({ where: { ...scopeWhere, status: "CANCELLED" } }),
+      ]);
+      return { pending, rejected, completed, cancelled };
+    };
+
+    const [incoming, outgoing] = await Promise.all([countByStatus(incomingBase), countByStatus(outgoingBase)]);
+    return { incoming, outgoing };
   }
 
   // A School Admin may only view a transfer that touches their own

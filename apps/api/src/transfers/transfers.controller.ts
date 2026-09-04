@@ -3,6 +3,8 @@ import { TransfersService, type TransferListFilters } from "./transfers.service"
 import { RequestTransferDto } from "./dto/request-transfer.dto";
 import { ApproveTransferDto } from "./dto/approve-transfer.dto";
 import { RejectTransferDto } from "./dto/reject-transfer.dto";
+import { PreviewBulkTransferDto } from "./dto/preview-bulk-transfer.dto";
+import { ConfirmBulkTransferDto } from "./dto/confirm-bulk-transfer.dto";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { RequirePermissions } from "../auth/decorators/require-permissions.decorator";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
@@ -67,6 +69,29 @@ export class TransfersController {
   @Post("transfers/:id/cancel")
   cancel(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.transfers.cancel(user, id);
+  }
+
+  // Bulk (one-admin, one-step) transfer — requires both permissions since
+  // the actor is authorizing both the request and the accept side in a
+  // single action; see TransfersService.confirmBulkTransfer.
+  @RequirePermissions("transfers.create", "transfers.approve")
+  @Post("schools/:schoolId/students/bulk-transfer/preview")
+  previewBulkTransfer(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Body() dto: PreviewBulkTransferDto,
+  ) {
+    return this.transfers.previewBulkTransfer(user, schoolId, dto);
+  }
+
+  @RequirePermissions("transfers.create", "transfers.approve")
+  @Post("schools/:schoolId/students/bulk-transfer/confirm")
+  confirmBulkTransfer(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Body() dto: ConfirmBulkTransferDto,
+  ) {
+    return this.transfers.confirmBulkTransfer(user, schoolId, dto);
   }
 
   // Org-wide (Super Admin) equivalent of the per-school list below — same

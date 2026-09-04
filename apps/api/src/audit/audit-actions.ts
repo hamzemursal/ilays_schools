@@ -40,6 +40,11 @@ export const AuditAction = {
   TRANSFER_APPROVED: "TRANSFER_APPROVED",
   TRANSFER_REJECTED: "TRANSFER_REJECTED",
   TRANSFER_CANCELLED: "TRANSFER_CANCELLED",
+  // One admin with access to both schools requests-and-accepts many
+  // students in a single action — see TransfersService.confirmBulkTransfer.
+  // Distinct from TRANSFER_APPROVED (the normal two-admin flow) even
+  // though the end result on each Transfer row is identical (EXECUTED).
+  TRANSFER_BULK_COMPLETED: "TRANSFER_BULK_COMPLETED",
 
   PROMOTION_CONFIRMED: "PROMOTION_CONFIRMED",
   PRIMARY_COMPLETION: "PRIMARY_COMPLETION",

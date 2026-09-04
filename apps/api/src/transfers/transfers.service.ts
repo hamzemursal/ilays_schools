@@ -8,6 +8,8 @@ import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { RequestTransferDto } from "./dto/request-transfer.dto";
 import { ApproveTransferDto } from "./dto/approve-transfer.dto";
 import { RejectTransferDto } from "./dto/reject-transfer.dto";
+import { PreviewBulkTransferDto } from "./dto/preview-bulk-transfer.dto";
+import { ConfirmBulkTransferDto } from "./dto/confirm-bulk-transfer.dto";
 
 // A student can be transferred from an ACTIVE enrollment (the ordinary
 // case) or a COMPLETED/GRADUATED one — a student currently awaiting their
@@ -460,23 +462,291 @@ export class TransfersService {
   // Same "STU-{year}-{sequence}" format and per-(school, year) scope as
   // StudentsService.generateStudentNumber — a transferred student is a new
   // admission at the destination school, so it gets a fresh code the same
-  // way a directly-enrolled student would.
+  // way a directly-enrolled student would. Accepts an optional tx client —
+  // confirmBulkTransfer() calls this once per student *inside* its own
+  // transaction, so each call must see the previous students' just-created
+  // rows (via `tx`) or every student in the batch would compute the same
+  // "next" sequence number against `this.prisma`'s stale, pre-transaction
+  // count.
   private async generateStudentNumber(
     schoolId: string,
     academicYearId: string,
     academicYearName: string,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
   ): Promise<string> {
-    const count = await this.prisma.studentEnrollment.count({ where: { schoolId, academicYearId } });
+    const count = await client.studentEnrollment.count({ where: { schoolId, academicYearId } });
     const sequence = String(count + 1).padStart(5, "0");
     return `STU-${academicYearName}-${sequence}`;
   }
 
-  // Scoped by academicYearId — see StudentsService.generateRollNumber for why.
-  private async generateRollNumber(sectionId: string, academicYearId: string): Promise<number> {
-    const result = await this.prisma.studentEnrollment.aggregate({
+  // Scoped by academicYearId — see StudentsService.generateRollNumber for
+  // why. Same tx-visibility reasoning as generateStudentNumber above.
+  private async generateRollNumber(
+    sectionId: string,
+    academicYearId: string,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<number> {
+    const result = await client.studentEnrollment.aggregate({
       where: { sectionId, academicYearId, status: "ACTIVE" },
       _max: { rollNumber: true },
     });
     return (result._max.rollNumber ?? 0) + 1;
+  }
+
+  // ---------------------------------------------------------------------
+  // Bulk transfer — the one-admin, one-step path confirmed with the user:
+  // used only when the same actor has access to both the origin and
+  // destination school. Each student still gets a normal Transfer row
+  // (created directly as EXECUTED, self-requested-and-approved) so their
+  // history and the existing per-transfer detail page work identically to
+  // the ordinary two-admin flow. The two-admin REQUESTED-then-approve()
+  // path above is completely untouched.
+  // ---------------------------------------------------------------------
+
+  async previewBulkTransfer(actor: AuthenticatedUser, schoolId: string, dto: PreviewBulkTransferDto) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    await this.schools.findOneAccessibleOrThrow(actor, dto.toSchoolId);
+
+    const students = await this.prisma.student.findMany({
+      where: { id: { in: dto.studentIds }, organizationId: actor.organizationId! },
+      include: {
+        enrollments: {
+          orderBy: { startDate: "desc" },
+          take: 1,
+          include: { class: true, section: true },
+        },
+      },
+    });
+    const byId = new Map(students.map((s) => [s.id, s]));
+
+    const pending = await this.prisma.transfer.findMany({
+      where: { studentId: { in: dto.studentIds }, status: "REQUESTED" },
+      select: { studentId: true },
+    });
+    const pendingSet = new Set(pending.map((t) => t.studentId));
+
+    const eligible: {
+      studentId: string;
+      enrollmentId: string;
+      firstName: string;
+      lastName: string;
+      studentNumber: string;
+      rollNumber: number;
+      fromClass: string;
+      fromSection: string;
+    }[] = [];
+    const ineligible: { studentId: string; reason: string }[] = [];
+
+    for (const studentId of dto.studentIds) {
+      const student = byId.get(studentId);
+      if (!student) {
+        ineligible.push({ studentId, reason: "Student not found in this organization" });
+        continue;
+      }
+      const enrollment = student.enrollments[0];
+      if (!enrollment || enrollment.schoolId !== schoolId) {
+        ineligible.push({ studentId, reason: "Student is not currently enrolled at this school" });
+        continue;
+      }
+      if (!TRANSFERABLE_ENROLLMENT_STATUSES.has(enrollment.status)) {
+        ineligible.push({ studentId, reason: `Enrollment status is ${enrollment.status}, not transferable` });
+        continue;
+      }
+      if (enrollment.schoolId === dto.toSchoolId) {
+        ineligible.push({ studentId, reason: "Student is already enrolled at that school" });
+        continue;
+      }
+      if (pendingSet.has(studentId)) {
+        ineligible.push({ studentId, reason: "Student already has a pending transfer request" });
+        continue;
+      }
+      eligible.push({
+        studentId,
+        enrollmentId: enrollment.id,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        studentNumber: enrollment.studentNumber,
+        rollNumber: enrollment.rollNumber,
+        fromClass: enrollment.class.name,
+        fromSection: enrollment.section.name,
+      });
+    }
+
+    return { eligible, ineligible };
+  }
+
+  async confirmBulkTransfer(actor: AuthenticatedUser, schoolId: string, dto: ConfirmBulkTransferDto) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    await this.schools.findOneAccessibleOrThrow(actor, dto.toSchoolId);
+
+    const toClass = await this.prisma.class.findFirst({
+      where: { id: dto.toClassId, division: { schoolId: dto.toSchoolId } },
+    });
+    if (!toClass) throw new BadRequestException("Target class does not belong to the destination school");
+
+    const toAcademicYear = await this.prisma.academicYear.findFirst({
+      where: { id: dto.toAcademicYearId, schoolId: dto.toSchoolId },
+    });
+    if (!toAcademicYear) throw new BadRequestException("That academic year does not belong to the destination school");
+
+    const studentIds = dto.assignments.map((a) => a.studentId);
+    if (new Set(studentIds).size !== studentIds.length) {
+      throw new BadRequestException("The same student can't be assigned twice");
+    }
+
+    const sectionIds = [...new Set(dto.assignments.map((a) => a.sectionId))];
+    const sections = await this.prisma.section.findMany({ where: { id: { in: sectionIds }, classId: dto.toClassId } });
+    if (sections.length !== sectionIds.length) {
+      throw new BadRequestException("One or more target sections don't belong to the destination class");
+    }
+    const sectionById = new Map(sections.map((s) => [s.id, s]));
+
+    const students = await this.prisma.student.findMany({
+      where: { id: { in: studentIds }, organizationId: actor.organizationId! },
+      include: { enrollments: { orderBy: { startDate: "desc" }, take: 1 } },
+    });
+    if (students.length !== studentIds.length) {
+      throw new BadRequestException("One or more students were not found in this organization");
+    }
+
+    const enrollmentByStudentId = new Map<string, (typeof students)[number]["enrollments"][number]>();
+    for (const student of students) {
+      const enrollment = student.enrollments[0];
+      if (!enrollment || enrollment.schoolId !== schoolId) {
+        throw new BadRequestException(`Student ${student.id} is not currently enrolled at this school`);
+      }
+      if (!TRANSFERABLE_ENROLLMENT_STATUSES.has(enrollment.status)) {
+        throw new BadRequestException(`Student ${student.id} enrollment status is ${enrollment.status}, not transferable`);
+      }
+      if (enrollment.schoolId === dto.toSchoolId) {
+        throw new BadRequestException(`Student ${student.id} is already enrolled at that school`);
+      }
+      enrollmentByStudentId.set(student.id, enrollment);
+    }
+
+    const alreadyPending = await this.prisma.transfer.findMany({
+      where: { studentId: { in: studentIds }, status: "REQUESTED" },
+      select: { studentId: true },
+    });
+    if (alreadyPending.length > 0) {
+      throw new BadRequestException("One or more students already have a pending transfer request");
+    }
+
+    const incomingBySection = new Map<string, number>();
+    for (const a of dto.assignments) {
+      incomingBySection.set(a.sectionId, (incomingBySection.get(a.sectionId) ?? 0) + 1);
+    }
+    for (const section of sections) {
+      if (section.capacity !== null) {
+        const activeCount = await this.prisma.studentEnrollment.count({
+          where: { sectionId: section.id, status: "ACTIVE" },
+        });
+        const incoming = incomingBySection.get(section.id) ?? 0;
+        if (activeCount + incoming > section.capacity) {
+          throw new BadRequestException(
+            `Section ${section.name} doesn't have room for ${incoming} more student(s) ` +
+              `(capacity ${section.capacity}, currently ${activeCount})`,
+          );
+        }
+      }
+    }
+
+    const results = await this.prisma.$transaction(
+      async (tx) => {
+        const batchResults: {
+          studentId: string;
+          transferId: string;
+          fromEnrollmentId: string;
+          toEnrollmentId: string;
+          sectionId: string;
+          studentNumber: string;
+          rollNumber: number;
+        }[] = [];
+
+        for (const assignment of dto.assignments) {
+          const enrollment = enrollmentByStudentId.get(assignment.studentId)!;
+          const section = sectionById.get(assignment.sectionId)!;
+
+          const studentNumber = await this.generateStudentNumber(dto.toSchoolId, dto.toAcademicYearId, toAcademicYear.name, tx);
+          const rollNumber = await this.generateRollNumber(assignment.sectionId, dto.toAcademicYearId, tx);
+
+          await tx.studentEnrollment.update({
+            where: { id: enrollment.id },
+            data: { status: "TRANSFERRED_OUT", endDate: new Date() },
+          });
+
+          const newEnrollment = await tx.studentEnrollment.create({
+            data: {
+              studentId: assignment.studentId,
+              organizationId: actor.organizationId!,
+              schoolId: dto.toSchoolId,
+              academicYearId: dto.toAcademicYearId,
+              classId: dto.toClassId,
+              sectionId: assignment.sectionId,
+              studentNumber,
+              rollNumber,
+              status: "ACTIVE",
+            },
+          });
+
+          await tx.student.update({ where: { id: assignment.studentId }, data: { currentStatus: "ACTIVE" } });
+
+          // Created directly as EXECUTED — requestedByUserId and
+          // approvedByUserId are the same actor, reflecting that one admin
+          // authorized both sides in a single action rather than the
+          // normal two-admin REQUESTED-then-approve() flow.
+          const transfer = await tx.transfer.create({
+            data: {
+              studentId: assignment.studentId,
+              fromEnrollmentId: enrollment.id,
+              fromSchoolId: schoolId,
+              toSchoolId: dto.toSchoolId,
+              toEnrollmentId: newEnrollment.id,
+              reason: dto.reason,
+              status: "EXECUTED",
+              requestedByUserId: actor.id,
+              approvedByUserId: actor.id,
+              transferDate: new Date(),
+            },
+          });
+
+          batchResults.push({
+            studentId: assignment.studentId,
+            transferId: transfer.id,
+            fromEnrollmentId: enrollment.id,
+            toEnrollmentId: newEnrollment.id,
+            sectionId: assignment.sectionId,
+            studentNumber,
+            rollNumber,
+          });
+        }
+
+        await this.audit.record(
+          {
+            actor,
+            organizationId: actor.organizationId,
+            schoolId: dto.toSchoolId,
+            action: AuditAction.TRANSFER_BULK_COMPLETED,
+            module: AuditModuleName.TRANSFERS,
+            resourceType: "BulkTransfer",
+            resourceId: batchResults[0]?.transferId,
+            after: {
+              fromSchoolId: schoolId,
+              toSchoolId: dto.toSchoolId,
+              toClass: toClass.name,
+              toAcademicYear: toAcademicYear.name,
+              studentCount: batchResults.length,
+              transferIds: batchResults.map((r) => r.transferId),
+            },
+          },
+          tx,
+        );
+
+        return batchResults;
+      },
+      { timeout: 30_000 },
+    );
+
+    return { fromSchoolId: schoolId, toSchoolId: dto.toSchoolId, toClassId: dto.toClassId, toAcademicYearId: dto.toAcademicYearId, results };
   }
 }

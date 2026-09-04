@@ -989,6 +989,95 @@ export interface Transfer {
   approvedByEmail: string | null;
 }
 
+// Student Lifecycle — every field here is derived by the backend from
+// Student.currentStatus + StudentEnrollment.status + PromotionItem; there is
+// no separate lifecycle status stored anywhere (see StudentLifecycleService).
+export interface LifecyclePrimarySummary {
+  totalCompleted: number;
+  awaitingForm1: number;
+  readyForForm1: number;
+  enrolledInForm1: number;
+  transferredOut: number;
+  withdrawn: number;
+}
+
+export interface LifecycleSecondarySummary {
+  totalGraduated: number;
+  graduationPending: number;
+  graduated: number;
+  alumni: number;
+  transferredOut: number;
+}
+
+export interface LifecycleSummary {
+  primary: LifecyclePrimarySummary;
+  secondary: LifecycleSecondarySummary;
+}
+
+export interface LifecycleEnrollmentRow {
+  enrollmentId: string;
+  studentId: string;
+  firstName: string;
+  lastName: string;
+  studentNumber: string;
+  rollNumber: number;
+  school: { id: string; name: string };
+  class: { id: string; name: string };
+  section: { id: string; name: string };
+  academicYear: { id: string; name: string };
+  enrollmentStatus: EnrollmentStatus;
+  lifecycleStatus: StudentStatus;
+  startDate: string;
+  endDate: string | null;
+  enrolledInForm1: boolean;
+  transfer: { status: TransferStatus; toSchoolId: string } | null;
+}
+
+export interface LifecycleListResponse {
+  data: LifecycleEnrollmentRow[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+export interface LifecycleListFilters {
+  schoolId?: string;
+  academicYearId?: string;
+  search?: string;
+  status?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface Form1TransitionPreview {
+  toClass: { id: string; name: string };
+  eligible: {
+    enrollmentId: string;
+    studentId: string;
+    firstName: string;
+    lastName: string;
+    studentNumber: string;
+    rollNumber: number;
+  }[];
+  ineligible: { enrollmentId: string; reason: string }[];
+  targetSections: { id: string; name: string; capacity: number | null; currentActive: number; available: number | null }[];
+}
+
+export interface Form1TransitionResult {
+  id: string;
+  schoolId: string;
+  fromAcademicYearId: string;
+  toAcademicYearId: string;
+  status: string;
+  confirmedAt: string;
+  results: {
+    studentId: string;
+    studentNumber: string;
+    fromEnrollmentId: string;
+    toEnrollmentId: string;
+    sectionId: string;
+    rollNumber: number;
+  }[];
+}
+
 export type ImportBatchStatus = "PROCESSING" | "NEEDS_REVIEW" | "COMPLETED";
 export type ImportRowStatus = "PENDING" | "CREATED" | "DUPLICATE_PENDING" | "ERROR" | "SKIPPED";
 
@@ -1382,6 +1471,41 @@ export const api = {
     request<Transfer>(`/transfers/${transferId}/reject`, { method: "POST", accessToken }),
   cancelTransfer: (accessToken: string, transferId: string) =>
     request<Transfer>(`/transfers/${transferId}/cancel`, { method: "POST", accessToken }),
+
+  // Student Lifecycle — schoolId omitted means "every school the actor can
+  // see" (the backend itself scopes a School Admin to their own school; see
+  // StudentLifecycleService.resolveSchoolIds), same convention as the
+  // Audit Log's org-wide vs per-school pages.
+  getLifecycleSummary: (accessToken: string, filters: { schoolId?: string; academicYearId?: string }) =>
+    request<LifecycleSummary>(`/student-lifecycle/summary${auditLogQs(filters)}`, { accessToken }),
+  listPrimaryCompleted: (accessToken: string, filters: LifecycleListFilters) =>
+    request<LifecycleListResponse>(`/student-lifecycle/primary-completed${auditLogQs(filters)}`, { accessToken }),
+  listAwaitingEnrollment: (accessToken: string, filters: LifecycleListFilters) =>
+    request<LifecycleListResponse>(`/student-lifecycle/awaiting-enrollment${auditLogQs(filters)}`, { accessToken }),
+  listSecondaryGraduated: (accessToken: string, filters: LifecycleListFilters) =>
+    request<LifecycleListResponse>(`/student-lifecycle/secondary-graduated${auditLogQs(filters)}`, { accessToken }),
+  listAlumni: (accessToken: string, filters: LifecycleListFilters) =>
+    request<LifecycleListResponse>(`/student-lifecycle/alumni${auditLogQs(filters)}`, { accessToken }),
+  previewForm1Transition: (
+    accessToken: string,
+    schoolId: string,
+    body: { toClassId: string; toAcademicYearId: string; enrollmentIds: string[] },
+  ) =>
+    request<Form1TransitionPreview>(`/schools/${schoolId}/student-lifecycle/form-1-transition/preview`, {
+      method: "POST",
+      body,
+      accessToken,
+    }),
+  confirmForm1Transition: (
+    accessToken: string,
+    schoolId: string,
+    body: { toClassId: string; toAcademicYearId: string; assignments: { enrollmentId: string; sectionId: string }[] },
+  ) =>
+    request<Form1TransitionResult>(`/schools/${schoolId}/student-lifecycle/form-1-transition/confirm`, {
+      method: "POST",
+      body,
+      accessToken,
+    }),
   getTransfer: (accessToken: string, transferId: string) =>
     request<Transfer>(`/transfers/${transferId}`, { accessToken }),
 

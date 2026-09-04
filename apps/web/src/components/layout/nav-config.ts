@@ -18,6 +18,7 @@ import {
   UserCircle,
   Award,
   KeyRound,
+  Milestone,
 } from "lucide-react";
 import type { Profile } from "@/lib/api";
 
@@ -67,6 +68,9 @@ export function schoolNavItems(user: Profile, schoolId: string): NavItem[] {
   if (has("promotions.execute")) {
     items.push({ label: "Promotions", href: `/schools/${schoolId}/promotions`, icon: ArrowUpCircle });
   }
+  if (has("students.view")) {
+    items.push({ label: "Student Lifecycle", href: `/schools/${schoolId}/student-lifecycle`, icon: Milestone });
+  }
   if (has("transfers.create") || has("transfers.approve")) {
     items.push({ label: "Transfers", href: `/schools/${schoolId}/transfers`, icon: ArrowLeftRight });
   }
@@ -90,6 +94,12 @@ export function orgNavItems(user: Profile): NavItem[] {
   // equivalent, scoped to just their school).
   if (user.permissions.includes("schools.view") && user.permissions.includes("audit.view")) {
     items.push({ label: "Audit Log", href: "/audit-log", icon: ScrollText });
+  }
+  // Org-wide Student Lifecycle dashboard — same "no single-school
+  // restriction" audience as the org-wide Audit Log above; a School Admin's
+  // equivalent is schoolNavItems' own per-school "Student Lifecycle" entry.
+  if (user.permissions.includes("schools.view") && user.permissions.includes("students.view")) {
+    items.push({ label: "Student Lifecycle", href: "/student-lifecycle", icon: Milestone });
   }
   return items;
 }

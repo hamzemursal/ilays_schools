@@ -8,6 +8,15 @@ import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { RequestTransferDto } from "./dto/request-transfer.dto";
 import { ApproveTransferDto } from "./dto/approve-transfer.dto";
 
+// A student can be transferred from an ACTIVE enrollment (the ordinary
+// case) or a COMPLETED/GRADUATED one — a student currently awaiting their
+// next enrollment after finishing Primary or Secondary (see
+// StudentLifecycleService), who has no active enrollment at all but still
+// has a real "current standing" worth transferring from. Anything else
+// (PROMOTED, TRANSFERRED_OUT, WITHDRAWN) is already-resolved history with
+// its own successor enrollment recorded elsewhere.
+const TRANSFERABLE_ENROLLMENT_STATUSES = new Set(["ACTIVE", "COMPLETED", "GRADUATED"]);
+
 @Injectable()
 export class TransfersService {
   constructor(
@@ -19,20 +28,20 @@ export class TransfersService {
   async request(actor: AuthenticatedUser, studentId: string, dto: RequestTransferDto) {
     const student = await this.prisma.student.findUnique({
       where: { id: studentId },
-      include: { enrollments: { where: { status: "ACTIVE" } } },
+      include: { enrollments: { orderBy: { startDate: "desc" }, take: 1 } },
     });
     if (!student || student.organizationId !== actor.organizationId) {
       throw new NotFoundException("Student not found");
     }
 
-    const activeEnrollment = student.enrollments[0];
-    if (!activeEnrollment) {
-      throw new BadRequestException("Student has no active enrollment to transfer from");
+    const sourceEnrollment = student.enrollments[0];
+    if (!sourceEnrollment || !TRANSFERABLE_ENROLLMENT_STATUSES.has(sourceEnrollment.status)) {
+      throw new BadRequestException("Student has no current enrollment to transfer from");
     }
-    if (actor.schoolIds.length > 0 && !actor.schoolIds.includes(activeEnrollment.schoolId)) {
+    if (actor.schoolIds.length > 0 && !actor.schoolIds.includes(sourceEnrollment.schoolId)) {
       throw new NotFoundException("Student not found");
     }
-    if (activeEnrollment.schoolId === dto.toSchoolId) {
+    if (sourceEnrollment.schoolId === dto.toSchoolId) {
       throw new BadRequestException("Student is already enrolled at that school");
     }
 
@@ -44,8 +53,8 @@ export class TransfersService {
     const transfer = await this.prisma.transfer.create({
       data: {
         studentId,
-        fromEnrollmentId: activeEnrollment.id,
-        fromSchoolId: activeEnrollment.schoolId,
+        fromEnrollmentId: sourceEnrollment.id,
+        fromSchoolId: sourceEnrollment.schoolId,
         toSchoolId: dto.toSchoolId,
         reason: dto.reason,
         status: "REQUESTED",
@@ -56,7 +65,7 @@ export class TransfersService {
     await this.audit.record({
       actor,
       organizationId: actor.organizationId,
-      schoolId: activeEnrollment.schoolId,
+      schoolId: sourceEnrollment.schoolId,
       action: AuditAction.TRANSFER_REQUESTED,
       module: AuditModuleName.TRANSFERS,
       resourceType: "Transfer",
@@ -118,6 +127,14 @@ export class TransfersService {
           status: "ACTIVE",
         },
       });
+
+      // A no-op for the ordinary case (an already-ACTIVE student stays
+      // ACTIVE), but necessary for a student transferred from the awaiting-
+      // enrollment state (COMPLETED/GRADUATED, no active enrollment) — this
+      // is the moment they get a real active enrollment again, and
+      // currentStatus must reflect that instead of leaving them stuck
+      // showing as "awaiting" indefinitely.
+      await tx.student.update({ where: { id: transfer.studentId }, data: { currentStatus: "ACTIVE" } });
 
       await tx.transfer.update({
         where: { id: transferId },

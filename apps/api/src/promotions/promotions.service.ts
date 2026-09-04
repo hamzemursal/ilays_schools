@@ -8,6 +8,18 @@ import { PromoteSectionDto } from "./dto/promote-section.dto";
 
 type Outcome = "PROMOTED" | "COMPLETED" | "GRADUATED";
 
+// The same confirm() write path handles three different real-world events —
+// an ordinary same-division promotion, a Primary division running out of
+// classes (Primary Completion), and a Secondary division running out of
+// classes (Secondary Graduation). Only the audit trail needs to tell these
+// apart; the transaction/roll-number/capacity logic below is identical
+// either way, so this is the one place that decides which label applies.
+const AUDIT_ACTION_BY_OUTCOME: Record<Outcome, string> = {
+  PROMOTED: AuditAction.PROMOTION_CONFIRMED,
+  COMPLETED: AuditAction.PRIMARY_COMPLETION,
+  GRADUATED: AuditAction.SECONDARY_GRADUATION,
+};
+
 @Injectable()
 export class PromotionsService {
   constructor(
@@ -198,8 +210,8 @@ export class PromotionsService {
           actor,
           organizationId: actor.organizationId,
           schoolId,
-          action: AuditAction.PROMOTION_CONFIRMED,
-          module: AuditModuleName.PROMOTIONS,
+          action: AUDIT_ACTION_BY_OUTCOME[outcome],
+          module: outcome === "PROMOTED" ? AuditModuleName.PROMOTIONS : AuditModuleName.STUDENT_LIFECYCLE,
           resourceType: "PromotionBatch",
           resourceId: batch.id,
           after: {

@@ -14,6 +14,7 @@ import { GuardiansModule } from "./guardians/guardians.module";
 import { StudentsModule } from "./students/students.module";
 import { TeachersModule } from "./teachers/teachers.module";
 import { PromotionsModule } from "./promotions/promotions.module";
+import { StudentLifecycleModule } from "./student-lifecycle/student-lifecycle.module";
 import { TransfersModule } from "./transfers/transfers.module";
 import { AttendanceModule } from "./attendance/attendance.module";
 import { ExamsModule } from "./exams/exams.module";
@@ -41,6 +42,7 @@ import { AnnouncementsModule } from "./announcements/announcements.module";
     StudentsModule,
     TeachersModule,
     PromotionsModule,
+    StudentLifecycleModule,
     TransfersModule,
     AttendanceModule,
     ExamsModule,

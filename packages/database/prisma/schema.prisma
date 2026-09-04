@@ -293,6 +293,12 @@ model StudentEnrollment {
   // block a new active student from getting that same number.
   @@unique([schoolId, academicYearId, studentNumber, status])
   @@index([studentId])
+  // The Student Lifecycle system's bucket queries (Primary Completed,
+  // Awaiting Enrollment, Secondary Graduated, etc.) all filter on
+  // "this school's enrollments in a given status" — schoolId alone was
+  // only ever a leftmost-prefix beneficiary of the composite unique index
+  // above, whose later columns don't help this access pattern.
+  @@index([schoolId, status])
   @@map("student_enrollments")
 }
 

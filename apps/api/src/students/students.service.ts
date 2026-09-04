@@ -300,7 +300,44 @@ export class StudentsService {
 
     const guardianList = await this.guardians.listForStudent(studentId);
 
-    return { ...student, enrollments, guardians: guardianList };
+    // Surfaced on the profile so a transferred-away enrollment's "why" isn't
+    // lost once TransfersService.approve() overwrites its status to
+    // TRANSFERRED_OUT — the Transfer row itself (reason, decision, route)
+    // is the only place that context still lives.
+    const transfers = await this.prisma.transfer.findMany({
+      where: {
+        studentId,
+        ...(actor.schoolIds.length > 0
+          ? { OR: [{ fromSchoolId: { in: actor.schoolIds } }, { toSchoolId: { in: actor.schoolIds } }] }
+          : {}),
+      },
+      select: {
+        id: true,
+        status: true,
+        reason: true,
+        transferDate: true,
+        createdAt: true,
+        fromEnrollment: {
+          select: {
+            school: { select: { id: true, name: true } },
+            class: { select: { name: true } },
+            section: { select: { name: true } },
+            academicYear: { select: { name: true } },
+          },
+        },
+        toEnrollment: {
+          select: {
+            school: { select: { id: true, name: true } },
+            class: { select: { name: true } },
+            section: { select: { name: true } },
+            academicYear: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return { ...student, enrollments, guardians: guardianList, transfers };
   }
 
   async create(actor: AuthenticatedUser, schoolId: string, dto: CreateStudentDto) {

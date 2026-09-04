@@ -218,6 +218,56 @@ export function StudentProfile({ studentId }: { studentId: string }) {
         </div>
       </Card>
 
+      {student.transfers.length > 0 && (
+        <Card padding="none">
+          <CardHeader title="Transfer history" />
+          <div className="divide-y divide-border">
+            {student.transfers.map((t) => (
+              <div key={t.id} className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
+                <div className="min-w-0">
+                  <p className="text-sm text-foreground">
+                    <span className="font-medium">{t.fromEnrollment.school.name}</span>
+                    <span className="text-foreground-muted">
+                      {" "}
+                      ({t.fromEnrollment.class.name} · {t.fromEnrollment.section.name}, {t.fromEnrollment.academicYear.name})
+                    </span>
+                    <span className="text-foreground-muted"> → </span>
+                    {t.toEnrollment ? (
+                      <>
+                        <span className="font-medium">{t.toEnrollment.school.name}</span>
+                        <span className="text-foreground-muted">
+                          {" "}
+                          ({t.toEnrollment.class.name} · {t.toEnrollment.section.name}, {t.toEnrollment.academicYear.name})
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-foreground-muted">destination pending</span>
+                    )}
+                  </p>
+                  {t.reason && <p className="mt-1 text-sm text-foreground-soft">{t.reason}</p>}
+                  <p className="mt-1 text-xs text-foreground-muted">
+                    {new Date(t.transferDate ?? t.createdAt).toLocaleDateString()}
+                  </p>
+                </div>
+                <Badge
+                  tone={
+                    t.status === "EXECUTED"
+                      ? "success"
+                      : t.status === "REJECTED" || t.status === "CANCELLED"
+                        ? "danger"
+                        : t.status === "APPROVED"
+                          ? "accent"
+                          : "warning"
+                  }
+                >
+                  {t.status}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <Card padding="none">
         <CardHeader
           title="Parent / guardian"

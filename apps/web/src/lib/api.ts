@@ -583,6 +583,28 @@ export interface StudentEnrollmentRecord {
   section: { id: string; name: string };
 }
 
+// A lighter shape than the full Transfer type (used by the Transfers list
+// pages) — just enough to explain, on the student's own profile, what
+// happened and why. Kept separate rather than reusing Transfer because this
+// route never computes fromSchoolName/requestedByEmail/etc., and toEnrollment
+// stays null until the destination school accepts.
+export interface StudentTransferSnapshot {
+  school: { id: string; name: string };
+  class: { name: string };
+  section: { name: string };
+  academicYear: { name: string };
+}
+
+export interface StudentTransferRecord {
+  id: string;
+  status: TransferStatus;
+  reason: string | null;
+  transferDate: string | null;
+  createdAt: string;
+  fromEnrollment: StudentTransferSnapshot;
+  toEnrollment: StudentTransferSnapshot | null;
+}
+
 export interface StudentDetail {
   id: string;
   organizationId: string;
@@ -595,6 +617,7 @@ export interface StudentDetail {
   currentStatus: StudentStatus;
   enrollments: StudentEnrollmentRecord[];
   guardians: GuardianRecord[];
+  transfers: StudentTransferRecord[];
 }
 
 export interface GuardianInput {

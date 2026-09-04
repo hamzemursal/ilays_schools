@@ -3,10 +3,11 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type AcademicYear, type EnrollmentReportRow } from "@/lib/api";
+import { api, type AcademicYear, type AttendanceStatusForDate, type EnrollmentReportRow } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
+import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
@@ -24,6 +25,7 @@ export default function AdminAttendancePage({ params }: { params: Promise<{ id: 
   const [academicYearId, setAcademicYearId] = useState("");
   const [rows, setRows] = useState<EnrollmentReportRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [todayStatus, setTodayStatus] = useState<AttendanceStatusForDate | null>(null);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -46,6 +48,16 @@ export default function AdminAttendancePage({ params }: { params: Promise<{ id: 
   }, [accessToken, schoolId, academicYearId]);
 
   const today = new Date().toISOString().slice(0, 10);
+
+  // Lets each section card show whether today has already been marked,
+  // instead of making an admin open every section just to find out.
+  useEffect(() => {
+    if (!accessToken) return;
+    api
+      .getAttendanceStatusForDate(accessToken, schoolId, today)
+      .then(setTodayStatus)
+      .catch(() => setTodayStatus(null));
+  }, [accessToken, schoolId, today]);
   const yearName = years?.find((y) => y.id === academicYearId)?.name ?? "";
 
   function attendanceUrl(className: string, sectionId: string, sectionName: string) {
@@ -104,16 +116,29 @@ export default function AdminAttendancePage({ params }: { params: Promise<{ id: 
                 {cls.sections.length === 0 ? (
                   <p className="text-sm text-foreground-muted">No sections yet.</p>
                 ) : (
-                  cls.sections.map((s) => (
+                  cls.sections.map((s) => {
+                    const isMarked = todayStatus?.markedSectionIds.includes(s.sectionId) ?? false;
+                    const isDraft = !isMarked && (todayStatus?.draftSectionIds.includes(s.sectionId) ?? false);
+                    return (
                     <Link key={s.sectionId} href={attendanceUrl(cls.className, s.sectionId, s.sectionName)}>
                       <Card padding="sm" className="transition-colors hover:border-accent">
-                        <p className="font-medium text-foreground">Section {s.sectionName}</p>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-medium text-foreground">Section {s.sectionName}</p>
+                          {isMarked ? (
+                            <Badge tone="success">Marked today</Badge>
+                          ) : isDraft ? (
+                            <Badge tone="warning">Draft</Badge>
+                          ) : (
+                            <Badge tone="neutral">Not marked</Badge>
+                          )}
+                        </div>
                         <p className="flex items-center gap-1.5 text-sm text-foreground-soft">
                           <Users className="size-3.5" /> {s.enrolled} student(s)
                         </p>
                       </Card>
                     </Link>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </Card>

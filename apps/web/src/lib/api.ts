@@ -681,6 +681,11 @@ export interface AttendanceRow {
   photoUrl: string | null;
 }
 
+export interface AttendanceStatusForDate {
+  markedSectionIds: string[];
+  draftSectionIds: string[];
+}
+
 export type ExamType = "QUIZ" | "MIDTERM" | "FINAL" | "ASSIGNMENT" | "OTHER";
 
 export interface Exam {
@@ -1699,6 +1704,8 @@ export const api = {
       `/schools/${schoolId}/sections/${sectionId}/attendance/summary${qs({ from, to })}`,
       { accessToken },
     ),
+  getAttendanceStatusForDate: (accessToken: string, schoolId: string, date: string) =>
+    request<AttendanceStatusForDate>(`/schools/${schoolId}/attendance/status${qs({ date })}`, { accessToken }),
 
   listExams: (accessToken: string, schoolId: string) => request<Exam[]>(`/schools/${schoolId}/exams`, { accessToken }),
   createExam: (accessToken: string, schoolId: string, body: { academicYearId: string; name: string; type: ExamType }) =>

@@ -270,6 +270,35 @@ export class AttendanceService {
     }));
   }
 
+  // Whole-school, per-section "has today been marked yet" — powers the
+  // School Admin's Attendance overview cards, where opening every section
+  // individually just to check would defeat the point of the overview.
+  // Deliberately not run through assertCanAccessSection: unlike every other
+  // method here, this spans every section in the school at once, which is
+  // exactly the School Admin use case (the same admin-only reports.view
+  // gate as the enrollment report this page already loads), not a
+  // teacher's own-section view.
+  async getStatusForDate(actor: AuthenticatedUser, schoolId: string, date: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    const d = new Date(date);
+
+    const [submitted, drafts] = await Promise.all([
+      this.prisma.attendance.findMany({
+        where: { date: d, enrollment: { schoolId } },
+        select: { enrollment: { select: { sectionId: true } } },
+      }),
+      this.prisma.attendanceDraft.findMany({
+        where: { date: d, enrollment: { schoolId } },
+        select: { enrollment: { select: { sectionId: true } } },
+      }),
+    ]);
+
+    return {
+      markedSectionIds: [...new Set(submitted.map((r) => r.enrollment.sectionId))],
+      draftSectionIds: [...new Set(drafts.map((r) => r.enrollment.sectionId))],
+    };
+  }
+
   async historyForStudent(actor: AuthenticatedUser, studentId: string) {
     await this.students.assertAccessibleStudent(actor, studentId);
     await this.assertTeacherCanAccessStudent(actor, studentId);

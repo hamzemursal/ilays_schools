@@ -43,6 +43,16 @@ export class AttendanceController {
     return this.attendance.saveDraft(user, schoolId, sectionId, dto);
   }
 
+  // Same admin-only reports.view gate as the enrollment report this page's
+  // Attendance overview already loads alongside this call — see
+  // AttendanceService.getStatusForDate for why this isn't attendance.view.
+  @RequirePermissions("reports.view")
+  @Get("schools/:schoolId/attendance/status")
+  status(@CurrentUser() user: AuthenticatedUser, @Param("schoolId") schoolId: string, @Query("date") date?: string) {
+    if (!date) throw new BadRequestException("date query param is required");
+    return this.attendance.getStatusForDate(user, schoolId, date);
+  }
+
   @RequirePermissions("attendance.view")
   @Get("schools/:schoolId/sections/:sectionId/attendance/history")
   history(

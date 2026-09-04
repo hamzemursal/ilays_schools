@@ -51,7 +51,13 @@ export class TransfersService {
   async request(actor: AuthenticatedUser, studentId: string, dto: RequestTransferDto) {
     const student = await this.prisma.student.findUnique({
       where: { id: studentId },
-      include: { enrollments: { orderBy: { startDate: "desc" }, take: 1 } },
+      include: {
+        enrollments: {
+          orderBy: { startDate: "desc" },
+          take: 1,
+          include: { class: true, section: true, academicYear: true },
+        },
+      },
     });
     if (!student || student.organizationId !== actor.organizationId) {
       throw new NotFoundException("Student not found");
@@ -102,14 +108,25 @@ export class TransfersService {
       module: AuditModuleName.TRANSFERS,
       resourceType: "Transfer",
       resourceId: transfer.id,
-      after: { toSchoolId: dto.toSchoolId, reason: dto.reason },
+      after: {
+        fromSchoolId: sourceEnrollment.schoolId,
+        toSchoolId: dto.toSchoolId,
+        fromClass: sourceEnrollment.class.name,
+        fromSection: sourceEnrollment.section.name,
+        fromAcademicYear: sourceEnrollment.academicYear.name,
+        status: "REQUESTED",
+        reason: dto.reason,
+      },
     });
 
     return this.getOne(actor, transfer.id);
   }
 
   async approve(actor: AuthenticatedUser, transferId: string, dto: ApproveTransferDto) {
-    const transfer = await this.prisma.transfer.findUnique({ where: { id: transferId } });
+    const transfer = await this.prisma.transfer.findUnique({
+      where: { id: transferId },
+      include: { fromEnrollment: { include: { class: true, section: true, academicYear: true } } },
+    });
     if (!transfer) throw new NotFoundException("Transfer not found");
     if (transfer.status !== "REQUESTED") throw new BadRequestException("Transfer is not pending");
 
@@ -119,6 +136,7 @@ export class TransfersService {
 
     const section = await this.prisma.section.findFirst({
       where: { id: dto.sectionId, classId: dto.classId, class: { division: { schoolId: transfer.toSchoolId } } },
+      include: { class: true },
     });
     if (!section) throw new BadRequestException("That section does not belong to the destination school's class");
 
@@ -187,7 +205,20 @@ export class TransfersService {
           module: AuditModuleName.TRANSFERS,
           resourceType: "Transfer",
           resourceId: transferId,
-          after: { newEnrollmentId: newEnrollment.id, studentNumber, rollNumber },
+          after: {
+            fromSchoolId: transfer.fromSchoolId,
+            toSchoolId: transfer.toSchoolId,
+            fromClass: transfer.fromEnrollment.class.name,
+            fromSection: transfer.fromEnrollment.section.name,
+            fromAcademicYear: transfer.fromEnrollment.academicYear.name,
+            toClass: section.class.name,
+            toSection: section.name,
+            toAcademicYear: academicYear.name,
+            status: "EXECUTED",
+            newEnrollmentId: newEnrollment.id,
+            studentNumber,
+            rollNumber,
+          },
         },
         tx,
       );
@@ -197,7 +228,10 @@ export class TransfersService {
   }
 
   async reject(actor: AuthenticatedUser, transferId: string, dto: RejectTransferDto) {
-    const transfer = await this.prisma.transfer.findUnique({ where: { id: transferId } });
+    const transfer = await this.prisma.transfer.findUnique({
+      where: { id: transferId },
+      include: { fromEnrollment: { include: { class: true, section: true, academicYear: true } } },
+    });
     if (!transfer) throw new NotFoundException("Transfer not found");
     if (transfer.status !== "REQUESTED") throw new BadRequestException("Transfer is not pending");
 
@@ -218,7 +252,15 @@ export class TransfersService {
       module: AuditModuleName.TRANSFERS,
       resourceType: "Transfer",
       resourceId: transferId,
-      after: { reason: dto.reason },
+      after: {
+        fromSchoolId: transfer.fromSchoolId,
+        toSchoolId: transfer.toSchoolId,
+        fromClass: transfer.fromEnrollment.class.name,
+        fromSection: transfer.fromEnrollment.section.name,
+        fromAcademicYear: transfer.fromEnrollment.academicYear.name,
+        status: "REJECTED",
+        reason: dto.reason,
+      },
     });
 
     return this.getOne(actor, transferId);
@@ -229,7 +271,10 @@ export class TransfersService {
   // this. Only a REQUESTED transfer can ever be cancelled; anything already
   // decided one way or the other is final.
   async cancel(actor: AuthenticatedUser, transferId: string) {
-    const transfer = await this.prisma.transfer.findUnique({ where: { id: transferId } });
+    const transfer = await this.prisma.transfer.findUnique({
+      where: { id: transferId },
+      include: { fromEnrollment: { include: { class: true, section: true, academicYear: true } } },
+    });
     if (!transfer) throw new NotFoundException("Transfer not found");
     if (transfer.status !== "REQUESTED") throw new BadRequestException("Only a pending transfer can be cancelled");
 
@@ -246,6 +291,14 @@ export class TransfersService {
       module: AuditModuleName.TRANSFERS,
       resourceType: "Transfer",
       resourceId: transferId,
+      after: {
+        fromSchoolId: transfer.fromSchoolId,
+        toSchoolId: transfer.toSchoolId,
+        fromClass: transfer.fromEnrollment.class.name,
+        fromSection: transfer.fromEnrollment.section.name,
+        fromAcademicYear: transfer.fromEnrollment.academicYear.name,
+        status: "CANCELLED",
+      },
     });
 
     return this.getOne(actor, transferId);

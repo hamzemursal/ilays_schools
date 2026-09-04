@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type AttendanceRow, type AttendanceStatus } from "@/lib/api";
@@ -8,6 +9,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { Avatar } from "@/components/ui/Avatar";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonTable } from "@/components/ui/Skeleton";
@@ -27,7 +29,7 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
   const { id: schoolId, sectionId } = use(params);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { accessToken } = useAuth();
+  const { user, accessToken } = useAuth();
   const { show } = useToast();
 
   // Purely for display — attendance itself is recorded per section per
@@ -245,12 +247,26 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
                 Mark all Present
               </Button>
             </div>
-            {rows.map((r) => (
-              <Card key={r.enrollmentId} padding="sm">
-                <div className="flex flex-col gap-2 p-2 sm:flex-row sm:items-center sm:justify-between">
+            {rows.map((r) => {
+              const canViewProfile = user?.permissions.includes("students.view") ?? false;
+              const studentIdentity = (
+                <>
+                  <Avatar name={`${r.firstName} ${r.lastName}`} photoUrl={r.photoUrl} size="md" />
                   <p className="font-medium text-foreground">
                     <span className="text-foreground-muted">#{r.rollNumber}</span> {r.firstName} {r.lastName}
                   </p>
+                </>
+              );
+              return (
+              <Card key={r.enrollmentId} padding="sm">
+                <div className="flex flex-col gap-2 p-2 sm:flex-row sm:items-center sm:justify-between">
+                  {canViewProfile ? (
+                    <Link href={`/schools/${schoolId}/students/${r.studentId}`} className="flex items-center gap-3 hover:opacity-80">
+                      {studentIdentity}
+                    </Link>
+                  ) : (
+                    <div className="flex items-center gap-3">{studentIdentity}</div>
+                  )}
                   <div className="grid grid-cols-4 gap-1 sm:flex sm:gap-2">
                     {STATUSES.map((s) => {
                       const isOn = pending[r.enrollmentId] === s.value;
@@ -270,7 +286,8 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
                   </div>
                 </div>
               </Card>
-            ))}
+              );
+            })}
           </div>
         )}
 

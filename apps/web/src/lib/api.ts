@@ -678,6 +678,7 @@ export interface AttendanceRow {
   // True only when this status came from a saved-but-not-submitted draft —
   // there's no finalized attendance for this student/day yet.
   isDraft: boolean;
+  photoUrl: string | null;
 }
 
 export type ExamType = "QUIZ" | "MIDTERM" | "FINAL" | "ASSIGNMENT" | "OTHER";

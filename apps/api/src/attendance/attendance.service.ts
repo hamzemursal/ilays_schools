@@ -4,6 +4,7 @@ import { SchoolsService } from "../schools/schools.service";
 import { StudentsService } from "../students/students.service";
 import { AuditService } from "../audit/audit.service";
 import { AuditAction, AuditModuleName } from "../audit/audit-actions";
+import { DocumentsService } from "../documents/documents.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { MarkAttendanceDto } from "./dto/mark-attendance.dto";
 
@@ -14,6 +15,7 @@ export class AttendanceService {
     private readonly schools: SchoolsService,
     private readonly students: StudentsService,
     private readonly audit: AuditService,
+    private readonly documents: DocumentsService,
   ) {}
 
   // A teacher (identified by a Teacher profile linked to this actor) may
@@ -81,20 +83,28 @@ export class AttendanceService {
     // day — once finalized, the draft is stale even if mark() somehow left
     // it behind. isDraft only ever true when there's a draft AND no
     // submitted row yet, which is exactly "resume where you left off."
-    return enrollments.map((e) => {
-      const submitted = e.attendances[0];
-      const draft = e.attendanceDrafts[0];
-      return {
-        enrollmentId: e.id,
-        studentId: e.studentId,
-        firstName: e.student.firstName,
-        lastName: e.student.lastName,
-        rollNumber: e.rollNumber,
-        status: submitted?.status ?? draft?.status ?? null,
-        note: submitted?.note ?? draft?.note ?? null,
-        isDraft: !submitted && !!draft,
-      };
-    });
+    return Promise.all(
+      enrollments.map(async (e) => {
+        const submitted = e.attendances[0];
+        const draft = e.attendanceDrafts[0];
+        // Same tryGetPhotoUrl-per-row pattern as
+        // TeachersService.myAssignmentStudents — a teacher marking
+        // attendance only holds attendance.mark/view, never students.view,
+        // so this can't go through the students.view-gated photo endpoint.
+        const photoUrl = await this.documents.tryGetPhotoUrl("STUDENT", e.studentId);
+        return {
+          enrollmentId: e.id,
+          studentId: e.studentId,
+          firstName: e.student.firstName,
+          lastName: e.student.lastName,
+          rollNumber: e.rollNumber,
+          status: submitted?.status ?? draft?.status ?? null,
+          note: submitted?.note ?? draft?.note ?? null,
+          isDraft: !submitted && !!draft,
+          photoUrl,
+        };
+      }),
+    );
   }
 
   // "Save as Draft" — used when a teacher wants to leave partway through

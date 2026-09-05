@@ -777,6 +777,17 @@ export interface ResultSubmissionListRow {
   submittedAt: string | null;
 }
 
+// Named AppNotification, not Notification — that name is already taken by
+// the browser's own Web Notifications API global.
+export interface AppNotification {
+  id: string;
+  title: string;
+  body: string;
+  actionUrl: string | null;
+  isRead: boolean;
+  createdAt: string;
+}
+
 export interface ResultSubmissionListFilters {
   schoolId?: string;
   academicYearId?: string;
@@ -1912,6 +1923,10 @@ export const api = {
         : `/results-review${auditLogQs(filters)}`,
       { accessToken },
     ),
+
+  listMyAppNotifications: (accessToken: string) => request<AppNotification[]>("/notifications", { accessToken }),
+  markMyAppNotificationRead: (accessToken: string, id: string) =>
+    request<AppNotification>(`/notifications/${id}/read`, { method: "PATCH", accessToken }),
 
   listMyExams: (accessToken: string) => request<MyExamRow[]>("/my-exams", { accessToken }),
   getExamPaper: (accessToken: string, schoolId: string, examSubjectId: string, sectionId: string) =>

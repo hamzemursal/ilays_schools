@@ -5,6 +5,7 @@ import { SchoolsService } from "../schools/schools.service";
 import { AuditService } from "../audit/audit.service";
 import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import { DocumentsService } from "../documents/documents.service";
+import { NotificationsService } from "../notifications/notifications.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateExamDto } from "./dto/create-exam.dto";
 import { CreateExamSubjectDto } from "./dto/create-exam-subject.dto";
@@ -44,7 +45,25 @@ export class ExamsService {
     private readonly schools: SchoolsService,
     private readonly audit: AuditService,
     private readonly documents: DocumentsService,
+    private readonly notifications: NotificationsService,
   ) {}
+
+  private resultsUrl(schoolId: string, examSubjectId: string, sectionId: string): string {
+    return `/schools/${schoolId}/exam-subjects/${examSubjectId}/sections/${sectionId}/results`;
+  }
+
+  // The teacher actually responsible for this (section, subject, year) —
+  // same lookup already used to resolve the "Teacher" column in the Exam
+  // Papers / Results Review lists. Returns null if nobody's currently
+  // assigned (a section between teachers), in which case the caller simply
+  // has nobody to notify — never an error.
+  private async resolveResponsibleTeacherUserId(sectionId: string, subjectId: string, academicYearId: string): Promise<string | null> {
+    const assignment = await this.prisma.teacherAssignment.findFirst({
+      where: { sectionId, subjectId, academicYearId },
+      include: { teacher: true },
+    });
+    return assignment?.teacher.userId ?? null;
+  }
 
   async listExams(actor: AuthenticatedUser, schoolId: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
@@ -318,6 +337,13 @@ export class ExamsService {
       after: { examSubjectId, sectionId, studentCount: activeCount },
     });
 
+    const section = await this.prisma.section.findUnique({ where: { id: sectionId } });
+    await this.notifications.notifySchoolStaffWithPermission(schoolId, "results.approve", {
+      title: wasReturned ? "Corrected results resubmitted" : "Results submitted for review",
+      body: `${examSubject.exam.name} · ${examSubject.class.name} · Section ${section?.name ?? ""} · ${examSubject.subject.name} — ${activeCount} student(s).`,
+      actionUrl: this.resultsUrl(schoolId, examSubjectId, sectionId),
+    });
+
     return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
   }
 
@@ -360,6 +386,16 @@ export class ExamsService {
       after: { examSubjectId, sectionId, reason: dto.reason },
     });
 
+    const teacherUserId = await this.resolveResponsibleTeacherUserId(sectionId, examSubject.subjectId, examSubject.exam.academicYearId);
+    if (teacherUserId) {
+      const section = await this.prisma.section.findUnique({ where: { id: sectionId } });
+      await this.notifications.notifyUser(teacherUserId, {
+        title: "Correction Required",
+        body: `${examSubject.exam.name} · ${examSubject.class.name} · Section ${section?.name ?? ""} · ${examSubject.subject.name} — ${dto.reason}`,
+        actionUrl: this.resultsUrl(schoolId, examSubjectId, sectionId),
+      });
+    }
+
     return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
   }
 
@@ -390,6 +426,16 @@ export class ExamsService {
       resourceId: submission.id,
       after: { examSubjectId, sectionId },
     });
+
+    const teacherUserId = await this.resolveResponsibleTeacherUserId(sectionId, examSubject.subjectId, examSubject.exam.academicYearId);
+    if (teacherUserId) {
+      const section = await this.prisma.section.findUnique({ where: { id: sectionId } });
+      await this.notifications.notifyUser(teacherUserId, {
+        title: "Results Approved",
+        body: `${examSubject.exam.name} · ${examSubject.class.name} · Section ${section?.name ?? ""} · ${examSubject.subject.name} — approved, waiting to be published.`,
+        actionUrl: this.resultsUrl(schoolId, examSubjectId, sectionId),
+      });
+    }
 
     return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
   }
@@ -427,6 +473,16 @@ export class ExamsService {
       severity: "WARNING",
       after: { examSubjectId, sectionId },
     });
+
+    const teacherUserId = await this.resolveResponsibleTeacherUserId(sectionId, examSubject.subjectId, examSubject.exam.academicYearId);
+    if (teacherUserId) {
+      const section = await this.prisma.section.findUnique({ where: { id: sectionId } });
+      await this.notifications.notifyUser(teacherUserId, {
+        title: "Results Published",
+        body: `${examSubject.exam.name} · ${examSubject.class.name} · Section ${section?.name ?? ""} · ${examSubject.subject.name} — now visible to students and parents.`,
+        actionUrl: this.resultsUrl(schoolId, examSubjectId, sectionId),
+      });
+    }
 
     return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
   }
@@ -594,6 +650,13 @@ export class ExamsService {
         resourceType: "ResultSubmission",
         resourceId: submission.id,
         after: { examSubjectId, sectionId, fileName: file.originalname },
+      });
+
+      const section = await this.prisma.section.findUnique({ where: { id: sectionId } });
+      await this.notifications.notifySchoolStaffWithPermission(schoolId, "results.approve", {
+        title: "Exam paper submitted",
+        body: `${examSubject.exam.name} · ${examSubject.class.name} · Section ${section?.name ?? ""} · ${examSubject.subject.name} — exam paper submitted for review.`,
+        actionUrl: this.resultsUrl(schoolId, examSubjectId, sectionId),
       });
     }
 

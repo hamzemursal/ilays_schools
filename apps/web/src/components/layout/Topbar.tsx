@@ -7,7 +7,7 @@ import { Bell, Camera, GraduationCap, KeyRound, Loader2, LogOut, Menu, Search, T
 import { useAuth } from "@/lib/auth-context";
 import { Avatar } from "@/components/ui/Avatar";
 import { useToast } from "@/components/ui/Toast";
-import { api } from "@/lib/api";
+import { api, type AppNotification } from "@/lib/api";
 import { useCurrentSchool } from "./Sidebar";
 import { orgNavItems, schoolNavItems, type NavItem } from "./nav-config";
 
@@ -20,8 +20,33 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [notifOpen, setNotifOpen] = useState(false);
+  const [notifications, setNotifications] = useState<AppNotification[] | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const unreadCount = notifications?.filter((n) => !n.isRead).length ?? 0;
+
+  useEffect(() => {
+    if (!accessToken) return;
+    api.listMyAppNotifications(accessToken).then(setNotifications).catch(() => setNotifications([]));
+    // Light polling, not a live socket — a new submit/return/approve/publish
+    // is rare enough that a minute's staleness on the Bell is a non-issue.
+    const interval = setInterval(() => {
+      api.listMyAppNotifications(accessToken).then(setNotifications).catch(() => undefined);
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [accessToken]);
+
+  async function openNotification(n: AppNotification) {
+    if (!accessToken) return;
+    setNotifOpen(false);
+    if (!n.isRead) {
+      api
+        .markMyAppNotificationRead(accessToken, n.id)
+        .then(() => setNotifications((prev) => prev?.map((x) => (x.id === n.id ? { ...x, isRead: true } : x)) ?? prev))
+        .catch(() => undefined);
+    }
+    if (n.actionUrl) router.push(n.actionUrl);
+  }
 
   const navItems: NavItem[] = useMemo(() => {
     if (!user) return [];
@@ -151,13 +176,39 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
             aria-label="Notifications"
           >
             <Bell className="size-5" />
+            {unreadCount > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-danger text-[10px] font-semibold text-white">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
+            )}
           </button>
           {notifOpen && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
-              <div className="absolute right-0 z-50 mt-2 w-72 rounded-xl border border-border bg-background p-4 shadow-lg">
+              <div className="absolute right-0 z-50 mt-2 w-80 rounded-xl border border-border bg-background p-4 shadow-lg">
                 <p className="text-sm font-semibold text-foreground">Notifications</p>
-                <p className="mt-2 text-sm text-foreground-soft">You&apos;re all caught up — nothing new yet.</p>
+                {!notifications ? (
+                  <p className="mt-2 text-sm text-foreground-soft">Loading…</p>
+                ) : notifications.length === 0 ? (
+                  <p className="mt-2 text-sm text-foreground-soft">You&apos;re all caught up — nothing new yet.</p>
+                ) : (
+                  <div className="mt-2 -mx-4 max-h-96 divide-y divide-border overflow-y-auto">
+                    {notifications.map((n) => (
+                      <button
+                        key={n.id}
+                        onClick={() => openNotification(n)}
+                        className={`block w-full px-4 py-2.5 text-left transition-colors hover:bg-surface-hover ${!n.isRead ? "bg-accent-soft/40" : ""}`}
+                      >
+                        <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+                          {!n.isRead && <span className="size-1.5 shrink-0 rounded-full bg-accent" />}
+                          {n.title}
+                        </p>
+                        <p className="mt-0.5 line-clamp-2 text-xs text-foreground-soft">{n.body}</p>
+                        <p className="mt-1 text-[11px] text-foreground-muted">{new Date(n.createdAt).toLocaleString()}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </>
           )}

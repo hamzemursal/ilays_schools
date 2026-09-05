@@ -400,21 +400,35 @@ model Announcement {
   @@map("announcements")
 }
 
+// Addressed to exactly one of guardianId or userId — never both, never
+// neither. Kept as two nullable columns rather than a single polymorphic
+// "recipientId" so each side keeps a real foreign key (and real
+// onDelete: Cascade) instead of an unenforced string. guardianId is the
+// original Parent Portal recipient; userId (added for the Exam Management
+// workflow) covers every other actor — Teacher, School Admin, Super Admin —
+// through the same User row their login already uses.
 model Notification {
-  id         String   @id @default(uuid())
-  guardianId String
-  guardian   Guardian @relation(fields: [guardianId], references: [id], onDelete: Cascade)
+  id         String    @id @default(uuid())
+  guardianId String?
+  guardian   Guardian? @relation(fields: [guardianId], references: [id], onDelete: Cascade)
+  userId     String?
+  user       User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   announcementId String?
   announcement   Announcement? @relation(fields: [announcementId], references: [id], onDelete: Cascade)
 
-  title  String
-  body   String
-  isRead Boolean @default(false)
+  title     String
+  body      String
+  // Where "View" in the notification list should take the reader — e.g.
+  // straight to the exam-subject/section results page a return/approve/
+  // publish event was about. Never a full origin URL, just the in-app path.
+  actionUrl String?
+  isRead    Boolean @default(false)
 
   createdAt DateTime @default(now())
 
   @@index([guardianId, createdAt])
+  @@index([userId, createdAt])
   @@map("notifications")
 }
 
@@ -902,6 +916,7 @@ model User {
   guardian      Guardian?
   teacher       Teacher?
   student       Student?
+  notifications Notification[]
 
   @@map("users")
 }

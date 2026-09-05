@@ -211,14 +211,16 @@ export class StudentPortalService {
     return names;
   }
 
-  // Only APPROVED results — an entered-but-not-yet-approved mark is still a
-  // teacher's draft, not something a student should see or rely on.
+  // Only PUBLISHED results — Approved is still an internal Admin-review
+  // state (see ResultSubmission.status); a student/parent must never see a
+  // result before an Admin has explicitly published it. Draft, Submitted,
+  // Needs Correction, and Approved are all deliberately invisible here.
   async myResults(actor: AuthenticatedUser) {
     const { student } = await this.getSelfOrThrow(actor);
 
     const results = await this.prisma.result.findMany({
-      where: { enrollment: { studentId: student.id }, status: "APPROVED" },
-      include: { examSubject: { include: { exam: true, subject: true } } },
+      where: { enrollment: { studentId: student.id }, resultSubmission: { status: "PUBLISHED" } },
+      include: { examSubject: { include: { exam: { include: { academicYear: true } }, subject: true } }, resultSubmission: true },
       orderBy: { createdAt: "desc" },
     });
 
@@ -226,11 +228,13 @@ export class StudentPortalService {
       id: r.id,
       examName: r.examSubject.exam.name,
       examType: r.examSubject.exam.type,
+      academicYearName: r.examSubject.exam.academicYear.name,
       subjectName: r.examSubject.subject.name,
       marksObtained: Number(r.marksObtained),
       maxMarks: r.examSubject.maxMarks,
       percentage: Math.round((Number(r.marksObtained) / r.examSubject.maxMarks) * 1000) / 10,
       examDate: r.examSubject.examDate,
+      publishedDate: r.resultSubmission.publishedAt,
     }));
   }
 

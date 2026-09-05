@@ -113,6 +113,7 @@ function ResultsTab({ accessToken, studentId }: { accessToken: string; studentId
           <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
             <tr>
               <th className="px-5 py-2.5">Exam</th>
+              <th className="px-5 py-2.5">Academic Year</th>
               <th className="px-5 py-2.5">Subject</th>
               <th className="px-5 py-2.5">Marks</th>
               <th className="px-5 py-2.5">Percentage</th>
@@ -125,6 +126,7 @@ function ResultsTab({ accessToken, studentId }: { accessToken: string; studentId
                   {r.examName}
                   <span className="ml-1.5 text-xs text-foreground-muted">{r.examType}</span>
                 </td>
+                <td className="px-5 py-3 text-foreground-soft">{r.academicYearName}</td>
                 <td className="px-5 py-3 text-foreground-soft">{r.subjectName}</td>
                 <td className="px-5 py-3 text-foreground-soft">
                   {r.marksObtained} / {r.maxMarks}

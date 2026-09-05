@@ -25,7 +25,7 @@ export default function StudentResultsPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Student Portal" title="Results" description="Your approved exam results." />
+      <PageHeader eyebrow="Student Portal" title="Results" description="Your published exam results." />
 
       <div className="space-y-5 p-4 sm:p-6">
         {error ? (
@@ -37,21 +37,23 @@ export default function StudentResultsPage() {
             <EmptyState
               icon={Award}
               title="Results are not available yet"
-              description="Approved exam results will appear here once your teachers finalize them."
+              description="Published exam results will appear here once your school releases them."
             />
           </Card>
         ) : (
           <Card padding="none">
-            <CardHeader title="Approved results" description={`${results.length} result(s).`} />
+            <CardHeader title="Published results" description={`${results.length} result(s).`} />
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[600px] text-left text-sm">
+              <table className="w-full min-w-[720px] text-left text-sm">
                 <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
                   <tr>
                     <th className="px-5 py-2.5">Exam</th>
+                    <th className="px-5 py-2.5">Academic Year</th>
                     <th className="px-5 py-2.5">Subject</th>
                     <th className="px-5 py-2.5">Marks</th>
                     <th className="px-5 py-2.5">Percentage</th>
-                    <th className="px-5 py-2.5">Date</th>
+                    <th className="px-5 py-2.5">Exam Date</th>
+                    <th className="px-5 py-2.5">Published</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -61,6 +63,7 @@ export default function StudentResultsPage() {
                         {r.examName}
                         <span className="ml-1.5 text-xs text-foreground-muted">({r.examType})</span>
                       </td>
+                      <td className="px-5 py-3 text-foreground-soft">{r.academicYearName}</td>
                       <td className="px-5 py-3 text-foreground-soft">{r.subjectName}</td>
                       <td className="px-5 py-3 whitespace-nowrap text-foreground-soft">
                         {r.marksObtained} / {r.maxMarks}
@@ -68,6 +71,9 @@ export default function StudentResultsPage() {
                       <td className="px-5 py-3 font-medium text-foreground">{r.percentage}%</td>
                       <td className="px-5 py-3 text-foreground-muted">
                         {r.examDate ? new Date(r.examDate).toLocaleDateString() : "—"}
+                      </td>
+                      <td className="px-5 py-3 text-foreground-muted">
+                        {r.publishedDate ? new Date(r.publishedDate).toLocaleDateString() : "—"}
                       </td>
                     </tr>
                   ))}

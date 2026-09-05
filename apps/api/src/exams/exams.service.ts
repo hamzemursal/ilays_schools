@@ -394,6 +394,43 @@ export class ExamsService {
     return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
   }
 
+  // Publishing is the one action that actually changes what a Student/
+  // Parent can see (StudentPortalService.myResults and
+  // GuardianPortalService.myChildResults both filter on
+  // resultSubmission.status = 'PUBLISHED') — everything before this point
+  // (submit, return, approve) is purely internal to the school.
+  async publishSubmission(actor: AuthenticatedUser, schoolId: string, examSubjectId: string, sectionId: string) {
+    const examSubject = await this.getExamSubjectInSchoolOrThrow(schoolId, examSubjectId);
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    await this.assertSectionBelongsToClass(sectionId, examSubject.classId);
+
+    const submission = await this.prisma.resultSubmission.findUnique({
+      where: { examSubjectId_sectionId: { examSubjectId, sectionId } },
+    });
+    if (!submission || submission.status !== "APPROVED") {
+      throw new BadRequestException("Only an approved result set can be published");
+    }
+
+    await this.prisma.resultSubmission.update({
+      where: { id: submission.id },
+      data: { status: "PUBLISHED", publishedByUserId: actor.id, publishedAt: new Date() },
+    });
+
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId,
+      action: AuditAction.RESULTS_PUBLISHED,
+      module: AuditModuleName.RESULTS,
+      resourceType: "ResultSubmission",
+      resourceId: submission.id,
+      severity: "WARNING",
+      after: { examSubjectId, sectionId },
+    });
+
+    return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
+  }
+
   // Admin-facing "Results Review" list — same viewpoint-scoping convention
   // as listExamPapers (and Transfers/Student Lifecycle before it): org-wide
   // when filters.schoolId is omitted and the actor has no schoolIds of

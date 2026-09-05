@@ -15,7 +15,8 @@ import { ResultsStatusBadge } from "@/features/exams/ExamStatusBadges";
 import { SubmitResultsDialog } from "@/features/exams/SubmitResultsDialog";
 import { ReturnForCorrectionDialog } from "@/features/exams/ReturnForCorrectionDialog";
 import { ApproveResultsDialog } from "@/features/exams/ApproveResultsDialog";
-import { CheckCircle2, RotateCcw, Save, Send } from "lucide-react";
+import { PublishResultsDialog } from "@/features/exams/PublishResultsDialog";
+import { CheckCircle2, Megaphone, RotateCcw, Save, Send } from "lucide-react";
 
 export default function ResultsPage({
   params,
@@ -36,6 +37,8 @@ export default function ResultsPage({
   const [returning, setReturning] = useState(false);
   const [approveDialogOpen, setApproveDialogOpen] = useState(false);
   const [approving, setApproving] = useState(false);
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
+  const [publishing, setPublishing] = useState(false);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -52,6 +55,7 @@ export default function ResultsPage({
   const canApprove = (user?.permissions.includes("results.approve") ?? false) && !isTeacher;
   const editable = !!data && (data.submission.status === "DRAFT" || data.submission.status === "NEEDS_CORRECTION");
   const canReview = canApprove && data?.submission.status === "SUBMITTED";
+  const canPublish = canApprove && data?.submission.status === "APPROVED";
 
   async function save(): Promise<ResultsForSection | null> {
     if (!accessToken || !data) return null;
@@ -124,6 +128,21 @@ export default function ResultsPage({
     }
   }
 
+  async function confirmPublish() {
+    if (!accessToken) return;
+    setPublishing(true);
+    setError(null);
+    try {
+      const updated = await api.publishResultsSubmission(accessToken, schoolId, examSubjectId, sectionId);
+      setData(updated);
+      setPublishDialogOpen(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to publish results");
+    } finally {
+      setPublishing(false);
+    }
+  }
+
   const contextLine = data
     ? `${data.context.academicYearName} · ${data.context.examName} · ${data.context.className} · Section ${data.context.sectionName} · ${data.context.subjectName}`
     : undefined;
@@ -180,7 +199,7 @@ export default function ResultsPage({
               </Alert>
             )}
             {data.submission.status === "SUBMITTED" && !canApprove && <Alert tone="warning">Submitted — waiting for Admin review.</Alert>}
-            {data.submission.status === "APPROVED" && <Alert tone="success">Approved — waiting to be published.</Alert>}
+            {data.submission.status === "APPROVED" && !canPublish && <Alert tone="success">Approved — waiting to be published.</Alert>}
             {data.submission.status === "PUBLISHED" && <Alert tone="success">Published — visible to students and parents.</Alert>}
 
             {data.students.length === 0 ? (
@@ -246,6 +265,14 @@ export default function ResultsPage({
                 </Button>
               </div>
             )}
+
+            {canPublish && (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button icon={<Megaphone className="size-4" />} onClick={() => setPublishDialogOpen(true)}>
+                  Publish Results
+                </Button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -287,6 +314,17 @@ export default function ResultsPage({
             loading={approving}
             onConfirm={confirmApprove}
             onCancel={() => setApproveDialogOpen(false)}
+          />
+          <PublishResultsDialog
+            open={publishDialogOpen}
+            examName={data.context.examName}
+            className={data.context.className}
+            sectionName={data.context.sectionName}
+            subjectName={data.context.subjectName}
+            studentCount={data.students.length}
+            loading={publishing}
+            onConfirm={confirmPublish}
+            onCancel={() => setPublishDialogOpen(false)}
           />
         </>
       )}

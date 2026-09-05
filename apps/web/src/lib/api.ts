@@ -499,11 +499,13 @@ export interface MyChildResult {
   id: string;
   examName: string;
   examType: string;
+  academicYearName: string;
   subjectName: string;
   marksObtained: number;
   maxMarks: number;
   percentage: number;
   examDate: string | null;
+  publishedDate: string | null;
 }
 
 export interface MyChildInvoice {
@@ -1895,6 +1897,11 @@ export const api = {
     }),
   approveResultsSubmission: (accessToken: string, schoolId: string, examSubjectId: string, sectionId: string) =>
     request<ResultsForSection>(`/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/approve`, {
+      method: "POST",
+      accessToken,
+    }),
+  publishResultsSubmission: (accessToken: string, schoolId: string, examSubjectId: string, sectionId: string) =>
+    request<ResultsForSection>(`/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/publish`, {
       method: "POST",
       accessToken,
     }),

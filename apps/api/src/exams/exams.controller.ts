@@ -103,6 +103,17 @@ export class ExamsController {
     return this.exams.approveSubmission(user, schoolId, examSubjectId, sectionId);
   }
 
+  @RequirePermissions("results.approve")
+  @Post(":examId/subjects/:examSubjectId/sections/:sectionId/publish")
+  publish(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("examSubjectId") examSubjectId: string,
+    @Param("sectionId") sectionId: string,
+  ) {
+    return this.exams.publishSubmission(user, schoolId, examSubjectId, sectionId);
+  }
+
   @RequirePermissions("results.enter")
   @Get(":examId/subjects/:examSubjectId/sections/:sectionId/paper")
   getPaper(

@@ -189,14 +189,15 @@ export class GuardianPortalService {
     };
   }
 
-  // Only APPROVED results — an entered-but-not-yet-approved mark is still a
-  // teacher's draft, not something a parent should see or rely on.
+  // Only PUBLISHED results — same rule as the Student Portal (see
+  // StudentPortalService.myResults): Approved is still an internal
+  // Admin-review state, never shown to a parent until explicitly published.
   async myChildResults(actor: AuthenticatedUser, studentId: string) {
     await this.guardians.assertGuardianCanAccessStudent(actor, studentId);
 
     const results = await this.prisma.result.findMany({
-      where: { enrollment: { studentId }, status: "APPROVED" },
-      include: { examSubject: { include: { exam: true, subject: true } } },
+      where: { enrollment: { studentId }, resultSubmission: { status: "PUBLISHED" } },
+      include: { examSubject: { include: { exam: { include: { academicYear: true } }, subject: true } }, resultSubmission: true },
       orderBy: { createdAt: "desc" },
     });
 
@@ -204,11 +205,13 @@ export class GuardianPortalService {
       id: r.id,
       examName: r.examSubject.exam.name,
       examType: r.examSubject.exam.type,
+      academicYearName: r.examSubject.exam.academicYear.name,
       subjectName: r.examSubject.subject.name,
       marksObtained: Number(r.marksObtained),
       maxMarks: r.examSubject.maxMarks,
       percentage: Math.round((Number(r.marksObtained) / r.examSubject.maxMarks) * 1000) / 10,
       examDate: r.examSubject.examDate,
+      publishedDate: r.resultSubmission.publishedAt,
     }));
   }
 

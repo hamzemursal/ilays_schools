@@ -5,10 +5,12 @@ import { v2 as cloudinary } from "cloudinary";
 // holds every asset, addressed by public_id (we reuse the same storageKey
 // strings DocumentsService already generates, e.g. "students/<id>/<uuid>.jpg").
 // resource_type has to match at upload and at every later read/delete, and
-// mimeType is the only signal we have for it (PDFs must be "raw"; images
-// are "image"), so callers that know the mimeType pass it through.
+// mimeType is the only signal we have for it — Cloudinary's "image" pipeline
+// only actually handles image formats; anything else (PDF, DOC, DOCX, ...)
+// must go through as "raw" or the upload fails/corrupts.
+const IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 function resourceTypeFor(mimeType?: string): "image" | "raw" {
-  return mimeType === "application/pdf" ? "raw" : "image";
+  return mimeType && IMAGE_MIME_TYPES.has(mimeType) ? "image" : "raw";
 }
 
 // For an "image" resource, Cloudinary silently strips a trailing file

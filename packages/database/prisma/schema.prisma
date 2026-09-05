@@ -142,7 +142,7 @@ model Section {
   classId String
   class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
 
-  name String // "A", "B", ...
+  name     String // "A", "B", ...
   // Null means unlimited — no maximum enrollment is enforced for this
   // section. A number preserves the original fixed-capacity behavior for
   // sections created before this became optional.
@@ -153,6 +153,7 @@ model Section {
 
   enrollments        StudentEnrollment[]
   teacherAssignments TeacherAssignment[]
+  resultSubmissions  ResultSubmission[]
 
   @@unique([classId, name])
   @@map("sections")
@@ -583,27 +584,90 @@ model ExamSubject {
 
   createdAt DateTime @default(now())
 
-  results Result[]
+  results           Result[]
+  resultSubmissions ResultSubmission[]
 
   @@unique([examId, classId, subjectId])
   @@map("exam_subjects")
 }
 
+// One row per (examSubject, section) — the actual per-teacher unit of work,
+// since ExamSubject itself has no section (a class's Mathematics exam is one
+// ExamSubject row shared by every section, but Section A and Section B are
+// reviewed/returned/approved/published independently by whichever teacher
+// holds the TeacherAssignment for that section). Kept as its own table
+// rather than a status column on Result, the same way AttendanceDraft is
+// kept separate from Attendance — every Result row belongs to exactly one
+// submission, and the submission's status is the single source of truth for
+// the whole draft->submitted->needs_correction->approved->published
+// pipeline, never re-derived from scanning individual Result rows.
 enum ResultStatus {
   ENTERED
   APPROVED
 }
 
-model Result {
-  id            String            @id @default(uuid())
-  examSubjectId String
-  examSubject   ExamSubject       @relation(fields: [examSubjectId], references: [id], onDelete: Cascade)
-  enrollmentId  String
-  enrollment    StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+enum ResultSubmissionStatus {
+  DRAFT
+  SUBMITTED
+  NEEDS_CORRECTION
+  APPROVED
+  PUBLISHED
+}
 
-  marksObtained    Decimal      @db.Decimal(6, 2)
+model ResultSubmission {
+  id            String      @id @default(uuid())
+  examSubjectId String
+  examSubject   ExamSubject @relation(fields: [examSubjectId], references: [id], onDelete: Cascade)
+  sectionId     String
+  section       Section     @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  status ResultSubmissionStatus @default(DRAFT)
+
+  // The teacher's own note about the exam paper/results, shown to the Admin
+  // during review — distinct from returnReason, which is the Admin's note
+  // back to the teacher.
+  notes String?
+
+  submittedByUserId String?
+  submittedAt       DateTime?
+
+  returnedByUserId String?
+  returnedAt       DateTime?
+  returnReason     String?
+
+  approvedByUserId String?
+  approvedAt       DateTime?
+
+  publishedByUserId String?
+  publishedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  results Result[]
+
+  @@unique([examSubjectId, sectionId])
+  @@index([sectionId, status])
+  @@map("result_submissions")
+}
+
+model Result {
+  id                 String            @id @default(uuid())
+  examSubjectId      String
+  examSubject        ExamSubject       @relation(fields: [examSubjectId], references: [id], onDelete: Cascade)
+  enrollmentId       String
+  enrollment         StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  resultSubmissionId String
+  resultSubmission   ResultSubmission  @relation(fields: [resultSubmissionId], references: [id], onDelete: Cascade)
+
+  marksObtained   Decimal @db.Decimal(6, 2)
+  enteredByUserId String
+
+  // Superseded by ResultSubmission.status — kept only so this migration
+  // stays additive (no DROP COLUMN on live data). No code writes or reads
+  // these two anymore; a later, separate cleanup can drop them once the new
+  // workflow has been live for a while.
   status           ResultStatus @default(ENTERED)
-  enteredByUserId  String
   approvedByUserId String?
 
   createdAt DateTime @default(now())
@@ -803,15 +867,15 @@ model User {
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
-  email        String     @unique
-  passwordHash String?
-  status       UserStatus @default(PENDING_SETUP)
+  email              String     @unique
+  passwordHash       String?
+  status             UserStatus @default(PENDING_SETUP)
   // Set on any account whose password was assigned by an admin rather than
   // chosen by the account holder (currently: Student Portal accounts only,
   // see StudentsService.createPortalAccount). Login still succeeds — this
   // only signals the frontend to gate everything else behind a password
   // change until AuthService.changeMyPassword clears it.
-  mustChangePassword Boolean @default(false)
+  mustChangePassword Boolean    @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -936,6 +1000,7 @@ enum MediaOwnerType {
   STUDENT
   TEACHER
   SCHOOL
+  RESULT_SUBMISSION
 }
 
 // PHOTO is always "the latest one wins" (see DocumentsService.getPhotoUrl).

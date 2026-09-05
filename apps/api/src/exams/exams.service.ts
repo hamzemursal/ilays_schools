@@ -141,6 +141,8 @@ export class ExamsService {
       throw new BadRequestException(`These results are already approved and can't be edited: ${approvedIds.join(", ")}`);
     }
 
+    const submission = await this.getOrCreateSubmission(examSubjectId, sectionId);
+
     await this.prisma.$transaction(
       dto.entries.map((entry) =>
         this.prisma.result.upsert({
@@ -151,6 +153,7 @@ export class ExamsService {
             enrollmentId: entry.enrollmentId,
             marksObtained: entry.marksObtained,
             enteredByUserId: actor.id,
+            resultSubmissionId: submission.id,
           },
         }),
       ),
@@ -191,6 +194,20 @@ export class ExamsService {
     });
 
     return { approvedCount: result.count };
+  }
+
+  // The per-(examSubject, section) submission row — created lazily the first
+  // time a teacher enters any mark, same "the first write creates its own
+  // container" shape as AttendanceService's upsert-by-composite-key. The
+  // draft/submit/return/approve/publish pipeline itself (Phases 3-6) reads
+  // and transitions this row; this phase only needs it to exist so every
+  // Result can carry a valid resultSubmissionId.
+  private async getOrCreateSubmission(examSubjectId: string, sectionId: string) {
+    return this.prisma.resultSubmission.upsert({
+      where: { examSubjectId_sectionId: { examSubjectId, sectionId } },
+      update: {},
+      create: { examSubjectId, sectionId },
+    });
   }
 
   private async getExamInSchoolOrThrow(schoolId: string, examId: string) {

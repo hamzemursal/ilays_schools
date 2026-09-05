@@ -10,9 +10,33 @@ import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-const ALLOWED_DOCUMENT_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
+const ALLOWED_DOCUMENT_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
 const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
-const MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024; // 10MB — PDFs run larger than a headshot
+const MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024; // 10MB — PDFs/exam papers run larger than a headshot
+
+// mimetype.split("/")[1] only ever produced a usable file extension by
+// coincidence, back when the only allowed types were images and PDF — it
+// breaks for anything with a structured subtype, e.g. Word's DOCX mimetype
+// (".openxmlformats-officedocument.wordprocessingml.document" is not a file
+// extension). This is the one place a mimetype becomes a storageKey suffix.
+const EXTENSION_BY_MIME_TYPE: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "application/pdf": "pdf",
+  "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+};
+function extensionFor(mimeType: string): string {
+  return EXTENSION_BY_MIME_TYPE[mimeType] ?? mimeType.split("/")[1];
+}
 
 @Injectable()
 export class DocumentsService {
@@ -36,7 +60,7 @@ export class DocumentsService {
     const student = await this.students.assertAccessibleStudent(actor, studentId);
 
     this.assertValidImage(file);
-    const extension = file.mimetype.split("/")[1];
+    const extension = extensionFor(file.mimetype);
     const storageKey = `students/${studentId}/${randomUUID()}.${extension}`;
 
     await this.storage.upload(storageKey, file.buffer, file.mimetype);
@@ -130,7 +154,7 @@ export class DocumentsService {
   async uploadSchoolLogo(actor: AuthenticatedUser, schoolId: string, file: Express.Multer.File) {
     const school = await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     this.assertValidImage(file);
-    const extension = file.mimetype.split("/")[1];
+    const extension = extensionFor(file.mimetype);
     const storageKey = `schools/${schoolId}/${randomUUID()}.${extension}`;
     await this.storage.upload(storageKey, file.buffer, file.mimetype);
 
@@ -218,7 +242,7 @@ export class DocumentsService {
   private async storeTeacherPhoto(actor: AuthenticatedUser, schoolId: string, teacherId: string, file: Express.Multer.File) {
     const school = await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     this.assertValidImage(file);
-    const extension = file.mimetype.split("/")[1];
+    const extension = extensionFor(file.mimetype);
     const storageKey = `teachers/${teacherId}/${randomUUID()}.${extension}`;
     await this.storage.upload(storageKey, file.buffer, file.mimetype);
 
@@ -246,7 +270,7 @@ export class DocumentsService {
   ) {
     const school = await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     this.assertValidDocument(file);
-    const extension = file.mimetype.split("/")[1];
+    const extension = extensionFor(file.mimetype);
     const storageKey = `teachers/${teacherId}/documents/${randomUUID()}.${extension}`;
     await this.storage.upload(storageKey, file.buffer, file.mimetype);
 
@@ -264,6 +288,59 @@ export class DocumentsService {
         uploadedByUserId: actor.id,
       },
     });
+  }
+
+  // Exam paper storage — foundation for the Exam Management workflow.
+  // Authorization here is deliberately only the school boundary; the finer
+  // "does this teacher hold a TeacherAssignment for this exact
+  // section+subject+year" check belongs to ExamsService (it owns
+  // ResultSubmission/TeacherAssignment, this module knows neither), the same
+  // split already used for every other Documents method's caller.
+  async uploadResultSubmissionPaper(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    resultSubmissionId: string,
+    file: Express.Multer.File,
+  ) {
+    const school = await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    this.assertValidDocument(file);
+    const extension = extensionFor(file.mimetype);
+    const storageKey = `result-submissions/${resultSubmissionId}/${randomUUID()}.${extension}`;
+    await this.storage.upload(storageKey, file.buffer, file.mimetype);
+
+    return this.prisma.mediaFile.create({
+      data: {
+        organizationId: school.organizationId,
+        schoolId,
+        ownerType: "RESULT_SUBMISSION",
+        ownerId: resultSubmissionId,
+        kind: "DOCUMENT",
+        storageKey,
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+        uploadedByUserId: actor.id,
+      },
+    });
+  }
+
+  // Latest-wins, like a photo — replacing an exam paper should show only the
+  // current one, even though the old MediaFile row is kept (never deleted)
+  // for audit history. Never throws: "no paper uploaded yet" is an expected,
+  // common state for a page listing many exam subjects/sections at once.
+  async getResultSubmissionPaper(resultSubmissionId: string) {
+    const latest = await this.prisma.mediaFile.findFirst({
+      where: { ownerType: "RESULT_SUBMISSION", ownerId: resultSubmissionId, kind: "DOCUMENT" },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!latest) return null;
+    return {
+      id: latest.id,
+      mimeType: latest.mimeType,
+      sizeBytes: latest.sizeBytes,
+      uploadedByUserId: latest.uploadedByUserId,
+      uploadedAt: latest.createdAt,
+      url: await this.storage.getSignedDownloadUrl(latest.storageKey, latest.mimeType),
+    };
   }
 
   private async listDocuments(ownerType: "STUDENT" | "TEACHER", ownerId: string) {
@@ -296,7 +373,7 @@ export class DocumentsService {
   private assertValidDocument(file: Express.Multer.File) {
     if (!file) throw new BadRequestException("No file uploaded");
     if (!ALLOWED_DOCUMENT_TYPES.has(file.mimetype)) {
-      throw new BadRequestException("Only JPEG, PNG, WebP, or PDF files are allowed");
+      throw new BadRequestException("Only JPEG, PNG, WebP, PDF, DOC, or DOCX files are allowed");
     }
     if (file.size > MAX_DOCUMENT_SIZE_BYTES) {
       throw new BadRequestException("File exceeds the 10MB limit");

@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Post, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { ExamsService } from "./exams.service";
 import { CreateExamDto } from "./dto/create-exam.dto";
 import { CreateExamSubjectDto } from "./dto/create-exam-subject.dto";
@@ -75,5 +76,32 @@ export class ExamsController {
     @Param("examSubjectId") examSubjectId: string,
   ) {
     return this.exams.approveResults(user, schoolId, examSubjectId);
+  }
+
+  @RequirePermissions("results.enter")
+  @Get(":examId/subjects/:examSubjectId/sections/:sectionId/paper")
+  getPaper(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("examSubjectId") examSubjectId: string,
+    @Param("sectionId") sectionId: string,
+  ) {
+    return this.exams.getExamPaper(user, schoolId, examSubjectId, sectionId);
+  }
+
+  @RequirePermissions("results.enter")
+  @Post(":examId/subjects/:examSubjectId/sections/:sectionId/paper")
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 10 * 1024 * 1024 } }))
+  uploadPaper(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("examSubjectId") examSubjectId: string,
+    @Param("sectionId") sectionId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body("notes") notes?: string,
+    @Body("submit") submit?: string,
+  ) {
+    if (!file) throw new BadRequestException("No file uploaded");
+    return this.exams.uploadExamPaper(user, schoolId, examSubjectId, sectionId, file, notes, submit === "true");
   }
 }

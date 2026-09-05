@@ -62,6 +62,14 @@ export function schoolNavItems(user: Profile, schoolId: string): NavItem[] {
   if ((has("attendance.mark") || has("attendance.view")) && !user.roles.includes("TEACHER")) {
     items.push({ label: "Attendance", href: `/schools/${schoolId}/attendance`, icon: ClipboardCheck });
   }
+  if (has("results.enter") && user.roles.includes("TEACHER")) {
+    items.push({ label: "My Exams", href: `/my-exams`, icon: Award });
+  }
+  // Admin's browse-every-exam-paper view — a teacher reaches their own
+  // papers through "My Exams" instead, same split as Attendance above.
+  if (has("results.view") && !user.roles.includes("TEACHER")) {
+    items.push({ label: "Exam Papers", href: `/schools/${schoolId}/exam-papers`, icon: Award });
+  }
   if (has("fees.manage") || has("payments.record")) {
     items.push({ label: "Finance", href: `/schools/${schoolId}/finance`, icon: Wallet });
   }
@@ -105,6 +113,11 @@ export function orgNavItems(user: Profile): NavItem[] {
   // Admin's equivalent is schoolNavItems' own per-school "Transfers" entry.
   if (user.permissions.includes("schools.view") && user.permissions.includes("transfers.create")) {
     items.push({ label: "Transfers", href: "/transfers", icon: ArrowLeftRight });
+  }
+  // Org-wide Exam Papers — same audience as the entries above; a School
+  // Admin's equivalent is schoolNavItems' own per-school "Exam Papers" entry.
+  if (user.permissions.includes("schools.view") && user.permissions.includes("results.view")) {
+    items.push({ label: "Exam Papers", href: "/exam-papers", icon: Award });
   }
   return items;
 }

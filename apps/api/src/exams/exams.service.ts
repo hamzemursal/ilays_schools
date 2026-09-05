@@ -4,10 +4,24 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import { AuditService } from "../audit/audit.service";
 import { AuditAction, AuditModuleName } from "../audit/audit-actions";
+import { DocumentsService } from "../documents/documents.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateExamDto } from "./dto/create-exam.dto";
 import { CreateExamSubjectDto } from "./dto/create-exam-subject.dto";
 import { EnterMarksDto } from "./dto/enter-marks.dto";
+
+export interface ExamPaperListFilters {
+  schoolId?: string;
+  academicYearId?: string;
+  examId?: string;
+  classId?: string;
+  sectionId?: string;
+  subjectId?: string;
+  teacherId?: string;
+  status?: "DRAFT" | "SUBMITTED";
+  dateFrom?: string;
+  dateTo?: string;
+}
 
 @Injectable()
 export class ExamsService {
@@ -15,6 +29,7 @@ export class ExamsService {
     private readonly prisma: PrismaService,
     private readonly schools: SchoolsService,
     private readonly audit: AuditService,
+    private readonly documents: DocumentsService,
   ) {}
 
   async listExams(actor: AuthenticatedUser, schoolId: string) {
@@ -194,6 +209,199 @@ export class ExamsService {
     });
 
     return { approvedCount: result.count };
+  }
+
+  // Every (examSubject, section) combo a teacher is actually responsible
+  // for, derived purely from their own TeacherAssignment rows — never from
+  // anything the frontend sends. A School/Super Admin has no Teacher
+  // profile and gets an empty list here, same as every other
+  // teacher-scoped query in this codebase.
+  async listMyExams(actor: AuthenticatedUser) {
+    const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id } });
+    if (!teacher) return [];
+
+    const assignments = await this.prisma.teacherAssignment.findMany({
+      where: { teacherId: teacher.id },
+      include: { section: { include: { class: true } }, subject: true, academicYear: true },
+    });
+
+    const rows = [];
+    for (const a of assignments) {
+      const examSubjects = await this.prisma.examSubject.findMany({
+        where: { classId: a.section.classId, subjectId: a.subjectId, exam: { academicYearId: a.academicYearId } },
+        include: { exam: true },
+      });
+      for (const es of examSubjects) {
+        const submission = await this.prisma.resultSubmission.findUnique({
+          where: { examSubjectId_sectionId: { examSubjectId: es.id, sectionId: a.sectionId } },
+        });
+        rows.push({
+          examSubjectId: es.id,
+          examId: es.exam.id,
+          examName: es.exam.name,
+          examType: es.exam.type,
+          schoolId: a.schoolId,
+          academicYearId: a.academicYearId,
+          academicYearName: a.academicYear.name,
+          classId: a.section.classId,
+          className: a.section.class.name,
+          sectionId: a.sectionId,
+          sectionName: a.section.name,
+          subjectId: a.subjectId,
+          subjectName: a.subject.name,
+          examDate: es.examDate,
+          maxMarks: es.maxMarks,
+          paperStatus: submission?.paperStatus ?? null,
+          resultsStatus: submission?.status ?? "DRAFT",
+          lastUpdated: submission?.updatedAt ?? es.createdAt,
+        });
+      }
+    }
+    return rows;
+  }
+
+  // Upload (or replace) the exam paper for one (examSubject, section). The
+  // same endpoint backs both "Save Draft" and "Submit Exam Paper" — `submit`
+  // decides which; a draft paper is never visible to the Admin's Exam
+  // Papers list (see listExamPapers' status filter / the frontend only
+  // rendering submitted ones there).
+  async uploadExamPaper(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    examSubjectId: string,
+    sectionId: string,
+    file: Express.Multer.File,
+    notes: string | undefined,
+    submit: boolean,
+  ) {
+    const examSubject = await this.getExamSubjectInSchoolOrThrow(schoolId, examSubjectId);
+    await this.assertCanAccessSectionForSubject(actor, schoolId, sectionId, examSubject.subjectId, examSubject.exam.academicYearId);
+    await this.assertSectionBelongsToClass(sectionId, examSubject.classId);
+
+    const submission = await this.getOrCreateSubmission(examSubjectId, sectionId);
+    await this.documents.uploadResultSubmissionPaper(actor, schoolId, submission.id, file);
+
+    const updated = await this.prisma.resultSubmission.update({
+      where: { id: submission.id },
+      data: {
+        notes: notes ?? submission.notes,
+        paperStatus: submit ? "SUBMITTED" : "DRAFT",
+        paperSubmittedByUserId: submit ? actor.id : submission.paperSubmittedByUserId,
+        paperSubmittedAt: submit ? new Date() : submission.paperSubmittedAt,
+      },
+    });
+
+    if (submit) {
+      await this.audit.record({
+        actor,
+        organizationId: actor.organizationId,
+        schoolId,
+        action: AuditAction.EXAM_PAPER_UPLOADED,
+        module: AuditModuleName.RESULTS,
+        resourceType: "ResultSubmission",
+        resourceId: submission.id,
+        after: { examSubjectId, sectionId, fileName: file.originalname },
+      });
+    }
+
+    return this.getExamPaper(actor, schoolId, examSubjectId, sectionId, updated);
+  }
+
+  async getExamPaper(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    examSubjectId: string,
+    sectionId: string,
+    knownSubmission?: { id: string; paperStatus: string | null; paperSubmittedByUserId: string | null; paperSubmittedAt: Date | null; notes: string | null },
+  ) {
+    const examSubject = await this.getExamSubjectInSchoolOrThrow(schoolId, examSubjectId);
+    await this.assertCanAccessSectionForSubject(actor, schoolId, sectionId, examSubject.subjectId, examSubject.exam.academicYearId);
+
+    const submission =
+      knownSubmission ??
+      (await this.prisma.resultSubmission.findUnique({ where: { examSubjectId_sectionId: { examSubjectId, sectionId } } }));
+
+    if (!submission) {
+      return { paperStatus: null, notes: null, paperSubmittedByUserId: null, paperSubmittedAt: null, file: null };
+    }
+
+    const file = await this.documents.getResultSubmissionPaper(submission.id);
+    return {
+      paperStatus: submission.paperStatus,
+      notes: submission.notes,
+      paperSubmittedByUserId: submission.paperSubmittedByUserId,
+      paperSubmittedAt: submission.paperSubmittedAt,
+      file,
+    };
+  }
+
+  // Admin-facing "Exam Papers" list — org-wide when filters.schoolId is
+  // omitted and the actor has no schoolIds of their own (Super/Org Admin),
+  // otherwise scoped exactly like every other admin list in this codebase.
+  async listExamPapers(actor: AuthenticatedUser, filters: ExamPaperListFilters) {
+    const schoolIds = await this.resolveViewpointSchoolIds(actor, filters.schoolId);
+
+    const where: Prisma.ResultSubmissionWhereInput = {
+      AND: [
+        schoolIds ? { examSubject: { exam: { schoolId: { in: schoolIds } } } } : { examSubject: { exam: { school: { organizationId: actor.organizationId! } } } },
+        filters.academicYearId ? { examSubject: { exam: { academicYearId: filters.academicYearId } } } : {},
+        filters.examId ? { examSubject: { examId: filters.examId } } : {},
+        filters.classId ? { examSubject: { classId: filters.classId } } : {},
+        filters.subjectId ? { examSubject: { subjectId: filters.subjectId } } : {},
+        filters.sectionId ? { sectionId: filters.sectionId } : {},
+        filters.status ? { paperStatus: filters.status } : { paperStatus: { not: null } },
+        filters.dateFrom ? { paperSubmittedAt: { gte: new Date(filters.dateFrom) } } : {},
+        filters.dateTo ? { paperSubmittedAt: { lte: new Date(filters.dateTo) } } : {},
+      ],
+    };
+
+    const submissions = await this.prisma.resultSubmission.findMany({
+      where,
+      include: {
+        section: { include: { class: true } },
+        examSubject: { include: { exam: { include: { school: true, academicYear: true } }, subject: true } },
+      },
+      orderBy: { paperSubmittedAt: "desc" },
+    });
+
+    const rows = await Promise.all(
+      submissions.map(async (s) => {
+        const assignment = await this.prisma.teacherAssignment.findFirst({
+          where: { sectionId: s.sectionId, subjectId: s.examSubject.subjectId, academicYearId: s.examSubject.exam.academicYearId },
+          include: { teacher: true },
+        });
+        const file = await this.documents.getResultSubmissionPaper(s.id);
+        return {
+          resultSubmissionId: s.id,
+          examId: s.examSubject.exam.id,
+          examName: s.examSubject.exam.name,
+          schoolId: s.examSubject.exam.schoolId,
+          schoolName: s.examSubject.exam.school.name,
+          academicYearName: s.examSubject.exam.academicYear.name,
+          className: s.section.class.name,
+          sectionId: s.sectionId,
+          sectionName: s.section.name,
+          subjectName: s.examSubject.subject.name,
+          teacherId: assignment?.teacherId ?? null,
+          teacherName: assignment ? `${assignment.teacher.firstName} ${assignment.teacher.lastName}` : null,
+          examDate: s.examSubject.examDate,
+          paperStatus: s.paperStatus,
+          paperSubmittedAt: s.paperSubmittedAt,
+          file,
+        };
+      }),
+    );
+
+    return filters.teacherId ? rows.filter((r) => r.teacherId === filters.teacherId) : rows;
+  }
+
+  private async resolveViewpointSchoolIds(actor: AuthenticatedUser, schoolId?: string): Promise<string[] | undefined> {
+    if (schoolId) {
+      await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+      return [schoolId];
+    }
+    if (actor.schoolIds.length > 0) return actor.schoolIds;
+    return undefined;
   }
 
   // The per-(examSubject, section) submission row — created lazily the first

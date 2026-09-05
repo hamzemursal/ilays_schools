@@ -717,6 +717,80 @@ export interface ResultsForSection {
   students: ResultRow[];
 }
 
+export type ExamPaperStatus = "DRAFT" | "SUBMITTED";
+export type ResultSubmissionStatus = "DRAFT" | "SUBMITTED" | "NEEDS_CORRECTION" | "APPROVED" | "PUBLISHED";
+
+export interface MyExamRow {
+  examSubjectId: string;
+  examId: string;
+  examName: string;
+  examType: string;
+  schoolId: string;
+  academicYearId: string;
+  academicYearName: string;
+  classId: string;
+  className: string;
+  sectionId: string;
+  sectionName: string;
+  subjectId: string;
+  subjectName: string;
+  examDate: string | null;
+  maxMarks: number;
+  paperStatus: ExamPaperStatus | null;
+  resultsStatus: ResultSubmissionStatus;
+  lastUpdated: string;
+}
+
+export interface ExamPaperFile {
+  id: string;
+  fileName: string | null;
+  mimeType: string;
+  sizeBytes: number;
+  uploadedByUserId: string;
+  uploadedAt: string;
+  url: string;
+}
+
+export interface ExamPaperDetail {
+  paperStatus: ExamPaperStatus | null;
+  notes: string | null;
+  paperSubmittedByUserId: string | null;
+  paperSubmittedAt: string | null;
+  file: ExamPaperFile | null;
+}
+
+export interface ExamPaperListRow {
+  resultSubmissionId: string;
+  examId: string;
+  examName: string;
+  schoolId: string;
+  schoolName: string;
+  academicYearName: string;
+  className: string;
+  sectionId: string;
+  sectionName: string;
+  subjectName: string;
+  teacherId: string | null;
+  teacherName: string | null;
+  examDate: string | null;
+  paperStatus: ExamPaperStatus | null;
+  paperSubmittedAt: string | null;
+  file: ExamPaperFile | null;
+}
+
+export interface ExamPaperListFilters {
+  schoolId?: string;
+  academicYearId?: string;
+  examId?: string;
+  classId?: string;
+  sectionId?: string;
+  subjectId?: string;
+  teacherId?: string;
+  status?: ExamPaperStatus;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
 export interface FeeStructure {
   id: string;
   name: string;
@@ -1736,6 +1810,33 @@ export const api = {
     request<ResultsForSection>(
       `/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/results`,
       { method: "POST", body: { entries }, accessToken },
+    ),
+
+  listMyExams: (accessToken: string) => request<MyExamRow[]>("/my-exams", { accessToken }),
+  getExamPaper: (accessToken: string, schoolId: string, examSubjectId: string, sectionId: string) =>
+    request<ExamPaperDetail>(`/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/paper`, { accessToken }),
+  uploadExamPaper: (
+    accessToken: string,
+    schoolId: string,
+    examSubjectId: string,
+    sectionId: string,
+    file: File,
+    notes: string | undefined,
+    submit: boolean,
+  ) =>
+    uploadFile<ExamPaperDetail>(
+      `/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/paper`,
+      file,
+      "file",
+      accessToken,
+      { ...(notes ? { notes } : {}), submit: String(submit) },
+    ),
+  listExamPapers: (accessToken: string, filters: ExamPaperListFilters) =>
+    request<ExamPaperListRow[]>(
+      filters.schoolId
+        ? `/schools/${filters.schoolId}/exam-papers${auditLogQs({ ...filters, schoolId: undefined })}`
+        : `/exam-papers${auditLogQs(filters)}`,
+      { accessToken },
     ),
 
   listFeeStructures: (accessToken: string, schoolId: string) =>

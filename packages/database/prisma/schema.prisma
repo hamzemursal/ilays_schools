@@ -614,6 +614,11 @@ enum ResultSubmissionStatus {
   PUBLISHED
 }
 
+enum ExamPaperStatus {
+  DRAFT
+  SUBMITTED
+}
+
 model ResultSubmission {
   id            String      @id @default(uuid())
   examSubjectId String
@@ -627,6 +632,16 @@ model ResultSubmission {
   // during review — distinct from returnReason, which is the Admin's note
   // back to the teacher.
   notes String?
+
+  // The exam paper's own small lifecycle — independent of `status` above,
+  // which tracks the *results* pipeline. Null means no paper has been
+  // uploaded yet; the actual file lives in MediaFile
+  // (ownerType=RESULT_SUBMISSION, ownerId=this row's id), "latest wins" like
+  // a profile photo — re-uploading replaces which file paperStatus/paper*
+  // describe, without deleting the older MediaFile rows.
+  paperStatus            ExamPaperStatus?
+  paperSubmittedByUserId String?
+  paperSubmittedAt       DateTime?
 
   submittedByUserId String?
   submittedAt       DateTime?

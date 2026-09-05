@@ -315,6 +315,7 @@ export class DocumentsService {
         ownerType: "RESULT_SUBMISSION",
         ownerId: resultSubmissionId,
         kind: "DOCUMENT",
+        label: file.originalname || null,
         storageKey,
         mimeType: file.mimetype,
         sizeBytes: file.size,
@@ -335,6 +336,7 @@ export class DocumentsService {
     if (!latest) return null;
     return {
       id: latest.id,
+      fileName: latest.label,
       mimeType: latest.mimeType,
       sizeBytes: latest.sizeBytes,
       uploadedByUserId: latest.uploadedByUserId,

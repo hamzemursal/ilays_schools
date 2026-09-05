@@ -726,12 +726,66 @@ export interface ResultSubmissionInfo {
   publishedAt: string | null;
 }
 
+export interface ResultsSectionContext {
+  examId: string;
+  examName: string;
+  examType: string;
+  academicYearId: string;
+  academicYearName: string;
+  className: string;
+  sectionName: string;
+  subjectName: string;
+  examDate: string | null;
+  teacherName: string | null;
+}
+
 export interface ResultsForSection {
+  context: ResultsSectionContext;
   maxMarks: number;
   students: ResultRow[];
   completedCount: number;
   missingCount: number;
+  average: number | null;
+  highest: number | null;
+  lowest: number | null;
   submission: ResultSubmissionInfo;
+}
+
+export interface ResultSubmissionListRow {
+  resultSubmissionId: string;
+  examSubjectId: string;
+  examId: string;
+  examName: string;
+  schoolId: string;
+  schoolName: string;
+  academicYearId: string;
+  academicYearName: string;
+  classId: string;
+  className: string;
+  sectionId: string;
+  sectionName: string;
+  subjectId: string;
+  subjectName: string;
+  teacherId: string | null;
+  teacherName: string | null;
+  status: ResultSubmissionStatus;
+  studentCount: number;
+  completedCount: number;
+  missingCount: number;
+  submittedAt: string | null;
+}
+
+export interface ResultSubmissionListFilters {
+  schoolId?: string;
+  academicYearId?: string;
+  examId?: string;
+  classId?: string;
+  sectionId?: string;
+  subjectId?: string;
+  teacherId?: string;
+  status?: ResultSubmissionStatus;
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 export type ExamPaperStatus = "DRAFT" | "SUBMITTED";
@@ -1833,6 +1887,24 @@ export const api = {
       method: "POST",
       accessToken,
     }),
+  returnResultsForCorrection: (accessToken: string, schoolId: string, examSubjectId: string, sectionId: string, reason: string) =>
+    request<ResultsForSection>(`/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/return`, {
+      method: "POST",
+      body: { reason },
+      accessToken,
+    }),
+  approveResultsSubmission: (accessToken: string, schoolId: string, examSubjectId: string, sectionId: string) =>
+    request<ResultsForSection>(`/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/approve`, {
+      method: "POST",
+      accessToken,
+    }),
+  listResultSubmissions: (accessToken: string, filters: ResultSubmissionListFilters) =>
+    request<ResultSubmissionListRow[]>(
+      filters.schoolId
+        ? `/schools/${filters.schoolId}/results-review${auditLogQs({ ...filters, schoolId: undefined })}`
+        : `/results-review${auditLogQs(filters)}`,
+      { accessToken },
+    ),
 
   listMyExams: (accessToken: string) => request<MyExamRow[]>("/my-exams", { accessToken }),
   getExamPaper: (accessToken: string, schoolId: string, examSubjectId: string, sectionId: string) =>

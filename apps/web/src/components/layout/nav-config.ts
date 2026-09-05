@@ -19,6 +19,7 @@ import {
   Award,
   KeyRound,
   Milestone,
+  ClipboardList,
 } from "lucide-react";
 import type { Profile } from "@/lib/api";
 
@@ -70,6 +71,12 @@ export function schoolNavItems(user: Profile, schoolId: string): NavItem[] {
   if (has("results.view") && !user.roles.includes("TEACHER")) {
     items.push({ label: "Exam Papers", href: `/schools/${schoolId}/exam-papers`, icon: Award });
   }
+  // Return/Approve requires results.approve specifically — a plain
+  // results.view (no approve) can't act on anything here, so it isn't
+  // worth a nav entry for that narrower audience.
+  if (has("results.approve") && !user.roles.includes("TEACHER")) {
+    items.push({ label: "Results Review", href: `/schools/${schoolId}/results-review`, icon: ClipboardList });
+  }
   if (has("fees.manage") || has("payments.record")) {
     items.push({ label: "Finance", href: `/schools/${schoolId}/finance`, icon: Wallet });
   }
@@ -118,6 +125,9 @@ export function orgNavItems(user: Profile): NavItem[] {
   // Admin's equivalent is schoolNavItems' own per-school "Exam Papers" entry.
   if (user.permissions.includes("schools.view") && user.permissions.includes("results.view")) {
     items.push({ label: "Exam Papers", href: "/exam-papers", icon: Award });
+  }
+  if (user.permissions.includes("schools.view") && user.permissions.includes("results.approve")) {
+    items.push({ label: "Results Review", href: "/results-review", icon: ClipboardList });
   }
   return items;
 }

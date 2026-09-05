@@ -4,6 +4,7 @@ import { ExamsService } from "./exams.service";
 import { CreateExamDto } from "./dto/create-exam.dto";
 import { CreateExamSubjectDto } from "./dto/create-exam-subject.dto";
 import { EnterMarksDto } from "./dto/enter-marks.dto";
+import { ReturnForCorrectionDto } from "./dto/return-for-correction.dto";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { RequirePermissions } from "../auth/decorators/require-permissions.decorator";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
@@ -80,13 +81,26 @@ export class ExamsController {
   }
 
   @RequirePermissions("results.approve")
-  @Post(":examId/subjects/:examSubjectId/approve")
+  @Post(":examId/subjects/:examSubjectId/sections/:sectionId/return")
+  returnForCorrection(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("examSubjectId") examSubjectId: string,
+    @Param("sectionId") sectionId: string,
+    @Body() dto: ReturnForCorrectionDto,
+  ) {
+    return this.exams.returnForCorrection(user, schoolId, examSubjectId, sectionId, dto);
+  }
+
+  @RequirePermissions("results.approve")
+  @Post(":examId/subjects/:examSubjectId/sections/:sectionId/approve")
   approve(
     @CurrentUser() user: AuthenticatedUser,
     @Param("schoolId") schoolId: string,
     @Param("examSubjectId") examSubjectId: string,
+    @Param("sectionId") sectionId: string,
   ) {
-    return this.exams.approveResults(user, schoolId, examSubjectId);
+    return this.exams.approveSubmission(user, schoolId, examSubjectId, sectionId);
   }
 
   @RequirePermissions("results.enter")

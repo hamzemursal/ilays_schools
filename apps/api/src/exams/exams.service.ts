@@ -9,6 +9,7 @@ import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateExamDto } from "./dto/create-exam.dto";
 import { CreateExamSubjectDto } from "./dto/create-exam-subject.dto";
 import { EnterMarksDto } from "./dto/enter-marks.dto";
+import { ReturnForCorrectionDto } from "./dto/return-for-correction.dto";
 
 export interface ExamPaperListFilters {
   schoolId?: string;
@@ -19,6 +20,19 @@ export interface ExamPaperListFilters {
   subjectId?: string;
   teacherId?: string;
   status?: "DRAFT" | "SUBMITTED";
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export interface ResultSubmissionListFilters {
+  schoolId?: string;
+  academicYearId?: string;
+  examId?: string;
+  classId?: string;
+  sectionId?: string;
+  subjectId?: string;
+  teacherId?: string;
+  status?: "DRAFT" | "SUBMITTED" | "NEEDS_CORRECTION" | "APPROVED" | "PUBLISHED";
   dateFrom?: string;
   dateTo?: string;
 }
@@ -109,6 +123,14 @@ export class ExamsService {
       where: { examSubjectId_sectionId: { examSubjectId, sectionId } },
     });
 
+    const [section, assignment] = await Promise.all([
+      this.prisma.section.findUnique({ where: { id: sectionId } }),
+      this.prisma.teacherAssignment.findFirst({
+        where: { sectionId, subjectId: examSubject.subjectId, academicYearId: examSubject.exam.academicYearId },
+        include: { teacher: true },
+      }),
+    ]);
+
     // No dedicated grading-scale system exists in this codebase (checked
     // during Phase 1 inspection) — percentage is plain arithmetic, not a
     // grading-policy decision, and matches exactly what the Student/Parent
@@ -136,12 +158,31 @@ export class ExamsService {
     );
 
     const completedCount = students.filter((s) => s.hasMark).length;
+    const marks = students.map((s) => s.marksObtained).filter((m): m is Prisma.Decimal => m !== null).map((m) => Number(m));
+    const average = marks.length > 0 ? Math.round((marks.reduce((a, b) => a + b, 0) / marks.length) * 100) / 100 : null;
+    const highest = marks.length > 0 ? Math.max(...marks) : null;
+    const lowest = marks.length > 0 ? Math.min(...marks) : null;
 
     return {
+      context: {
+        examId: examSubject.exam.id,
+        examName: examSubject.exam.name,
+        examType: examSubject.exam.type,
+        academicYearId: examSubject.exam.academicYearId,
+        academicYearName: examSubject.exam.academicYear.name,
+        className: examSubject.class.name,
+        sectionName: section?.name ?? "",
+        subjectName: examSubject.subject.name,
+        examDate: examSubject.examDate,
+        teacherName: assignment ? `${assignment.teacher.firstName} ${assignment.teacher.lastName}` : null,
+      },
       maxMarks: examSubject.maxMarks,
       students,
       completedCount,
       missingCount: students.length - completedCount,
+      average,
+      highest,
+      lowest,
       submission: submission
         ? {
             status: submission.status,
@@ -280,13 +321,63 @@ export class ExamsService {
     return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
   }
 
-  async approveResults(actor: AuthenticatedUser, schoolId: string, examSubjectId: string) {
+  // Section-scoped — replaces the earlier whole-ExamSubject approve (never
+  // used by any frontend, confirmed before removing it). That version could
+  // approve a section whose teacher hadn't even submitted yet just because
+  // a sibling section had; this one only ever acts on the one submission
+  // it's given, and only once it's actually in the SUBMITTED state.
+  async returnForCorrection(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    examSubjectId: string,
+    sectionId: string,
+    dto: ReturnForCorrectionDto,
+  ) {
+    const examSubject = await this.getExamSubjectInSchoolOrThrow(schoolId, examSubjectId);
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    await this.getExamSubjectInSchoolOrThrow(schoolId, examSubjectId);
+    await this.assertSectionBelongsToClass(sectionId, examSubject.classId);
 
-    const result = await this.prisma.result.updateMany({
-      where: { examSubjectId, status: "ENTERED" },
-      data: { status: "APPROVED", approvedByUserId: actor.id },
+    const submission = await this.prisma.resultSubmission.findUnique({
+      where: { examSubjectId_sectionId: { examSubjectId, sectionId } },
+    });
+    if (!submission || submission.status !== "SUBMITTED") {
+      throw new BadRequestException("Only a submitted result set waiting for review can be returned");
+    }
+
+    await this.prisma.resultSubmission.update({
+      where: { id: submission.id },
+      data: { status: "NEEDS_CORRECTION", returnedByUserId: actor.id, returnedAt: new Date(), returnReason: dto.reason },
+    });
+
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId,
+      action: AuditAction.RESULTS_RETURNED,
+      module: AuditModuleName.RESULTS,
+      resourceType: "ResultSubmission",
+      resourceId: submission.id,
+      after: { examSubjectId, sectionId, reason: dto.reason },
+    });
+
+    return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
+  }
+
+  async approveSubmission(actor: AuthenticatedUser, schoolId: string, examSubjectId: string, sectionId: string) {
+    const examSubject = await this.getExamSubjectInSchoolOrThrow(schoolId, examSubjectId);
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    await this.assertSectionBelongsToClass(sectionId, examSubject.classId);
+
+    const submission = await this.prisma.resultSubmission.findUnique({
+      where: { examSubjectId_sectionId: { examSubjectId, sectionId } },
+    });
+    if (!submission || submission.status !== "SUBMITTED") {
+      throw new BadRequestException("Only a submitted result set waiting for review can be approved");
+    }
+
+    await this.prisma.resultSubmission.update({
+      where: { id: submission.id },
+      data: { status: "APPROVED", approvedByUserId: actor.id, approvedAt: new Date() },
     });
 
     await this.audit.record({
@@ -295,12 +386,85 @@ export class ExamsService {
       schoolId,
       action: AuditAction.RESULTS_APPROVED,
       module: AuditModuleName.RESULTS,
-      resourceType: "ExamSubject",
-      resourceId: examSubjectId,
-      after: { approvedCount: result.count },
+      resourceType: "ResultSubmission",
+      resourceId: submission.id,
+      after: { examSubjectId, sectionId },
     });
 
-    return { approvedCount: result.count };
+    return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
+  }
+
+  // Admin-facing "Results Review" list — same viewpoint-scoping convention
+  // as listExamPapers (and Transfers/Student Lifecycle before it): org-wide
+  // when filters.schoolId is omitted and the actor has no schoolIds of
+  // their own, otherwise scoped to their own school(s).
+  async listResultSubmissions(actor: AuthenticatedUser, filters: ResultSubmissionListFilters) {
+    const schoolIds = await this.resolveViewpointSchoolIds(actor, filters.schoolId);
+
+    const where: Prisma.ResultSubmissionWhereInput = {
+      AND: [
+        schoolIds
+          ? { examSubject: { exam: { schoolId: { in: schoolIds } } } }
+          : { examSubject: { exam: { school: { organizationId: actor.organizationId! } } } },
+        filters.academicYearId ? { examSubject: { exam: { academicYearId: filters.academicYearId } } } : {},
+        filters.examId ? { examSubject: { examId: filters.examId } } : {},
+        filters.classId ? { examSubject: { classId: filters.classId } } : {},
+        filters.subjectId ? { examSubject: { subjectId: filters.subjectId } } : {},
+        filters.sectionId ? { sectionId: filters.sectionId } : {},
+        filters.status ? { status: filters.status } : {},
+        filters.dateFrom ? { submittedAt: { gte: new Date(filters.dateFrom) } } : {},
+        filters.dateTo ? { submittedAt: { lte: new Date(filters.dateTo) } } : {},
+      ],
+    };
+
+    const submissions = await this.prisma.resultSubmission.findMany({
+      where,
+      include: {
+        section: { include: { class: true } },
+        examSubject: { include: { exam: { include: { school: true, academicYear: true } }, subject: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    const rows = await Promise.all(
+      submissions.map(async (s) => {
+        const assignment = await this.prisma.teacherAssignment.findFirst({
+          where: { sectionId: s.sectionId, subjectId: s.examSubject.subjectId, academicYearId: s.examSubject.exam.academicYearId },
+          include: { teacher: true },
+        });
+        const [activeCount, resultCount] = await Promise.all([
+          this.prisma.studentEnrollment.count({
+            where: { sectionId: s.sectionId, academicYearId: s.examSubject.exam.academicYearId, status: "ACTIVE" },
+          }),
+          this.prisma.result.count({ where: { resultSubmissionId: s.id } }),
+        ]);
+        return {
+          resultSubmissionId: s.id,
+          examSubjectId: s.examSubjectId,
+          examId: s.examSubject.exam.id,
+          examName: s.examSubject.exam.name,
+          schoolId: s.examSubject.exam.schoolId,
+          schoolName: s.examSubject.exam.school.name,
+          academicYearId: s.examSubject.exam.academicYearId,
+          academicYearName: s.examSubject.exam.academicYear.name,
+          classId: s.examSubject.classId,
+          className: s.section.class.name,
+          sectionId: s.sectionId,
+          sectionName: s.section.name,
+          subjectId: s.examSubject.subjectId,
+          subjectName: s.examSubject.subject.name,
+          teacherId: assignment?.teacherId ?? null,
+          teacherName: assignment ? `${assignment.teacher.firstName} ${assignment.teacher.lastName}` : null,
+          status: s.status,
+          studentCount: activeCount,
+          completedCount: resultCount,
+          missingCount: activeCount - resultCount,
+          submittedAt: s.submittedAt,
+        };
+      }),
+    );
+
+    return filters.teacherId ? rows.filter((r) => r.teacherId === filters.teacherId) : rows;
   }
 
   // Every (examSubject, section) combo a teacher is actually responsible
@@ -519,7 +683,7 @@ export class ExamsService {
   private async getExamSubjectInSchoolOrThrow(schoolId: string, examSubjectId: string) {
     const examSubject = await this.prisma.examSubject.findFirst({
       where: { id: examSubjectId, exam: { schoolId } },
-      include: { exam: true },
+      include: { exam: { include: { academicYear: true } }, class: true, subject: true },
     });
     if (!examSubject) throw new NotFoundException("Exam subject not found in this school");
     return examSubject;

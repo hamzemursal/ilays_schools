@@ -5,11 +5,12 @@ import { DocumentsModule } from "../documents/documents.module";
 import { ExamsController } from "./exams.controller";
 import { MyExamsController } from "./my-exams.controller";
 import { ExamPapersController } from "./exam-papers.controller";
+import { ResultsReviewController } from "./results-review.controller";
 import { ExamsService } from "./exams.service";
 
 @Module({
   imports: [SchoolsModule, AuditModule, DocumentsModule],
-  controllers: [ExamsController, MyExamsController, ExamPapersController],
+  controllers: [ExamsController, MyExamsController, ExamPapersController, ResultsReviewController],
   providers: [ExamsService],
 })
 export class ExamsModule {}

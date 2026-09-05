@@ -734,6 +734,8 @@ export interface ResultsSectionContext {
   examType: string;
   academicYearId: string;
   academicYearName: string;
+  schoolName: string;
+  schoolLogoUrl: string | null;
   className: string;
   sectionName: string;
   subjectName: string;

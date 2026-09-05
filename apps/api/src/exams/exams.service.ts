@@ -142,12 +142,13 @@ export class ExamsService {
       where: { examSubjectId_sectionId: { examSubjectId, sectionId } },
     });
 
-    const [section, assignment] = await Promise.all([
+    const [section, assignment, schoolLogoUrl] = await Promise.all([
       this.prisma.section.findUnique({ where: { id: sectionId } }),
       this.prisma.teacherAssignment.findFirst({
         where: { sectionId, subjectId: examSubject.subjectId, academicYearId: examSubject.exam.academicYearId },
         include: { teacher: true },
       }),
+      this.documents.tryGetPhotoUrl("SCHOOL", schoolId),
     ]);
 
     // No dedicated grading-scale system exists in this codebase (checked
@@ -189,6 +190,8 @@ export class ExamsService {
         examType: examSubject.exam.type,
         academicYearId: examSubject.exam.academicYearId,
         academicYearName: examSubject.exam.academicYear.name,
+        schoolName: examSubject.exam.school.name,
+        schoolLogoUrl,
         className: examSubject.class.name,
         sectionName: section?.name ?? "",
         subjectName: examSubject.subject.name,
@@ -783,7 +786,7 @@ export class ExamsService {
   private async getExamSubjectInSchoolOrThrow(schoolId: string, examSubjectId: string) {
     const examSubject = await this.prisma.examSubject.findFirst({
       where: { id: examSubjectId, exam: { schoolId } },
-      include: { exam: { include: { academicYear: true } }, class: true, subject: true },
+      include: { exam: { include: { academicYear: true, school: true } }, class: true, subject: true },
     });
     if (!examSubject) throw new NotFoundException("Exam subject not found in this school");
     return examSubject;

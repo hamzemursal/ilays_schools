@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
+import Link from "next/link";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type ResultsForSection } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -16,7 +17,7 @@ import { SubmitResultsDialog } from "@/features/exams/SubmitResultsDialog";
 import { ReturnForCorrectionDialog } from "@/features/exams/ReturnForCorrectionDialog";
 import { ApproveResultsDialog } from "@/features/exams/ApproveResultsDialog";
 import { PublishResultsDialog } from "@/features/exams/PublishResultsDialog";
-import { CheckCircle2, Megaphone, RotateCcw, Save, Send } from "lucide-react";
+import { CheckCircle2, Megaphone, Printer, RotateCcw, Save, Send } from "lucide-react";
 
 export default function ResultsPage({
   params,
@@ -167,7 +168,19 @@ export default function ResultsPage({
         ) : (
           <>
             <Card padding="none">
-              <CardHeader title={data.context.examName} description={data.context.examDate ? new Date(data.context.examDate).toLocaleDateString() : undefined} />
+              <CardHeader
+                title={data.context.examName}
+                description={data.context.examDate ? new Date(data.context.examDate).toLocaleDateString() : undefined}
+                actions={
+                  canApprove && (
+                    <Link href={`/schools/${schoolId}/exam-subjects/${examSubjectId}/sections/${sectionId}/print`} target="_blank">
+                      <Button size="sm" variant="outline" icon={<Printer className="size-3.5" />}>
+                        Print Result Sheet
+                      </Button>
+                    </Link>
+                  )
+                }
+              />
               <div className="flex flex-wrap items-center gap-2 border-t border-border p-5">
                 <Badge tone="accent">{data.context.subjectName}</Badge>
                 <Badge tone="neutral">Out of {data.maxMarks}</Badge>

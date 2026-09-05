@@ -52,8 +52,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-surface">
-      <aside className="hidden w-64 shrink-0 border-r border-border lg:block">
+    <div className="flex h-screen overflow-hidden bg-surface print:h-auto print:overflow-visible">
+      <aside className="hidden w-64 shrink-0 border-r border-border lg:block print:hidden">
         <Sidebar user={user} />
       </aside>
 
@@ -73,11 +73,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <Topbar onMenuClick={() => setDrawerOpen(true)} />
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden print:overflow-visible">
+        <div className="print:hidden">
+          <Topbar onMenuClick={() => setDrawerOpen(true)} />
+        </div>
         <SelectedChildProvider>
-          <main className="flex-1 overflow-y-auto">
-            <ChildSwitcher />
+          <main className="flex-1 overflow-y-auto print:overflow-visible">
+            <div className="print:hidden">
+              <ChildSwitcher />
+            </div>
             {children}
           </main>
         </SelectedChildProvider>

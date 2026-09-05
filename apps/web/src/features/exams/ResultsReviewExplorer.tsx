@@ -145,11 +145,12 @@ export function ResultsReviewExplorer({
                     <th className="px-5 py-2.5">Teacher</th>
                     <th className="px-5 py-2.5">Completed</th>
                     <th className="px-5 py-2.5">Status</th>
+                    <th className="px-5 py-2.5">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {rows.map((r) => (
-                    <tr key={r.resultSubmissionId} className="cursor-pointer hover:bg-surface-hover">
+                    <tr key={r.resultSubmissionId} className="hover:bg-surface-hover">
                       <td className="px-5 py-3 text-foreground">
                         <Link href={`/schools/${r.schoolId}/exam-subjects/${r.examSubjectId}/sections/${r.sectionId}/results`} className="block">
                           {r.examName}
@@ -167,6 +168,15 @@ export function ResultsReviewExplorer({
                       </td>
                       <td className="px-5 py-3">
                         <ResultsStatusBadge status={r.status} />
+                      </td>
+                      <td className="px-5 py-3">
+                        <Link
+                          href={`/schools/${r.schoolId}/exam-subjects/${r.examSubjectId}/sections/${r.sectionId}/print`}
+                          target="_blank"
+                          className="text-sm font-medium text-accent hover:underline"
+                        >
+                          Print
+                        </Link>
                       </td>
                     </tr>
                   ))}

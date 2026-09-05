@@ -153,6 +153,9 @@ export default function UploadExamPaperPage({ params }: { params: Promise<{ exam
               />
               <div className="space-y-4 pt-4">
                 <div
+                  role="button"
+                  tabIndex={0}
+                  aria-label={file ? `Selected file: ${file.name}. Click or press Enter to choose a different file.` : "Choose an exam paper file, or drag and drop it here"}
                   onDragOver={(e) => {
                     e.preventDefault();
                     setDragging(true);
@@ -164,7 +167,13 @@ export default function UploadExamPaperPage({ params }: { params: Promise<{ exam
                     validateAndSetFile(e.dataTransfer.files?.[0]);
                   }}
                   onClick={() => inputRef.current?.click()}
-                  className={`flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed p-8 text-center transition-colors ${
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      inputRef.current?.click();
+                    }
+                  }}
+                  className={`flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed p-8 text-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 ${
                     dragging ? "border-accent bg-accent-soft" : "border-border hover:border-accent"
                   }`}
                 >

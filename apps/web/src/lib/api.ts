@@ -705,16 +705,33 @@ export interface Exam {
 
 export interface ResultRow {
   enrollmentId: string;
+  studentId: string;
+  studentNumber: string;
   firstName: string;
   lastName: string;
   rollNumber: number;
+  photoUrl: string | null;
   marksObtained: string | null;
-  status: "ENTERED" | "APPROVED" | null;
+  percentage: number | null;
+  hasMark: boolean;
+}
+
+export interface ResultSubmissionInfo {
+  status: ResultSubmissionStatus;
+  notes: string | null;
+  submittedAt: string | null;
+  returnedAt: string | null;
+  returnReason: string | null;
+  approvedAt: string | null;
+  publishedAt: string | null;
 }
 
 export interface ResultsForSection {
   maxMarks: number;
   students: ResultRow[];
+  completedCount: number;
+  missingCount: number;
+  submission: ResultSubmissionInfo;
 }
 
 export type ExamPaperStatus = "DRAFT" | "SUBMITTED";
@@ -1811,6 +1828,11 @@ export const api = {
       `/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/results`,
       { method: "POST", body: { entries }, accessToken },
     ),
+  submitResultsForReview: (accessToken: string, schoolId: string, examSubjectId: string, sectionId: string) =>
+    request<ResultsForSection>(`/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/submit`, {
+      method: "POST",
+      accessToken,
+    }),
 
   listMyExams: (accessToken: string) => request<MyExamRow[]>("/my-exams", { accessToken }),
   getExamPaper: (accessToken: string, schoolId: string, examSubjectId: string, sectionId: string) =>

@@ -105,16 +105,54 @@ export class ExamsService {
       orderBy: { rollNumber: "asc" },
     });
 
+    const submission = await this.prisma.resultSubmission.findUnique({
+      where: { examSubjectId_sectionId: { examSubjectId, sectionId } },
+    });
+
+    // No dedicated grading-scale system exists in this codebase (checked
+    // during Phase 1 inspection) — percentage is plain arithmetic, not a
+    // grading-policy decision, and matches exactly what the Student/Parent
+    // Portal already computes for a published result (see
+    // StudentPortalService.getMyResults). A real letter-grade scale, if
+    // wanted, is a separate feature to design deliberately, not something to
+    // invent quietly here.
+    const students = await Promise.all(
+      enrollments.map(async (e) => {
+        const result = e.results[0];
+        const photoUrl = await this.documents.tryGetPhotoUrl("STUDENT", e.studentId);
+        return {
+          enrollmentId: e.id,
+          studentId: e.studentId,
+          studentNumber: e.studentNumber,
+          firstName: e.student.firstName,
+          lastName: e.student.lastName,
+          rollNumber: e.rollNumber,
+          photoUrl,
+          marksObtained: result?.marksObtained ?? null,
+          percentage: result ? Math.round((Number(result.marksObtained) / examSubject.maxMarks) * 1000) / 10 : null,
+          hasMark: !!result,
+        };
+      }),
+    );
+
+    const completedCount = students.filter((s) => s.hasMark).length;
+
     return {
       maxMarks: examSubject.maxMarks,
-      students: enrollments.map((e) => ({
-        enrollmentId: e.id,
-        firstName: e.student.firstName,
-        lastName: e.student.lastName,
-        rollNumber: e.rollNumber,
-        marksObtained: e.results[0]?.marksObtained ?? null,
-        status: e.results[0]?.status ?? null,
-      })),
+      students,
+      completedCount,
+      missingCount: students.length - completedCount,
+      submission: submission
+        ? {
+            status: submission.status,
+            notes: submission.notes,
+            submittedAt: submission.submittedAt,
+            returnedAt: submission.returnedAt,
+            returnReason: submission.returnReason,
+            approvedAt: submission.approvedAt,
+            publishedAt: submission.publishedAt,
+          }
+        : { status: "DRAFT" as const, notes: null, submittedAt: null, returnedAt: null, returnReason: null, approvedAt: null, publishedAt: null },
     };
   }
 
@@ -148,12 +186,18 @@ export class ExamsService {
       }
     }
 
-    const existing = await this.prisma.result.findMany({
-      where: { examSubjectId, enrollmentId: { in: enrollmentIds } },
+    // The submission's own status is the single source of truth for whether
+    // marks can still be edited — DRAFT (nothing submitted yet) and
+    // NEEDS_CORRECTION (an Admin explicitly reopened it) are the only
+    // editable states. Result's own legacy status field is never consulted
+    // here anymore (see Phase 2's migration notes on why it's still around).
+    const existingSubmission = await this.prisma.resultSubmission.findUnique({
+      where: { examSubjectId_sectionId: { examSubjectId, sectionId } },
     });
-    const approvedIds = existing.filter((r) => r.status === "APPROVED").map((r) => r.enrollmentId);
-    if (approvedIds.length > 0) {
-      throw new BadRequestException(`These results are already approved and can't be edited: ${approvedIds.join(", ")}`);
+    if (existingSubmission && !["DRAFT", "NEEDS_CORRECTION"].includes(existingSubmission.status)) {
+      throw new BadRequestException(
+        `These results are ${existingSubmission.status.toLowerCase().replace("_", " ")} and can't be edited right now.`,
+      );
     }
 
     const submission = await this.getOrCreateSubmission(examSubjectId, sectionId);
@@ -183,6 +227,54 @@ export class ExamsService {
       resourceType: "ExamSubject",
       resourceId: examSubjectId,
       after: { enteredCount: dto.entries.length },
+    });
+
+    return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
+  }
+
+  // "Submit for Review" (from DRAFT) and "Resubmit for Review" (from
+  // NEEDS_CORRECTION, Part 9) are the same transition — the only thing that
+  // differs is which audit action gets recorded, so there is no separate
+  // resubmit method. Never trusts the frontend's own completed/missing
+  // count: every active enrollment in the section is re-checked here.
+  async submitForReview(actor: AuthenticatedUser, schoolId: string, examSubjectId: string, sectionId: string) {
+    const examSubject = await this.getExamSubjectInSchoolOrThrow(schoolId, examSubjectId);
+    await this.assertCanAccessSectionForSubject(actor, schoolId, sectionId, examSubject.subjectId, examSubject.exam.academicYearId);
+    await this.assertSectionBelongsToClass(sectionId, examSubject.classId);
+
+    const submission = await this.prisma.resultSubmission.findUnique({
+      where: { examSubjectId_sectionId: { examSubjectId, sectionId } },
+    });
+    if (!submission) {
+      throw new BadRequestException("Enter at least one mark before submitting for review");
+    }
+    if (!["DRAFT", "NEEDS_CORRECTION"].includes(submission.status)) {
+      throw new BadRequestException(`This submission is already ${submission.status.toLowerCase().replace("_", " ")}`);
+    }
+
+    const [activeCount, resultCount] = await Promise.all([
+      this.prisma.studentEnrollment.count({ where: { sectionId, academicYearId: examSubject.exam.academicYearId, status: "ACTIVE" } }),
+      this.prisma.result.count({ where: { examSubjectId, resultSubmissionId: submission.id } }),
+    ]);
+    if (resultCount < activeCount) {
+      throw new BadRequestException(`${activeCount - resultCount} student(s) still need marks before this can be submitted`);
+    }
+
+    const wasReturned = submission.status === "NEEDS_CORRECTION";
+    await this.prisma.resultSubmission.update({
+      where: { id: submission.id },
+      data: { status: "SUBMITTED", submittedByUserId: actor.id, submittedAt: new Date() },
+    });
+
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId,
+      action: wasReturned ? AuditAction.RESULTS_RESUBMITTED : AuditAction.RESULTS_SUBMITTED,
+      module: AuditModuleName.RESULTS,
+      resourceType: "ResultSubmission",
+      resourceId: submission.id,
+      after: { examSubjectId, sectionId, studentCount: activeCount },
     });
 
     return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);

@@ -68,6 +68,17 @@ export class ExamsController {
     return this.exams.enterMarks(user, schoolId, examSubjectId, sectionId, dto);
   }
 
+  @RequirePermissions("results.enter")
+  @Post(":examId/subjects/:examSubjectId/sections/:sectionId/submit")
+  submitForReview(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("examSubjectId") examSubjectId: string,
+    @Param("sectionId") sectionId: string,
+  ) {
+    return this.exams.submitForReview(user, schoolId, examSubjectId, sectionId);
+  }
+
   @RequirePermissions("results.approve")
   @Post(":examId/subjects/:examSubjectId/approve")
   approve(

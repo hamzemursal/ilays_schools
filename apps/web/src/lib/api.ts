@@ -700,6 +700,7 @@ export interface Exam {
     classId: string;
     subjectId: string;
     maxMarks: number;
+    examDate: string | null;
     class: { id: string; name: string };
     subject: { id: string; name: string };
   }[];
@@ -1889,10 +1890,22 @@ export const api = {
     accessToken: string,
     schoolId: string,
     examId: string,
-    body: { classId: string; subjectId: string; maxMarks?: number },
+    body: { classId: string; subjectId: string; maxMarks?: number; examDate?: string },
   ) =>
     request<Exam["examSubjects"][number]>(`/schools/${schoolId}/exams/${examId}/subjects`, {
       method: "POST",
+      body,
+      accessToken,
+    }),
+  updateExamSubject: (
+    accessToken: string,
+    schoolId: string,
+    examId: string,
+    examSubjectId: string,
+    body: { examDate?: string },
+  ) =>
+    request<Exam["examSubjects"][number]>(`/schools/${schoolId}/exams/${examId}/subjects/${examSubjectId}`, {
+      method: "PATCH",
       body,
       accessToken,
     }),
@@ -1931,6 +1944,12 @@ export const api = {
   publishResultsSubmission: (accessToken: string, schoolId: string, examSubjectId: string, sectionId: string) =>
     request<ResultsForSection>(`/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/publish`, {
       method: "POST",
+      accessToken,
+    }),
+  unpublishResultsSubmission: (accessToken: string, schoolId: string, examSubjectId: string, sectionId: string, reason: string) =>
+    request<ResultsForSection>(`/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/unpublish`, {
+      method: "POST",
+      body: { reason },
       accessToken,
     }),
   listResultSubmissions: (accessToken: string, filters: ResultSubmissionListFilters) =>

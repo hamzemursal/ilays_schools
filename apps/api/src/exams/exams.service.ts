@@ -9,8 +9,10 @@ import { NotificationsService } from "../notifications/notifications.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateExamDto } from "./dto/create-exam.dto";
 import { CreateExamSubjectDto } from "./dto/create-exam-subject.dto";
+import { UpdateExamSubjectDto } from "./dto/update-exam-subject.dto";
 import { EnterMarksDto } from "./dto/enter-marks.dto";
 import { ReturnForCorrectionDto } from "./dto/return-for-correction.dto";
+import { UnpublishResultsDto } from "./dto/unpublish-results.dto";
 
 export interface ExamPaperListFilters {
   schoolId?: string;
@@ -125,6 +127,42 @@ export class ExamsService {
       }
       throw error;
     }
+  }
+
+  // The "Add subject" form only ever collects class/subject/maxMarks — this
+  // is the one way to set or fix examDate afterward (e.g. it was left blank
+  // when the subject was scheduled). Deliberately narrow: class, subject,
+  // and maxMarks stay fixed once results may already reference this row.
+  async updateExamSubject(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    examId: string,
+    examSubjectId: string,
+    dto: UpdateExamSubjectDto,
+  ) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    await this.getExamInSchoolOrThrow(schoolId, examId);
+    const examSubject = await this.prisma.examSubject.findFirst({ where: { id: examSubjectId, examId } });
+    if (!examSubject) throw new NotFoundException("Exam subject not found in this exam");
+
+    const updated = await this.prisma.examSubject.update({
+      where: { id: examSubjectId },
+      data: { examDate: dto.examDate ? new Date(dto.examDate) : undefined },
+      include: { class: true, subject: true },
+    });
+
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId,
+      action: AuditAction.EXAM_SUBJECT_UPDATED,
+      module: AuditModuleName.ACADEMIC,
+      resourceType: "ExamSubject",
+      resourceId: examSubjectId,
+      after: { examDate: dto.examDate ?? null },
+    });
+
+    return updated;
   }
 
   async getResultsForSection(actor: AuthenticatedUser, schoolId: string, examSubjectId: string, sectionId: string) {
@@ -483,6 +521,61 @@ export class ExamsService {
       await this.notifications.notifyUser(teacherUserId, {
         title: "Results Published",
         body: `${examSubject.exam.name} · ${examSubject.class.name} · Section ${section?.name ?? ""} · ${examSubject.subject.name} — now visible to students and parents.`,
+        actionUrl: this.resultsUrl(schoolId, examSubjectId, sectionId),
+      });
+    }
+
+    return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
+  }
+
+  // The undo for publishSubmission — same reasoning in reverse: this is the
+  // one action that removes what a Student/Parent can currently see, so (like
+  // returnForCorrection) it requires a reason, which both the audit log and
+  // the teacher's notification carry. Deliberately reverts to APPROVED, not
+  // back through SUBMITTED — the results themselves aren't being questioned,
+  // only whether they should be visible yet; the Admin can re-publish
+  // immediately once ready, without making the teacher resubmit anything.
+  async unpublishSubmission(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    examSubjectId: string,
+    sectionId: string,
+    dto: UnpublishResultsDto,
+  ) {
+    const examSubject = await this.getExamSubjectInSchoolOrThrow(schoolId, examSubjectId);
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    await this.assertSectionBelongsToClass(sectionId, examSubject.classId);
+
+    const submission = await this.prisma.resultSubmission.findUnique({
+      where: { examSubjectId_sectionId: { examSubjectId, sectionId } },
+    });
+    if (!submission || submission.status !== "PUBLISHED") {
+      throw new BadRequestException("Only a published result set can be unpublished");
+    }
+
+    await this.prisma.resultSubmission.update({
+      where: { id: submission.id },
+      data: { status: "APPROVED" },
+    });
+
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId,
+      action: AuditAction.RESULTS_UNPUBLISHED,
+      module: AuditModuleName.RESULTS,
+      resourceType: "ResultSubmission",
+      resourceId: submission.id,
+      severity: "WARNING",
+      after: { examSubjectId, sectionId, reason: dto.reason },
+    });
+
+    const teacherUserId = await this.resolveResponsibleTeacherUserId(sectionId, examSubject.subjectId, examSubject.exam.academicYearId);
+    if (teacherUserId) {
+      const section = await this.prisma.section.findUnique({ where: { id: sectionId } });
+      await this.notifications.notifyUser(teacherUserId, {
+        title: "Results Unpublished",
+        body: `${examSubject.exam.name} · ${examSubject.class.name} · Section ${section?.name ?? ""} · ${examSubject.subject.name} — no longer visible to students and parents. ${dto.reason}`,
         actionUrl: this.resultsUrl(schoolId, examSubjectId, sectionId),
       });
     }

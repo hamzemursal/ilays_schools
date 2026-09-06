@@ -864,18 +864,41 @@ function ExamRow({
   const [classId, setClassId] = useState(classes[0]?.id ?? "");
   const [subjectId, setSubjectId] = useState(subjects[0]?.id ?? "");
   const [maxMarks, setMaxMarks] = useState("100");
+  const [examDate, setExamDate] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const { show } = useToast();
 
   async function onAddSubject(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
     try {
-      const examSubject = await api.createExamSubject(accessToken, schoolId, exam.id, { classId, subjectId, maxMarks: Number(maxMarks) });
+      const examSubject = await api.createExamSubject(accessToken, schoolId, exam.id, {
+        classId,
+        subjectId,
+        maxMarks: Number(maxMarks),
+        examDate: examDate || undefined,
+      });
       setExams((prev) => prev.map((ex) => (ex.id === exam.id ? { ...ex, examSubjects: [...ex.examSubjects, examSubject] } : ex)));
+      setExamDate("");
       show("Subject scheduled for this exam.");
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Failed to add subject");
+    }
+  }
+
+  async function onSaveDate(examSubjectId: string, newDate: string) {
+    try {
+      const updated = await api.updateExamSubject(accessToken, schoolId, exam.id, examSubjectId, { examDate: newDate || undefined });
+      setExams((prev) =>
+        prev.map((ex) =>
+          ex.id === exam.id ? { ...ex, examSubjects: ex.examSubjects.map((es) => (es.id === examSubjectId ? updated : es)) } : ex,
+        ),
+      );
+      setEditingId(null);
+      show("Exam date updated.");
+    } catch (err) {
+      show(err instanceof ApiError ? err.message : "Failed to update exam date");
     }
   }
 
@@ -885,11 +908,34 @@ function ExamRow({
         {exam.name} <span className="text-sm font-normal text-foreground-soft">· {exam.type}</span>
       </p>
 
-      <div className="mt-2 flex flex-wrap gap-2">
+      <div className="mt-2 space-y-2">
         {exam.examSubjects.map((es) => (
-          <Badge key={es.id} tone="accent">
-            {es.class.name} · {es.subject.name} · /{es.maxMarks}
-          </Badge>
+          <div key={es.id} className="flex flex-wrap items-center gap-2">
+            <Badge tone="accent">
+              {es.class.name} · {es.subject.name} · /{es.maxMarks}
+            </Badge>
+            {editingId === es.id ? (
+              <ExamDateEditor
+                initialDate={es.examDate}
+                onSave={(newDate) => onSaveDate(es.id, newDate)}
+                onCancel={() => setEditingId(null)}
+              />
+            ) : (
+              <>
+                <span className="text-sm text-foreground-muted">{es.examDate ? new Date(es.examDate).toLocaleDateString() : "No date set"}</span>
+                {canManage && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingId(es.id)}
+                    aria-label={`Edit exam date for ${es.subject.name}`}
+                    className="text-foreground-muted hover:text-accent"
+                  >
+                    <Pencil className="size-3.5" />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         ))}
         {exam.examSubjects.length === 0 && <span className="text-sm text-foreground-muted">No subjects scheduled yet.</span>}
       </div>
@@ -911,6 +957,7 @@ function ExamRow({
             ))}
           </Select>
           <Input type="number" min={1} value={maxMarks} onChange={(e) => setMaxMarks(e.target.value)} placeholder="Max marks" className="w-28" />
+          <Input type="date" value={examDate} onChange={(e) => setExamDate(e.target.value)} className="w-auto" aria-label="Exam date" />
           <Button type="submit" size="sm" variant="outline">
             Add subject
           </Button>
@@ -918,5 +965,28 @@ function ExamRow({
         </form>
       )}
     </Card>
+  );
+}
+
+function ExamDateEditor({
+  initialDate,
+  onSave,
+  onCancel,
+}: {
+  initialDate: string | null;
+  onSave: (newDate: string) => void;
+  onCancel: () => void;
+}) {
+  // <input type="date"> needs "YYYY-MM-DD" — trims the time-of-day ISO
+  // string the API returns down to just the date part it can display/edit.
+  const [value, setValue] = useState(initialDate ? initialDate.slice(0, 10) : "");
+  return (
+    <span className="flex items-center gap-1.5">
+      <Input type="date" value={value} onChange={(e) => setValue(e.target.value)} className="h-8 w-auto py-1 text-sm" autoFocus />
+      <Button size="sm" variant="ghost" icon={<Check className="size-3.5" />} onClick={() => onSave(value)} aria-label="Save" />
+      <button type="button" onClick={onCancel} className="text-sm text-foreground-muted hover:text-foreground">
+        Cancel
+      </button>
+    </span>
   );
 }

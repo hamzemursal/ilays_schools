@@ -1,10 +1,12 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Patch, Post, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { ExamsService } from "./exams.service";
 import { CreateExamDto } from "./dto/create-exam.dto";
 import { CreateExamSubjectDto } from "./dto/create-exam-subject.dto";
+import { UpdateExamSubjectDto } from "./dto/update-exam-subject.dto";
 import { EnterMarksDto } from "./dto/enter-marks.dto";
 import { ReturnForCorrectionDto } from "./dto/return-for-correction.dto";
+import { UnpublishResultsDto } from "./dto/unpublish-results.dto";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { RequirePermissions } from "../auth/decorators/require-permissions.decorator";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
@@ -44,6 +46,18 @@ export class ExamsController {
     @Body() dto: CreateExamSubjectDto,
   ) {
     return this.exams.createExamSubject(user, schoolId, examId, dto);
+  }
+
+  @RequirePermissions("results.approve")
+  @Patch(":examId/subjects/:examSubjectId")
+  updateSubject(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("examId") examId: string,
+    @Param("examSubjectId") examSubjectId: string,
+    @Body() dto: UpdateExamSubjectDto,
+  ) {
+    return this.exams.updateExamSubject(user, schoolId, examId, examSubjectId, dto);
   }
 
   @RequirePermissions("results.view")
@@ -112,6 +126,18 @@ export class ExamsController {
     @Param("sectionId") sectionId: string,
   ) {
     return this.exams.publishSubmission(user, schoolId, examSubjectId, sectionId);
+  }
+
+  @RequirePermissions("results.approve")
+  @Post(":examId/subjects/:examSubjectId/sections/:sectionId/unpublish")
+  unpublish(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("examSubjectId") examSubjectId: string,
+    @Param("sectionId") sectionId: string,
+    @Body() dto: UnpublishResultsDto,
+  ) {
+    return this.exams.unpublishSubmission(user, schoolId, examSubjectId, sectionId, dto);
   }
 
   @RequirePermissions("results.enter")

@@ -17,7 +17,8 @@ import { SubmitResultsDialog } from "@/features/exams/SubmitResultsDialog";
 import { ReturnForCorrectionDialog } from "@/features/exams/ReturnForCorrectionDialog";
 import { ApproveResultsDialog } from "@/features/exams/ApproveResultsDialog";
 import { PublishResultsDialog } from "@/features/exams/PublishResultsDialog";
-import { CheckCircle2, Megaphone, Printer, RotateCcw, Save, Send } from "lucide-react";
+import { UnpublishResultsDialog } from "@/features/exams/UnpublishResultsDialog";
+import { CheckCircle2, Megaphone, Printer, RotateCcw, Save, Send, Undo2 } from "lucide-react";
 
 export default function ResultsPage({
   params,
@@ -40,6 +41,8 @@ export default function ResultsPage({
   const [approving, setApproving] = useState(false);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [unpublishDialogOpen, setUnpublishDialogOpen] = useState(false);
+  const [unpublishing, setUnpublishing] = useState(false);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -57,6 +60,7 @@ export default function ResultsPage({
   const editable = !!data && (data.submission.status === "DRAFT" || data.submission.status === "NEEDS_CORRECTION");
   const canReview = canApprove && data?.submission.status === "SUBMITTED";
   const canPublish = canApprove && data?.submission.status === "APPROVED";
+  const canUnpublish = canApprove && data?.submission.status === "PUBLISHED";
 
   async function save(): Promise<ResultsForSection | null> {
     if (!accessToken || !data) return null;
@@ -141,6 +145,21 @@ export default function ResultsPage({
       setError(err instanceof ApiError ? err.message : "Failed to publish results");
     } finally {
       setPublishing(false);
+    }
+  }
+
+  async function confirmUnpublish(reason: string) {
+    if (!accessToken) return;
+    setUnpublishing(true);
+    setError(null);
+    try {
+      const updated = await api.unpublishResultsSubmission(accessToken, schoolId, examSubjectId, sectionId, reason);
+      setData(updated);
+      setUnpublishDialogOpen(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to undo publish");
+    } finally {
+      setUnpublishing(false);
     }
   }
 
@@ -286,6 +305,14 @@ export default function ResultsPage({
                 </Button>
               </div>
             )}
+
+            {canUnpublish && (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button variant="outline" icon={<Undo2 className="size-4" />} onClick={() => setUnpublishDialogOpen(true)}>
+                  Undo Publish
+                </Button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -338,6 +365,12 @@ export default function ResultsPage({
             loading={publishing}
             onConfirm={confirmPublish}
             onCancel={() => setPublishDialogOpen(false)}
+          />
+          <UnpublishResultsDialog
+            open={unpublishDialogOpen}
+            loading={unpublishing}
+            onConfirm={confirmUnpublish}
+            onCancel={() => setUnpublishDialogOpen(false)}
           />
         </>
       )}

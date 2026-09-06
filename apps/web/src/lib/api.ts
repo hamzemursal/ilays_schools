@@ -695,11 +695,15 @@ export interface Exam {
   name: string;
   type: ExamType;
   academicYearId: string;
+  startDate: string | null;
+  endDate: string | null;
+  description: string | null;
   examSubjects: {
     id: string;
     classId: string;
     subjectId: string;
     maxMarks: number;
+    passingMark: number | null;
     examDate: string | null;
     class: { id: string; name: string };
     subject: { id: string; name: string };
@@ -1884,8 +1888,22 @@ export const api = {
     request<AttendanceStatusForDate>(`/schools/${schoolId}/attendance/status${qs({ date })}`, { accessToken }),
 
   listExams: (accessToken: string, schoolId: string) => request<Exam[]>(`/schools/${schoolId}/exams`, { accessToken }),
-  createExam: (accessToken: string, schoolId: string, body: { academicYearId: string; name: string; type: ExamType }) =>
-    request<Exam>(`/schools/${schoolId}/exams`, { method: "POST", body, accessToken }),
+  createExam: (
+    accessToken: string,
+    schoolId: string,
+    body: {
+      academicYearId: string;
+      name: string;
+      type: ExamType;
+      startDate?: string;
+      endDate?: string;
+      description?: string;
+      examSubjects?: { classId: string; subjectId: string }[];
+      maxMarks?: number;
+      passingMark?: number;
+      examDate?: string;
+    },
+  ) => request<Exam>(`/schools/${schoolId}/exams`, { method: "POST", body, accessToken }),
   createExamSubject: (
     accessToken: string,
     schoolId: string,

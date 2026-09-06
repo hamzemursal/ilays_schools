@@ -575,6 +575,15 @@ model Exam {
   name String
   type ExamType
 
+  // The exam period as a whole — distinct from ExamSubject.examDate, which is
+  // the specific sitting date for one (class, subject) pair and is what
+  // actually drives the printed result sheet. Both optional, same as
+  // examDate always has been: plenty of real exams get scheduled before
+  // every date is nailed down.
+  startDate   DateTime? @db.Date
+  endDate     DateTime? @db.Date
+  description String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -594,7 +603,12 @@ model ExamSubject {
   subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
 
   maxMarks Int       @default(100)
-  examDate DateTime? @db.Date
+  // Stored, not enforced anywhere — this system has no pass/fail policy (see
+  // the Phase 8 print-sheet decision not to compute a pass rate), so this is
+  // configuration an admin can record, not a value anything currently
+  // derives a status from.
+  passingMark Int?
+  examDate    DateTime? @db.Date
 
   createdAt DateTime @default(now())
 

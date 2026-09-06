@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import {
   api,
@@ -10,7 +11,6 @@ import {
   type ClassWithSections,
   type Division,
   type Exam,
-  type ExamType,
   type Subject,
 } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -33,6 +33,7 @@ type Tab = (typeof TABS)[number];
 export default function AcademicStructurePage({ params }: { params: Promise<{ id: string }> }) {
   const { id: schoolId } = use(params);
   const { user, accessToken } = useAuth();
+  const searchParams = useSearchParams();
 
   const [divisions, setDivisions] = useState<Division[] | null>(null);
   const [years, setYears] = useState<AcademicYear[]>([]);
@@ -40,7 +41,8 @@ export default function AcademicStructurePage({ params }: { params: Promise<{ id
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("Years");
+  const initialTab = TABS.find((t) => t === searchParams.get("tab")) ?? "Years";
+  const [tab, setTab] = useState<Tab>(initialTab);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -768,29 +770,21 @@ function ExamsSection({
   setExams: (fn: (prev: Exam[]) => Exam[]) => void;
   canManage: boolean;
 }) {
-  const [name, setName] = useState("");
-  const [type, setType] = useState<ExamType>("MIDTERM");
-  const [academicYearId, setAcademicYearId] = useState(years[0]?.id ?? "");
-  const [formError, setFormError] = useState<string | null>(null);
-  const { show } = useToast();
-
-  async function onCreate(e: FormEvent) {
-    e.preventDefault();
-    setFormError(null);
-    try {
-      const exam = await api.createExam(accessToken, schoolId, { name, type, academicYearId });
-      setExams((prev) => [{ ...exam, examSubjects: [] }, ...prev]);
-      setName("");
-      show(`${exam.name} created.`);
-    } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Failed to create exam");
-    }
-  }
-
   return (
     <div className="space-y-5">
+      {canManage && years.length > 0 && (
+        <div className="flex justify-end">
+          <Link href={`/schools/${schoolId}/academic/exams/new`}>
+            <Button icon={<Plus className="size-4" />}>Create Exam</Button>
+          </Link>
+        </div>
+      )}
+
       {exams.length === 0 ? (
-        <EmptyState title="No exams yet" description="Set up an exam to start scheduling subjects for it." />
+        <EmptyState
+          title="No exams yet"
+          description={canManage ? "Create an exam to start scheduling classes and subjects for it." : "No exams have been scheduled yet."}
+        />
       ) : (
         <div className="space-y-3">
           {exams.map((exam) => (
@@ -806,39 +800,6 @@ function ExamsSection({
             />
           ))}
         </div>
-      )}
-
-      {canManage && years.length > 0 && (
-        <Card>
-          <h3 className="text-sm font-semibold text-foreground">Add exam</h3>
-          <form onSubmit={onCreate} className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
-            <FormField label="Year">
-              <Select value={academicYearId} onChange={(e) => setAcademicYearId(e.target.value)}>
-                {years.map((y) => (
-                  <option key={y.id} value={y.id}>
-                    {y.name}
-                  </option>
-                ))}
-              </Select>
-            </FormField>
-            <FormField label="Name" className="sm:col-span-2">
-              <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Midterm 2027" />
-            </FormField>
-            <FormField label="Type">
-              <Select value={type} onChange={(e) => setType(e.target.value as ExamType)}>
-                <option value="QUIZ">Quiz</option>
-                <option value="MIDTERM">Midterm</option>
-                <option value="FINAL">Final</option>
-                <option value="ASSIGNMENT">Assignment</option>
-                <option value="OTHER">Other</option>
-              </Select>
-            </FormField>
-            <div className="sm:col-span-4">
-              <Button type="submit">Add exam</Button>
-            </div>
-            {formError && <Alert tone="danger" className="sm:col-span-4">{formError}</Alert>}
-          </form>
-        </Card>
       )}
     </div>
   );

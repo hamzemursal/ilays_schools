@@ -82,10 +82,72 @@ export class ExamsService {
     const year = await this.prisma.academicYear.findFirst({ where: { id: dto.academicYearId, schoolId } });
     if (!year) throw new BadRequestException("That academic year does not belong to this school");
 
-    try {
-      return await this.prisma.exam.create({
-        data: { schoolId, academicYearId: dto.academicYearId, name: dto.name, type: dto.type },
+    // The wizard's bulk step: every pair must be a real ClassSubject
+    // relationship, not just a class and a subject that each independently
+    // belong to this school — the frontend already scopes its subject list
+    // to selected classes this way, but that's a convenience, not a trust
+    // boundary. Deduplicated up front so a pair appearing twice (e.g. the
+    // same subject shared by two selected classes, submitted once per
+    // class by mistake) can't violate ExamSubject's own unique constraint.
+    const pairs = dto.examSubjects ?? [];
+    const uniquePairs = Array.from(new Map(pairs.map((p) => [`${p.classId}:${p.subjectId}`, p])).values());
+
+    if (uniquePairs.length > 0) {
+      const validRelations = await this.prisma.classSubject.findMany({
+        where: {
+          OR: uniquePairs.map((p) => ({ classId: p.classId, subjectId: p.subjectId })),
+          class: { division: { schoolId } },
+        },
       });
+      const validKeys = new Set(validRelations.map((r) => `${r.classId}:${r.subjectId}`));
+      const invalid = uniquePairs.filter((p) => !validKeys.has(`${p.classId}:${p.subjectId}`));
+      if (invalid.length > 0) {
+        throw new BadRequestException("One or more selected subjects are not assigned to their selected class");
+      }
+    }
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const exam = await tx.exam.create({
+          data: {
+            schoolId,
+            academicYearId: dto.academicYearId,
+            name: dto.name,
+            type: dto.type,
+            startDate: dto.startDate ? new Date(dto.startDate) : undefined,
+            endDate: dto.endDate ? new Date(dto.endDate) : undefined,
+            description: dto.description,
+          },
+        });
+
+        // One batched insert, not one round trip per pair — "Select All"
+        // classes and subjects on a school with a large academic structure
+        // can easily mean 50-100+ pairs, and a sequential loop of individual
+        // creates was measured tripping Prisma's 5s interactive-transaction
+        // timeout well before that.
+        if (uniquePairs.length > 0) {
+          await tx.examSubject.createMany({
+            data: uniquePairs.map((pair) => ({
+              examId: exam.id,
+              classId: pair.classId,
+              subjectId: pair.subjectId,
+              maxMarks: dto.maxMarks ?? 100,
+              passingMark: dto.passingMark,
+              examDate: dto.examDate ? new Date(dto.examDate) : undefined,
+            })),
+            skipDuplicates: true,
+          });
+        }
+
+        return tx.exam.findUniqueOrThrow({
+          where: { id: exam.id },
+          include: { examSubjects: { include: { class: true, subject: true } } },
+        });
+        // Prisma's interactive-transaction default is 5s — comfortable now
+        // that subject creation is one batched insert instead of one round
+        // trip per pair, but a wider margin costs nothing against occasional
+        // Neon connection latency.
+      }, { timeout: 15000 });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("An exam with this name already exists for this academic year");

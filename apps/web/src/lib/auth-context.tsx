@@ -22,10 +22,60 @@ const AuthContext = createContext<AuthState | null>(null);
 // the margin, a clock skew, etc.), not the primary mechanism.
 const PROACTIVE_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
+// Each login session gets its own refresh-token cookie, named by sessionId
+// (see AuthController) — without this, a second tab logging into a
+// different account would silently overwrite the first tab's cookie, and
+// the first tab would eventually refresh into the second tab's identity.
+//
+// sessionStorage is genuinely per-tab (unlike localStorage or cookies), so
+// it's where a tab remembers *its own* current session id across a same-tab
+// reload. The localStorage mirror exists only so a brand-new tab with empty
+// sessionStorage can make one best-effort attempt to resume "whatever was
+// last active" — convenience for the ordinary single-session case — and is
+// never consulted again once a tab has resolved its own session id.
+const TAB_SESSION_KEY = "auth:sessionId";
+const LAST_ACTIVE_SESSION_KEY = "auth:lastActiveSessionId";
+
+function readInitialSessionId(): string | null {
+  try {
+    return window.sessionStorage.getItem(TAB_SESSION_KEY) ?? window.localStorage.getItem(LAST_ACTIVE_SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function persistSessionId(sessionId: string) {
+  try {
+    window.sessionStorage.setItem(TAB_SESSION_KEY, sessionId);
+    window.localStorage.setItem(LAST_ACTIVE_SESSION_KEY, sessionId);
+  } catch {
+    // Private browsing / storage disabled — the session id just won't
+    // survive a reload, same graceful degradation as before this change.
+  }
+}
+
+function clearSessionId(sessionId: string | null) {
+  try {
+    window.sessionStorage.removeItem(TAB_SESSION_KEY);
+    // Only un-seed the shared "last active" pointer if it still points at
+    // the session being cleared — a different, still-live tab may since
+    // have become the more relevant one to hand a brand-new tab.
+    if (sessionId && window.localStorage.getItem(LAST_ACTIVE_SESSION_KEY) === sessionId) {
+      window.localStorage.removeItem(LAST_ACTIVE_SESSION_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [user, setUser] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  // This tab's current login session id. A ref (not state) because nothing
+  // needs to re-render when it changes — every read of it happens inside an
+  // async callback right before an API call, never during render.
+  const sessionIdRef = useRef<string | null>(null);
 
   const loadProfile = useCallback(async (token: string) => {
     const profile = await api.me(token);
@@ -44,7 +94,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const p = (async () => {
       try {
-        const { accessToken: token } = await api.refresh();
+        const { accessToken: token, sessionId } = await api.refresh(sessionIdRef.current ?? undefined);
+        // Rotation issues a new sessionId every time — this tab must track
+        // the latest one, or its next refresh would present a now-dead
+        // cookie name and look like an expired session.
+        sessionIdRef.current = sessionId;
+        persistSessionId(sessionId);
         setAccessToken(token);
         await loadProfile(token);
         return token;
@@ -52,6 +107,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Refresh cookie is gone/expired/revoked — this session is truly
         // over. Clear state so the app's own "no user -> /login" redirect
         // takes it from here, instead of leaving a dead token around.
+        clearSessionId(sessionIdRef.current);
+        sessionIdRef.current = null;
         setAccessToken(null);
         setUser(null);
         return null;
@@ -75,6 +132,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (refreshedOnce.current) return;
     refreshedOnce.current = true;
 
+    sessionIdRef.current = readInitialSessionId();
     performRefresh().finally(() => setLoading(false));
   }, [performRefresh]);
 
@@ -99,7 +157,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
-      const { accessToken: token } = await api.login(email, password);
+      const { accessToken: token, sessionId } = await api.login(email, password);
+      sessionIdRef.current = sessionId;
+      persistSessionId(sessionId);
       setAccessToken(token);
       return loadProfile(token);
     },
@@ -108,7 +168,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const acceptInvite = useCallback(
     async (token: string, password: string) => {
-      const { accessToken: newToken } = await api.acceptInvite(token, password);
+      const { accessToken: newToken, sessionId } = await api.acceptInvite(token, password);
+      sessionIdRef.current = sessionId;
+      persistSessionId(sessionId);
       setAccessToken(newToken);
       await loadProfile(newToken);
     },
@@ -116,7 +178,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    await api.logout().catch(() => undefined);
+    const sessionId = sessionIdRef.current;
+    // Deliberately this tab's own session only: the cookie is named by
+    // sessionId, so this clears exactly one login session server-side and
+    // leaves every other tab/account's cookie (a different name) untouched.
+    await api.logout(sessionId ?? undefined).catch(() => undefined);
+    clearSessionId(sessionId);
+    sessionIdRef.current = null;
     setAccessToken(null);
     setUser(null);
   }, []);

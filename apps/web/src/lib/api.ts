@@ -1381,11 +1381,26 @@ export interface ImportBatchDetail extends ImportBatch {
 
 export const api = {
   login: (email: string, password: string) =>
-    request<{ accessToken: string }>("/auth/login", { method: "POST", body: { email, password } }),
-  refresh: () => request<{ accessToken: string }>("/auth/refresh", { method: "POST" }),
-  logout: () => request<{ success: boolean }>("/auth/logout", { method: "POST" }),
+    request<{ accessToken: string; sessionId: string }>("/auth/login", { method: "POST", body: { email, password } }),
+  // sessionId tells the backend which of this browser's several possible
+  // refresh-token cookies belongs to this tab's session — see AuthController.
+  // Omitted only when this tab has never had one (falls back to the legacy
+  // shared cookie, if any).
+  refresh: (sessionId?: string) =>
+    request<{ accessToken: string; sessionId: string }>("/auth/refresh", {
+      method: "POST",
+      body: sessionId ? { sessionId } : undefined,
+    }),
+  logout: (sessionId?: string) =>
+    request<{ success: boolean }>("/auth/logout", {
+      method: "POST",
+      body: sessionId ? { sessionId } : undefined,
+    }),
   acceptInvite: (token: string, password: string) =>
-    request<{ accessToken: string }>("/auth/accept-invite", { method: "POST", body: { token, password } }),
+    request<{ accessToken: string; sessionId: string }>("/auth/accept-invite", {
+      method: "POST",
+      body: { token, password },
+    }),
   me: (accessToken: string) => request<Profile>("/auth/me", { accessToken }),
 
   listSchools: (accessToken: string) => request<School[]>("/schools", { accessToken }),

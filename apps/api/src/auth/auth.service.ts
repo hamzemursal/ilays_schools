@@ -14,6 +14,11 @@ export interface TokenPair {
   accessToken: string;
   refreshToken: string;
   refreshTokenExpiresAt: Date;
+  // The RefreshToken row's own id, reused as-is — it already uniquely
+  // identifies this one login session, so no new column is needed. The
+  // controller uses it to name this session's refresh cookie distinctly
+  // from every other concurrently logged-in session in the same browser.
+  sessionId: string;
 }
 
 function hashToken(raw: string): string {
@@ -251,7 +256,7 @@ export class AuthService {
     const rawRefreshToken = randomBytes(32).toString("hex");
     const refreshTokenExpiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
 
-    await this.prisma.refreshToken.create({
+    const created = await this.prisma.refreshToken.create({
       data: {
         userId,
         tokenHash: hashToken(rawRefreshToken),
@@ -259,6 +264,6 @@ export class AuthService {
       },
     });
 
-    return { accessToken, refreshToken: rawRefreshToken, refreshTokenExpiresAt };
+    return { accessToken, refreshToken: rawRefreshToken, refreshTokenExpiresAt, sessionId: created.id };
   }
 }

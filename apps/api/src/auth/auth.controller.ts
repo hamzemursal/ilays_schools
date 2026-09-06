@@ -4,14 +4,31 @@ import { AuthService, TokenPair } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
 import { AcceptInviteDto } from "./dto/accept-invite.dto";
 import { ChangePasswordDto } from "./dto/change-password.dto";
+import { RefreshSessionDto } from "./dto/refresh-session.dto";
 import { Public } from "./decorators/public.decorator";
 import { CurrentUser } from "./decorators/current-user.decorator";
 import { PrismaService } from "../prisma/prisma.service";
 import { DocumentsService } from "../documents/documents.service";
 import type { AuthenticatedUser } from "./types/authenticated-user";
 
-const REFRESH_COOKIE = "refresh_token";
+// One browser can have several independent logins open at once (different
+// tabs, different accounts, or the same account twice) — each refresh-token
+// cookie is therefore named per login session (sessionId = that session's
+// RefreshToken row id) instead of one fixed name shared by the whole
+// browser. Without this, a second tab logging in would silently overwrite
+// the first tab's cookie, and the first tab would eventually refresh into
+// the second tab's identity. See TokenPair.sessionId / AuthService.
+const REFRESH_COOKIE_PREFIX = "refresh_token_";
+// A request with no sessionId (an old cached frontend bundle mid-deploy, or
+// a brand-new tab that never received one) falls back to this fixed name —
+// nothing sets it anymore going forward, but reading it keeps a session
+// alive that was established just before this change shipped.
+const REFRESH_COOKIE_LEGACY_NAME = "refresh_token";
 const REFRESH_COOKIE_PATH = "/api/v1/auth";
+
+function refreshCookieName(sessionId?: string): string {
+  return sessionId ? `${REFRESH_COOKIE_PREFIX}${sessionId}` : REFRESH_COOKIE_LEGACY_NAME;
+}
 
 // The web app (Vercel) and this API (Render) are on different registrable
 // domains, so every refresh-cookie request is genuinely cross-site — a
@@ -42,28 +59,44 @@ export class AuthController {
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
     const tokens = await this.auth.login(dto.email, dto.password);
     this.setRefreshCookie(res, tokens);
-    return { accessToken: tokens.accessToken };
+    return { accessToken: tokens.accessToken, sessionId: tokens.sessionId };
   }
 
   @Public()
   @Post("refresh")
-  async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const raw = req.cookies?.[REFRESH_COOKIE];
+  async refresh(
+    @Body() dto: RefreshSessionDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const oldCookieName = refreshCookieName(dto.sessionId);
+    const raw = req.cookies?.[oldCookieName];
     if (!raw) throw new UnauthorizedException("No refresh token");
 
     const tokens = await this.auth.refresh(raw);
+    // Rotation issues a new sessionId (new RefreshToken row), so the cookie
+    // name changes too — the old one is now dead and must be cleared, or it
+    // would sit in the browser forever pointing at a revoked token.
+    res.clearCookie(oldCookieName, REFRESH_COOKIE_OPTIONS);
     this.setRefreshCookie(res, tokens);
-    return { accessToken: tokens.accessToken };
+    return { accessToken: tokens.accessToken, sessionId: tokens.sessionId };
   }
 
   @Public()
   @Post("logout")
-  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const raw = req.cookies?.[REFRESH_COOKIE];
+  async logout(
+    @Body() dto: RefreshSessionDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const cookieName = refreshCookieName(dto.sessionId);
+    const raw = req.cookies?.[cookieName];
     if (raw) await this.auth.logout(raw);
     // clearCookie must be called with the same SameSite/Secure attributes
     // the cookie was actually set with, or some browsers silently keep it.
-    res.clearCookie(REFRESH_COOKIE, REFRESH_COOKIE_OPTIONS);
+    // Only this one session's cookie is cleared — every other tab/session's
+    // cookie has a different name and is untouched.
+    res.clearCookie(cookieName, REFRESH_COOKIE_OPTIONS);
     return { success: true };
   }
 
@@ -72,7 +105,7 @@ export class AuthController {
   async acceptInvite(@Body() dto: AcceptInviteDto, @Res({ passthrough: true }) res: Response) {
     const tokens = await this.auth.acceptInvite(dto.token, dto.password);
     this.setRefreshCookie(res, tokens);
-    return { accessToken: tokens.accessToken };
+    return { accessToken: tokens.accessToken, sessionId: tokens.sessionId };
   }
 
   @Get("me")
@@ -105,7 +138,7 @@ export class AuthController {
   }
 
   private setRefreshCookie(res: Response, tokens: TokenPair) {
-    res.cookie(REFRESH_COOKIE, tokens.refreshToken, {
+    res.cookie(refreshCookieName(tokens.sessionId), tokens.refreshToken, {
       ...REFRESH_COOKIE_OPTIONS,
       expires: tokens.refreshTokenExpiresAt,
     });

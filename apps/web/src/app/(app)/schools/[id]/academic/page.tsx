@@ -889,66 +889,75 @@ function ExamRow({
   }
 
   return (
-    <Card>
-      <p className="font-medium text-foreground">
-        {exam.name} <span className="text-sm font-normal text-foreground-soft">· {exam.type}</span>
-      </p>
+    <div className="space-y-3">
+      <Card padding="none">
+        <CardHeader
+          title={
+            <>
+              {exam.name} <span className="text-sm font-normal text-foreground-soft">· {exam.type}</span>
+            </>
+          }
+          description="Subjects already scheduled for this exam."
+        />
+        <div className="space-y-2 p-5">
+          {exam.examSubjects.map((es) => (
+            <div key={es.id} className="flex flex-wrap items-center gap-2">
+              <Badge tone="accent">
+                {es.class.name} · {es.subject.name} · /{es.maxMarks}
+              </Badge>
+              {canManage ? (
+                <Input
+                  type="date"
+                  value={dateValueFor(es)}
+                  onChange={(e) => setPendingDates((prev) => ({ ...prev, [es.id]: e.target.value }))}
+                  className="h-8 w-auto py-1 text-sm"
+                  aria-label={`Exam date for ${es.subject.name}`}
+                />
+              ) : (
+                <span className="text-sm text-foreground-muted">{es.examDate ? new Date(es.examDate).toLocaleDateString() : "No date set"}</span>
+              )}
+            </div>
+          ))}
+          {exam.examSubjects.length === 0 && <span className="text-sm text-foreground-muted">No subjects scheduled yet.</span>}
 
-      <div className="mt-2 space-y-2">
-        {exam.examSubjects.map((es) => (
-          <div key={es.id} className="flex flex-wrap items-center gap-2">
-            <Badge tone="accent">
-              {es.class.name} · {es.subject.name} · /{es.maxMarks}
-            </Badge>
-            {canManage ? (
-              <Input
-                type="date"
-                value={dateValueFor(es)}
-                onChange={(e) => setPendingDates((prev) => ({ ...prev, [es.id]: e.target.value }))}
-                className="h-8 w-auto py-1 text-sm"
-                aria-label={`Exam date for ${es.subject.name}`}
-              />
-            ) : (
-              <span className="text-sm text-foreground-muted">{es.examDate ? new Date(es.examDate).toLocaleDateString() : "No date set"}</span>
-            )}
-          </div>
-        ))}
-        {exam.examSubjects.length === 0 && <span className="text-sm text-foreground-muted">No subjects scheduled yet.</span>}
-      </div>
-
-      {canManage && exam.examSubjects.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3">
-          <Button type="button" size="sm" loading={savingDates} disabled={changedSubjectIds.length === 0} onClick={saveDates}>
-            {changedSubjectIds.length > 0 ? `Save ${changedSubjectIds.length} date${changedSubjectIds.length === 1 ? "" : "s"}` : "Save dates"}
-          </Button>
-          {saveDatesError && <p className="text-sm text-danger">{saveDatesError}</p>}
+          {canManage && exam.examSubjects.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
+              <Button type="button" size="sm" loading={savingDates} disabled={changedSubjectIds.length === 0} onClick={saveDates}>
+                {changedSubjectIds.length > 0 ? `Save ${changedSubjectIds.length} date${changedSubjectIds.length === 1 ? "" : "s"}` : "Save dates"}
+              </Button>
+              {saveDatesError && <p className="text-sm text-danger">{saveDatesError}</p>}
+            </div>
+          )}
         </div>
-      )}
+      </Card>
 
       {canManage && classes.length > 0 && subjects.length > 0 && (
-        <form onSubmit={onAddSubject} className="mt-3 flex flex-wrap items-end gap-2">
-          <Select value={classId} onChange={(e) => setClassId(e.target.value)} className="w-auto">
-            {classes.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
-          <Select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} className="w-auto">
-            {subjects.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
-          <Input type="number" min={1} value={maxMarks} onChange={(e) => setMaxMarks(e.target.value)} placeholder="Max marks" className="w-28" />
-          <Input type="date" value={examDate} onChange={(e) => setExamDate(e.target.value)} className="w-auto" aria-label="Exam date" />
-          <Button type="submit" size="sm" variant="outline">
-            Add subject
-          </Button>
-          {formError && <p className="w-full text-sm text-danger">{formError}</p>}
-        </form>
+        <Card padding="none">
+          <CardHeader title="Add a new subject" description="Schedule another class/subject for this same exam." />
+          <form onSubmit={onAddSubject} className="flex flex-wrap items-end gap-2 p-5">
+            <Select value={classId} onChange={(e) => setClassId(e.target.value)} className="w-auto">
+              {classes.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+            <Select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} className="w-auto">
+              {subjects.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+            <Input type="number" min={1} value={maxMarks} onChange={(e) => setMaxMarks(e.target.value)} placeholder="Max marks" className="w-28" />
+            <Input type="date" value={examDate} onChange={(e) => setExamDate(e.target.value)} className="w-auto" aria-label="Exam date" />
+            <Button type="submit" size="sm" variant="outline">
+              Add subject
+            </Button>
+            {formError && <p className="w-full text-sm text-danger">{formError}</p>}
+          </form>
+        </Card>
       )}
-    </Card>
+    </div>
   );
 }

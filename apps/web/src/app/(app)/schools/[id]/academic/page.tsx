@@ -827,7 +827,6 @@ function ExamRow({
   const [maxMarks, setMaxMarks] = useState("100");
   const [examDate, setExamDate] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const { show } = useToast();
 
   async function onAddSubject(e: FormEvent) {
@@ -848,18 +847,44 @@ function ExamRow({
     }
   }
 
-  async function onSaveDate(examSubjectId: string, newDate: string) {
+  // Keyed by examSubjectId, holds only the dates the admin has actually
+  // touched in this form — everything else keeps reading straight from
+  // exam.examSubjects, so a subject added later (via the form below) or
+  // updated elsewhere never needs this map to "catch up".
+  const [pendingDates, setPendingDates] = useState<Record<string, string>>({});
+  const [savingDates, setSavingDates] = useState(false);
+  const [saveDatesError, setSaveDatesError] = useState<string | null>(null);
+
+  function dateValueFor(es: Exam["examSubjects"][number]): string {
+    return pendingDates[es.id] ?? (es.examDate ? es.examDate.slice(0, 10) : "");
+  }
+
+  const changedSubjectIds = exam.examSubjects
+    .filter((es) => es.id in pendingDates && pendingDates[es.id] !== (es.examDate ? es.examDate.slice(0, 10) : ""))
+    .map((es) => es.id);
+
+  async function saveDates() {
+    setSavingDates(true);
+    setSaveDatesError(null);
     try {
-      const updated = await api.updateExamSubject(accessToken, schoolId, exam.id, examSubjectId, { examDate: newDate || undefined });
-      setExams((prev) =>
-        prev.map((ex) =>
-          ex.id === exam.id ? { ...ex, examSubjects: ex.examSubjects.map((es) => (es.id === examSubjectId ? updated : es)) } : ex,
+      const updates = await Promise.all(
+        changedSubjectIds.map((id) =>
+          api.updateExamSubject(accessToken, schoolId, exam.id, id, { examDate: pendingDates[id] || undefined }),
         ),
       );
-      setEditingId(null);
-      show("Exam date updated.");
+      setExams((prev) =>
+        prev.map((ex) =>
+          ex.id === exam.id
+            ? { ...ex, examSubjects: ex.examSubjects.map((es) => updates.find((u) => u.id === es.id) ?? es) }
+            : ex,
+        ),
+      );
+      setPendingDates({});
+      show(`${updates.length} exam date${updates.length === 1 ? "" : "s"} updated.`);
     } catch (err) {
-      show(err instanceof ApiError ? err.message : "Failed to update exam date");
+      setSaveDatesError(err instanceof ApiError ? err.message : "Failed to save exam dates");
+    } finally {
+      setSavingDates(false);
     }
   }
 
@@ -875,31 +900,30 @@ function ExamRow({
             <Badge tone="accent">
               {es.class.name} · {es.subject.name} · /{es.maxMarks}
             </Badge>
-            {editingId === es.id ? (
-              <ExamDateEditor
-                initialDate={es.examDate}
-                onSave={(newDate) => onSaveDate(es.id, newDate)}
-                onCancel={() => setEditingId(null)}
+            {canManage ? (
+              <Input
+                type="date"
+                value={dateValueFor(es)}
+                onChange={(e) => setPendingDates((prev) => ({ ...prev, [es.id]: e.target.value }))}
+                className="h-8 w-auto py-1 text-sm"
+                aria-label={`Exam date for ${es.subject.name}`}
               />
             ) : (
-              <>
-                <span className="text-sm text-foreground-muted">{es.examDate ? new Date(es.examDate).toLocaleDateString() : "No date set"}</span>
-                {canManage && (
-                  <button
-                    type="button"
-                    onClick={() => setEditingId(es.id)}
-                    aria-label={`Edit exam date for ${es.subject.name}`}
-                    className="text-foreground-muted hover:text-accent"
-                  >
-                    <Pencil className="size-3.5" />
-                  </button>
-                )}
-              </>
+              <span className="text-sm text-foreground-muted">{es.examDate ? new Date(es.examDate).toLocaleDateString() : "No date set"}</span>
             )}
           </div>
         ))}
         {exam.examSubjects.length === 0 && <span className="text-sm text-foreground-muted">No subjects scheduled yet.</span>}
       </div>
+
+      {canManage && exam.examSubjects.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3">
+          <Button type="button" size="sm" loading={savingDates} disabled={changedSubjectIds.length === 0} onClick={saveDates}>
+            {changedSubjectIds.length > 0 ? `Save ${changedSubjectIds.length} date${changedSubjectIds.length === 1 ? "" : "s"}` : "Save dates"}
+          </Button>
+          {saveDatesError && <p className="text-sm text-danger">{saveDatesError}</p>}
+        </div>
+      )}
 
       {canManage && classes.length > 0 && subjects.length > 0 && (
         <form onSubmit={onAddSubject} className="mt-3 flex flex-wrap items-end gap-2">
@@ -926,28 +950,5 @@ function ExamRow({
         </form>
       )}
     </Card>
-  );
-}
-
-function ExamDateEditor({
-  initialDate,
-  onSave,
-  onCancel,
-}: {
-  initialDate: string | null;
-  onSave: (newDate: string) => void;
-  onCancel: () => void;
-}) {
-  // <input type="date"> needs "YYYY-MM-DD" — trims the time-of-day ISO
-  // string the API returns down to just the date part it can display/edit.
-  const [value, setValue] = useState(initialDate ? initialDate.slice(0, 10) : "");
-  return (
-    <span className="flex items-center gap-1.5">
-      <Input type="date" value={value} onChange={(e) => setValue(e.target.value)} className="h-8 w-auto py-1 text-sm" autoFocus />
-      <Button size="sm" variant="ghost" icon={<Check className="size-3.5" />} onClick={() => onSave(value)} aria-label="Save" />
-      <button type="button" onClick={onCancel} className="text-sm text-foreground-muted hover:text-foreground">
-        Cancel
-      </button>
-    </span>
   );
 }

@@ -257,25 +257,76 @@ export class StudentsService {
     return { success: true };
   }
 
-  async listForSchool(actor: AuthenticatedUser, schoolId: string) {
+  async listForSchool(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    filters: { academicYearId?: string; classId?: string; sectionId?: string; search?: string } = {},
+  ) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
 
+    const search = filters.search?.trim();
+    const searchAsRoll = search && /^\d+$/.test(search) ? Number(search) : undefined;
+
     const enrollments = await this.prisma.studentEnrollment.findMany({
-      where: { schoolId, status: "ACTIVE" },
-      include: { student: true, class: true, section: true },
+      where: {
+        schoolId,
+        status: "ACTIVE",
+        ...(filters.academicYearId ? { academicYearId: filters.academicYearId } : {}),
+        ...(filters.classId ? { classId: filters.classId } : {}),
+        ...(filters.sectionId ? { sectionId: filters.sectionId } : {}),
+        ...(search
+          ? {
+              OR: [
+                { student: { firstName: { contains: search, mode: "insensitive" } } },
+                { student: { lastName: { contains: search, mode: "insensitive" } } },
+                { studentNumber: { contains: search, mode: "insensitive" } },
+                ...(searchAsRoll !== undefined ? [{ rollNumber: searchAsRoll }] : []),
+                // Parent/guardian name or phone — real, existing relationship
+                // (StudentGuardian), not a field invented for this search.
+                { student: { guardians: { some: { guardian: { firstName: { contains: search, mode: "insensitive" } } } } } },
+                { student: { guardians: { some: { guardian: { lastName: { contains: search, mode: "insensitive" } } } } } },
+                { student: { guardians: { some: { guardian: { phone: { contains: search } } } } } },
+              ],
+            }
+          : {}),
+      },
+      include: {
+        student: {
+          include: {
+            guardians: {
+              where: { status: "ACTIVE" },
+              include: { guardian: true },
+              orderBy: [{ isPrimaryContact: "desc" }],
+              take: 1,
+            },
+          },
+        },
+        class: true,
+        section: true,
+      },
       orderBy: [{ class: { level: "asc" } }, { section: { name: "asc" } }, { rollNumber: "asc" }],
     });
 
-    return enrollments.map((e) => ({
-      enrollmentId: e.id,
-      studentId: e.studentId,
-      firstName: e.student.firstName,
-      lastName: e.student.lastName,
-      studentNumber: e.studentNumber,
-      rollNumber: e.rollNumber,
-      className: e.class.name,
-      sectionName: e.section.name,
-    }));
+    return enrollments.map((e) => {
+      const primaryGuardian = e.student.guardians[0]?.guardian;
+      return {
+        enrollmentId: e.id,
+        studentId: e.studentId,
+        firstName: e.student.firstName,
+        lastName: e.student.lastName,
+        studentNumber: e.studentNumber,
+        rollNumber: e.rollNumber,
+        className: e.class.name,
+        sectionName: e.section.name,
+        classId: e.classId,
+        sectionId: e.sectionId,
+        academicYearId: e.academicYearId,
+        sex: e.student.sex,
+        status: e.student.currentStatus,
+        guardianName: primaryGuardian ? `${primaryGuardian.firstName} ${primaryGuardian.lastName}` : null,
+        guardianPhone: primaryGuardian?.phone ?? null,
+      };
+    });
   }
 
   async getOne(actor: AuthenticatedUser, studentId: string) {

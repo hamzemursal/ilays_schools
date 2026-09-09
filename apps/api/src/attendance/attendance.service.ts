@@ -299,6 +299,54 @@ export class AttendanceService {
     };
   }
 
+  // Powers the Student List's Attendance column/filter — one rate per
+  // active enrollment matching the given school/year/class/section filters,
+  // for whatever's actually been marked across that academic year's own
+  // date range (there's no separate Term model in this schema, so the year
+  // itself is the correct existing structure to scope by, same reasoning as
+  // summaryForSection scoping by an explicit from/to). A student with zero
+  // marked days gets `rate: null` — never a fabricated 0%.
+  async attendanceRatesForSchool(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    filters: { academicYearId: string; classId?: string; sectionId?: string },
+  ) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+
+    const academicYear = await this.prisma.academicYear.findFirst({
+      where: { id: filters.academicYearId, schoolId },
+    });
+    if (!academicYear) throw new BadRequestException("That academic year does not belong to this school");
+
+    const counts = await this.prisma.attendance.groupBy({
+      by: ["enrollmentId", "status"],
+      where: {
+        date: { gte: academicYear.startDate, lte: academicYear.endDate },
+        enrollment: {
+          schoolId,
+          academicYearId: filters.academicYearId,
+          status: "ACTIVE",
+          ...(filters.classId ? { classId: filters.classId } : {}),
+          ...(filters.sectionId ? { sectionId: filters.sectionId } : {}),
+        },
+      },
+      _count: true,
+    });
+
+    const byEnrollment = new Map<string, { present: number; total: number }>();
+    for (const row of counts) {
+      const bucket = byEnrollment.get(row.enrollmentId) ?? { present: 0, total: 0 };
+      bucket.total += row._count;
+      if (row.status === "PRESENT") bucket.present += row._count;
+      byEnrollment.set(row.enrollmentId, bucket);
+    }
+
+    return Array.from(byEnrollment.entries()).map(([enrollmentId, { present, total }]) => ({
+      enrollmentId,
+      rate: total > 0 ? Math.round((present / total) * 1000) / 10 : null,
+    }));
+  }
+
   async historyForStudent(actor: AuthenticatedUser, studentId: string) {
     await this.students.assertAccessibleStudent(actor, studentId);
     await this.assertTeacherCanAccessStudent(actor, studentId);
@@ -310,7 +358,7 @@ export class AttendanceService {
           ...(actor.schoolIds.length > 0 ? { schoolId: { in: actor.schoolIds } } : {}),
         },
       },
-      include: { enrollment: { include: { school: true, class: true, section: true } } },
+      include: { enrollment: { include: { school: true, class: true, section: true, academicYear: true } } },
       orderBy: { date: "desc" },
     });
   }

@@ -82,4 +82,21 @@ export class AttendanceController {
   historyForStudent(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.attendance.historyForStudent(user, id);
   }
+
+  // Powers the Student List's Attendance column/filter — one rate per
+  // student for the given academic year, optionally narrowed to one
+  // class/section, matching whatever the list itself is currently filtered
+  // to. See AttendanceService.attendanceRatesForSchool for the definition.
+  @RequirePermissions("attendance.view")
+  @Get("schools/:schoolId/students/attendance-summary")
+  attendanceSummary(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Query("academicYearId") academicYearId?: string,
+    @Query("classId") classId?: string,
+    @Query("sectionId") sectionId?: string,
+  ) {
+    if (!academicYearId) throw new BadRequestException("academicYearId query param is required");
+    return this.attendance.attendanceRatesForSchool(user, schoolId, { academicYearId, classId, sectionId });
+  }
 }

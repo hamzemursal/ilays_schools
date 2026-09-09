@@ -326,6 +326,30 @@ export interface StudentListItem {
   rollNumber: number;
   className: string;
   sectionName: string;
+  classId: string;
+  sectionId: string;
+  academicYearId: string;
+  sex: Sex;
+  status: StudentStatus;
+  guardianName: string | null;
+  guardianPhone: string | null;
+}
+
+export interface StudentAttendanceRate {
+  enrollmentId: string;
+  rate: number | null;
+}
+
+export interface StudentAttendanceHistoryRecord {
+  id: string;
+  date: string;
+  status: "PRESENT" | "ABSENT" | "LATE" | "EXCUSED";
+  note: string | null;
+  enrollment: {
+    academicYear: { id: string; name: string };
+    class: { name: string };
+    section: { name: string };
+  };
 }
 
 export interface DuplicateCandidate {
@@ -1583,8 +1607,33 @@ export const api = {
   removeSubject: (accessToken: string, schoolId: string, subjectId: string) =>
     request<{ success: boolean }>(`/schools/${schoolId}/subjects/${subjectId}`, { method: "DELETE", accessToken }),
 
-  listStudents: (accessToken: string, schoolId: string) =>
-    request<StudentListItem[]>(`/schools/${schoolId}/students`, { accessToken }),
+  listStudents: (
+    accessToken: string,
+    schoolId: string,
+    filters?: { academicYearId?: string; classId?: string; sectionId?: string; search?: string },
+  ) =>
+    request<StudentListItem[]>(
+      `/schools/${schoolId}/students${qs({
+        academicYearId: filters?.academicYearId,
+        classId: filters?.classId,
+        sectionId: filters?.sectionId,
+        search: filters?.search,
+      })}`,
+      { accessToken },
+    ),
+  getStudentAttendanceHistory: (accessToken: string, studentId: string) =>
+    request<StudentAttendanceHistoryRecord[]>(`/students/${studentId}/attendance`, { accessToken }),
+  getStudentAttendanceRates: (
+    accessToken: string,
+    schoolId: string,
+    academicYearId: string,
+    classId?: string,
+    sectionId?: string,
+  ) =>
+    request<StudentAttendanceRate[]>(
+      `/schools/${schoolId}/students/attendance-summary${qs({ academicYearId, classId, sectionId })}`,
+      { accessToken },
+    ),
   createStudent: (accessToken: string, schoolId: string, body: CreateStudentInput) =>
     request<{ student: { id: string }; enrollment: unknown }>(`/schools/${schoolId}/students`, {
       method: "POST",

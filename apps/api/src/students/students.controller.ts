@@ -19,10 +19,21 @@ export class StudentsController {
     private readonly prisma: PrismaService,
   ) {}
 
+  // All filters are optional and additive — omitting every one of them
+  // preserves the exact old "every active student in the school" behavior
+  // for the other existing callers of this endpoint (Transfers wizard,
+  // Reports, the Parent portal's children list), none of which pass these.
   @RequirePermissions("students.view")
   @Get("schools/:schoolId/students")
-  listForSchool(@CurrentUser() user: AuthenticatedUser, @Param("schoolId") schoolId: string) {
-    return this.students.listForSchool(user, schoolId);
+  listForSchool(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Query("academicYearId") academicYearId?: string,
+    @Query("classId") classId?: string,
+    @Query("sectionId") sectionId?: string,
+    @Query("search") search?: string,
+  ) {
+    return this.students.listForSchool(user, schoolId, { academicYearId, classId, sectionId, search });
   }
 
   @RequirePermissions("students.create")

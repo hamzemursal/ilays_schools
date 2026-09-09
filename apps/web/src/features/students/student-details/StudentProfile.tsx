@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeftRight, BookOpen, Cake, KeyRound, Pencil, Plus, Trash2, User } from "lucide-react";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type ClassSubjectRecord, type GuardianRecord, type SectionTeacherAssignment, type StudentDetail } from "@/lib/api";
@@ -33,14 +33,30 @@ export function StudentProfile({ studentId }: { studentId: string }) {
   const { user, accessToken } = useAuth();
   const { show } = useToast();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [student, setStudent] = useState<StudentDetail | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [addingGuardian, setAddingGuardian] = useState(false);
-  const [editing, setEditing] = useState(false);
+  // Arrives pre-opened when the Student List's "Edit" action links here with
+  // ?edit=1 — the profile page has always had its own inline edit toggle,
+  // this just lets a caller open straight into it instead of View + a
+  // second click.
+  const [editing, setEditing] = useState(searchParams.get("edit") === "1");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Same idea for "Print Profile" (?print=1) — the browser's own print
+  // dialog is the whole feature; no dedicated print page/template needed.
+  useEffect(() => {
+    if (searchParams.get("print") === "1" && student) {
+      window.print();
+    }
+    // Fires once the student data that would appear on the printed page has
+    // actually loaded, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [student]);
 
   useEffect(() => {
     if (!accessToken) return;

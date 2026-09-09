@@ -11,8 +11,8 @@ import {
   type ClassSubjectRecord,
   type ClassWithSections,
   type Section,
+  type SectionStudent,
   type SectionTeacherAssignment,
-  type StudentListItem,
   type Subject,
 } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -29,6 +29,12 @@ import { formatStudentListForShare } from "@/lib/share";
 import { useToast } from "@/components/ui/Toast";
 import { ArrowLeftRight, ChevronRight, GraduationCap, Pencil, Plus, Search, Trash2, Check, X } from "lucide-react";
 
+// Built by merging each section's own listSectionStudents result (real,
+// backend-enforced, ID-scoped per section) rather than fetching the whole
+// school's roster and matching on className/sectionName strings — see the
+// comment on the roster-loading effect below for why that mattered.
+type ClassRosterStudent = SectionStudent & { sectionName: string; className: string };
+
 export default function ClassDetailPage({ params }: { params: Promise<{ id: string; classId: string }> }) {
   const { id: schoolId, classId } = use(params);
   const { user, accessToken } = useAuth();
@@ -38,7 +44,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const [cls, setCls] = useState<ClassWithSections | null>(null);
   const [allClasses, setAllClasses] = useState<ClassWithSections[] | null>(null);
   const [sections, setSections] = useState<Section[] | null>(null);
-  const [students, setStudents] = useState<StudentListItem[] | null>(null);
+  const [classStudents, setClassStudents] = useState<ClassRosterStudent[] | null>(null);
   const [rosterSearch, setRosterSearch] = useState("");
   const [subjects, setSubjects] = useState<ClassSubjectRecord[] | null>(null);
   const [allSubjects, setAllSubjects] = useState<Subject[]>([]);
@@ -75,20 +81,19 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const [selectedEnrollmentIds, setSelectedEnrollmentIds] = useState<Set<string>>(new Set());
   const [loadingTransferImpact, setLoadingTransferImpact] = useState(false);
   const [transferImpact, setTransferImpact] = useState<ClassBulkTransferImpact | null>(null);
-  const [selectedStudentsPreview, setSelectedStudentsPreview] = useState<StudentListItem[]>([]);
+  const [selectedStudentsPreview, setSelectedStudentsPreview] = useState<ClassRosterStudent[]>([]);
   const [transferError, setTransferError] = useState<string | null>(null);
   const [transferring, setTransferring] = useState(false);
 
   async function loadAll() {
     if (!accessToken) return;
     try {
-      const [classes, secs, subs, y, allSubj, allStudents] = await Promise.all([
+      const [classes, secs, subs, y, allSubj] = await Promise.all([
         api.listClasses(accessToken, schoolId),
         api.listSections(accessToken, schoolId, classId),
         api.listClassSubjects(accessToken, schoolId, classId),
         api.listAcademicYears(accessToken, schoolId),
         api.listSubjects(accessToken, schoolId),
-        api.listStudents(accessToken, schoolId),
       ]);
       const found = classes.find((c) => c.id === classId);
       if (!found) {
@@ -101,7 +106,6 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
       setSubjects(subs);
       setYears(y);
       setAllSubjects(allSubj);
-      setStudents(allStudents);
       setYearId((prev) => prev || (y.find((yr) => yr.isCurrent) ?? y[0])?.id || "");
       setTransferYearId((prev) => prev || (y.find((yr) => yr.isCurrent) ?? y[0])?.id || "");
     } catch (err) {
@@ -117,6 +121,30 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, schoolId, classId]);
+
+  // The roster used to come from GET /schools/:id/students (every student in
+  // the school) filtered client-side by matching className/sectionName
+  // strings — Class.name has no uniqueness constraint beyond
+  // [divisionId, level], so two classes could in principle share a literal
+  // name and silently merge rosters here. Fetching each of this class's own
+  // sections via listSectionStudents (the same backend-enforced,
+  // classId+sectionId-scoped endpoint the Section Workspace uses) removes
+  // that risk entirely — every row here is guaranteed to actually belong to
+  // this class.
+  useEffect(() => {
+    if (!accessToken || !sections || !cls) return;
+    const className = cls.name;
+    Promise.all(
+      sections.map((s) =>
+        api
+          .listSectionStudents(accessToken, schoolId, classId, s.id)
+          .then((rows) => rows.map((r) => ({ ...r, sectionName: s.name, className }))),
+      ),
+    ).then((results) => {
+      const merged = results.flat().sort((a, b) => a.sectionName.localeCompare(b.sectionName) || a.rollNumber - b.rollNumber);
+      setClassStudents(merged);
+    });
+  }, [accessToken, schoolId, classId, sections, cls]);
 
   useEffect(() => {
     if (!accessToken || !sections || !yearId) return;
@@ -325,18 +353,6 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const schoolName = user?.schools.find((s) => s.id === schoolId)?.name ?? "School";
   const canManage = user?.permissions.includes("academic.manage") ?? false;
   const unassignedSubjects = allSubjects.filter((s) => !subjects?.some((cs) => cs.subjectId === s.id));
-
-  // Matched by class name + section membership, not classId — StudentListItem
-  // (from GET /schools/:id/students) only carries denormalized names, same
-  // as everywhere else this endpoint is consumed. Restricting to this
-  // class's own sections (not just a name match) avoids any cross-class
-  // mix-up if another class in a different division happened to share a name.
-  const classStudents =
-    cls && sections
-      ? students
-          ?.filter((s) => s.className === cls.name && sections.some((sec) => sec.name === s.sectionName))
-          .sort((a, b) => a.sectionName.localeCompare(b.sectionName) || a.rollNumber - b.rollNumber)
-      : undefined;
 
   const studentSearchResults = (() => {
     const q = studentSearch.trim().toLowerCase();

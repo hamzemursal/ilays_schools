@@ -11,8 +11,9 @@ import {
   type ClassSubjectRecord,
   type ClassWithSections,
   type Section,
-  type SectionStudent,
   type SectionTeacherAssignment,
+  type StudentListItem,
+  type StudentStatus,
   type Subject,
 } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -24,16 +25,11 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { ShareListButton } from "@/components/ui/ShareListButton";
-import { formatStudentListForShare } from "@/lib/share";
 import { useToast } from "@/components/ui/Toast";
-import { ArrowLeftRight, ChevronRight, GraduationCap, Pencil, Plus, Search, Trash2, Check, X } from "lucide-react";
+import { StudentsTable } from "@/features/students/tables/StudentsTable";
+import { ArrowLeftRight, GraduationCap, Pencil, Plus, Printer, Search, Trash2, Check, X } from "lucide-react";
 
-// Built by merging each section's own listSectionStudents result (real,
-// backend-enforced, ID-scoped per section) rather than fetching the whole
-// school's roster and matching on className/sectionName strings — see the
-// comment on the roster-loading effect below for why that mattered.
-type ClassRosterStudent = SectionStudent & { sectionName: string; className: string };
+type RosterAttendanceFilter = "ALL" | "EXCELLENT" | "GOOD" | "NEEDS_ATTENTION";
 
 // A subtle, cycling visual identity per section card — decorative only,
 // never a security boundary (isolation is enforced by classId/sectionId on
@@ -60,8 +56,11 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const [cls, setCls] = useState<ClassWithSections | null>(null);
   const [allClasses, setAllClasses] = useState<ClassWithSections[] | null>(null);
   const [sections, setSections] = useState<Section[] | null>(null);
-  const [classStudents, setClassStudents] = useState<ClassRosterStudent[] | null>(null);
-  const [rosterSearch, setRosterSearch] = useState("");
+  const [classStudents, setClassStudents] = useState<StudentListItem[] | null>(null);
+  const [attendanceRates, setAttendanceRates] = useState<Map<string, number | null> | null>(null);
+  const [rosterSectionId, setRosterSectionId] = useState("");
+  const [rosterStatus, setRosterStatus] = useState<StudentStatus | "ALL">("ALL");
+  const [rosterAttendance, setRosterAttendance] = useState<RosterAttendanceFilter>("ALL");
   const [subjects, setSubjects] = useState<ClassSubjectRecord[] | null>(null);
   const [allSubjects, setAllSubjects] = useState<Subject[]>([]);
   const [years, setYears] = useState<AcademicYear[]>([]);
@@ -97,7 +96,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const [selectedEnrollmentIds, setSelectedEnrollmentIds] = useState<Set<string>>(new Set());
   const [loadingTransferImpact, setLoadingTransferImpact] = useState(false);
   const [transferImpact, setTransferImpact] = useState<ClassBulkTransferImpact | null>(null);
-  const [selectedStudentsPreview, setSelectedStudentsPreview] = useState<ClassRosterStudent[]>([]);
+  const [selectedStudentsPreview, setSelectedStudentsPreview] = useState<StudentListItem[]>([]);
   const [transferError, setTransferError] = useState<string | null>(null);
   const [transferring, setTransferring] = useState(false);
 
@@ -146,29 +145,27 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     api.listSections(accessToken, schoolId, classId, yearId).then(setSections);
   }, [accessToken, schoolId, classId, yearId]);
 
-  // The roster used to come from GET /schools/:id/students (every student in
-  // the school) filtered client-side by matching className/sectionName
-  // strings — Class.name has no uniqueness constraint beyond
-  // [divisionId, level], so two classes could in principle share a literal
-  // name and silently merge rosters here. Fetching each of this class's own
-  // sections via listSectionStudents (the same backend-enforced,
-  // classId+sectionId-scoped endpoint the Section Workspace uses) removes
-  // that risk entirely — every row here is guaranteed to actually belong to
-  // this class, for the selected academic year.
+  // listForSchool's classId filter is enforced on the enrollment's actual
+  // classId column, not by matching Class.name/Section.name strings, so this
+  // is exactly as safe as the section-by-section fetch it replaces — every
+  // row here is still guaranteed to belong to this class, for this year —
+  // while also giving the roster real attendance/status/guardian fields to
+  // power the same StudentsTable used on the school-wide Student List.
   useEffect(() => {
-    if (!accessToken || !sections || !cls || !yearId) return;
-    const className = cls.name;
-    Promise.all(
-      sections.map((s) =>
-        api
-          .listSectionStudents(accessToken, schoolId, classId, s.id, yearId)
-          .then((rows) => rows.map((r) => ({ ...r, sectionName: s.name, className }))),
-      ),
-    ).then((results) => {
-      const merged = results.flat().sort((a, b) => a.sectionName.localeCompare(b.sectionName) || a.rollNumber - b.rollNumber);
-      setClassStudents(merged);
-    });
-  }, [accessToken, schoolId, classId, sections, cls, yearId]);
+    if (!accessToken || !cls || !yearId) return;
+    api.listStudents(accessToken, schoolId, { academicYearId: yearId, classId }).then(setClassStudents);
+  }, [accessToken, schoolId, classId, cls, yearId]);
+
+  useEffect(() => {
+    if (!accessToken || !yearId) return;
+    api
+      .getStudentAttendanceRates(accessToken, schoolId, yearId, classId)
+      .then((rows) => setAttendanceRates(new Map(rows.map((r) => [r.enrollmentId, r.rate]))))
+      // Same as the Student List page: attendance is an enhancement, not
+      // core to the roster — a failure here just hides the Attendance
+      // column/filter rather than breaking the class page.
+      .catch(() => setAttendanceRates(null));
+  }, [accessToken, schoolId, classId, yearId]);
 
   useEffect(() => {
     if (!accessToken || !sections || !yearId) return;
@@ -376,6 +373,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const transferDestinationClass = allClasses?.find((c) => c.id === effectiveToClassId);
   const schoolName = user?.schools.find((s) => s.id === schoolId)?.name ?? "School";
   const canManage = user?.permissions.includes("academic.manage") ?? false;
+  const canBulkTransfer = (user?.permissions.includes("transfers.create") && user?.permissions.includes("transfers.approve")) ?? false;
   const yearName = years.find((y) => y.id === yearId)?.name ?? "";
   const unassignedSubjects = allSubjects.filter((s) => !subjects?.some((cs) => cs.subjectId === s.id));
 
@@ -390,13 +388,22 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     );
   })();
 
-  const filteredRoster = (() => {
-    const q = rosterSearch.trim().toLowerCase();
-    if (!q) return classStudents ?? [];
-    return (classStudents ?? []).filter((s) =>
-      `${s.firstName} ${s.lastName} ${s.studentNumber} ${s.rollNumber} ${s.sectionName}`.toLowerCase().includes(q),
-    );
-  })();
+  // Section/Status/Attendance narrow the roster before it reaches
+  // StudentsTable — name/ID/roll/parent search is StudentsTable's own
+  // built-in search, same as the school-wide Student List page.
+  const filteredRoster = (classStudents ?? []).filter((s) => {
+    if (rosterSectionId && s.sectionId !== rosterSectionId) return false;
+    if (rosterStatus !== "ALL" && s.status !== rosterStatus) return false;
+    if (rosterAttendance !== "ALL" && attendanceRates) {
+      const rate = attendanceRates.get(s.enrollmentId);
+      if (rate === undefined || rate === null) return false;
+      if (rosterAttendance === "EXCELLENT" && rate < 90) return false;
+      if (rosterAttendance === "GOOD" && (rate < 75 || rate >= 90)) return false;
+      if (rosterAttendance === "NEEDS_ATTENTION" && rate >= 75) return false;
+    }
+    return true;
+  });
+  const rosterHasFilters = rosterSectionId !== "" || rosterStatus !== "ALL" || rosterAttendance !== "ALL";
 
   if (error) {
     return (
@@ -891,10 +898,9 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                 actions={
                   classStudents &&
                   classStudents.length > 0 && (
-                    <ShareListButton
-                      title={`${cls?.name ?? "Class"} - Students`}
-                      text={() => formatStudentListForShare(`${cls?.name ?? "Class"} — Students`, filteredRoster)}
-                    />
+                    <Button variant="outline" size="sm" icon={<Printer className="size-4" />} onClick={() => window.print()}>
+                      Print
+                    </Button>
                   )
                 }
               />
@@ -908,55 +914,57 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                 </div>
               ) : (
                 <>
-                  <div className="border-b border-border p-4">
-                    <div className="relative max-w-xs">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-muted" />
-                      <Input
-                        value={rosterSearch}
-                        onChange={(e) => setRosterSearch(e.target.value)}
-                        placeholder="Search by name, ID, roll no, or section…"
-                        className="pl-9"
-                      />
+                  {sections && sections.length > 1 && (
+                    <div className="flex flex-wrap items-end gap-3 border-b border-border p-4">
+                      <FormField label="Section" className="w-auto">
+                        <Select value={rosterSectionId} onChange={(e) => setRosterSectionId(e.target.value)} className="w-auto min-w-[130px]">
+                          <option value="">All Sections</option>
+                          {sections.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              Section {s.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </FormField>
+                      <FormField label="Status" className="w-auto">
+                        <Select value={rosterStatus} onChange={(e) => setRosterStatus(e.target.value as StudentStatus | "ALL")} className="w-auto min-w-[130px]">
+                          <option value="ALL">All Status</option>
+                          <option value="ACTIVE">Active</option>
+                          <option value="COMPLETED">Completed</option>
+                          <option value="GRADUATED">Graduated</option>
+                          <option value="TRANSFERRED">Transferred</option>
+                          <option value="WITHDRAWN">Withdrawn</option>
+                          <option value="ARCHIVED">Archived</option>
+                        </Select>
+                      </FormField>
+                      {attendanceRates && (
+                        <FormField label="Attendance" className="w-auto">
+                          <Select
+                            value={rosterAttendance}
+                            onChange={(e) => setRosterAttendance(e.target.value as RosterAttendanceFilter)}
+                            className="w-auto min-w-[150px]"
+                          >
+                            <option value="ALL">All Attendance</option>
+                            <option value="EXCELLENT">Excellent (90%+)</option>
+                            <option value="GOOD">Good (75–89%)</option>
+                            <option value="NEEDS_ATTENTION">Needs Attention (&lt;75%)</option>
+                          </Select>
+                        </FormField>
+                      )}
                     </div>
-                  </div>
-                  {filteredRoster.length === 0 ? (
+                  )}
+                  {rosterHasFilters && filteredRoster.length === 0 ? (
                     <div className="p-5">
-                      <EmptyState title="No matches" description="Try a different search term." />
+                      <EmptyState title="No students match these filters" description="Try clearing a filter above." />
                     </div>
                   ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[520px] text-left text-sm">
-                        <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
-                          <tr>
-                            <th className="px-5 py-2.5">Roll No</th>
-                            <th className="px-5 py-2.5">Student ID</th>
-                            <th className="px-5 py-2.5">Name</th>
-                            <th className="px-5 py-2.5">Section</th>
-                            <th className="px-5 py-2.5" />
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                          {filteredRoster.map((s) => (
-                            <tr key={s.enrollmentId} className="transition-colors hover:bg-surface-hover">
-                              <td className="px-5 py-3 tabular-nums text-foreground-soft">{s.rollNumber}</td>
-                              <td className="px-5 py-3 font-mono text-xs text-foreground-soft">{s.studentNumber}</td>
-                              <td className="px-5 py-3 font-medium text-foreground">
-                                {s.firstName} {s.lastName}
-                              </td>
-                              <td className="px-5 py-3 text-foreground-soft">{s.sectionName}</td>
-                              <td className="px-5 py-3 text-right">
-                                <Link
-                                  href={`/schools/${schoolId}/students/${s.studentId}`}
-                                  className="inline-flex items-center gap-1 text-sm font-medium text-accent hover:underline"
-                                >
-                                  View / Edit <ChevronRight className="size-3.5" />
-                                </Link>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <StudentsTable
+                      schoolId={schoolId}
+                      accessToken={accessToken ?? ""}
+                      students={filteredRoster}
+                      attendanceRates={attendanceRates}
+                      canTransfer={canBulkTransfer}
+                    />
                   )}
                 </>
               )}

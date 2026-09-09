@@ -25,7 +25,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { BulkActionBar } from "@/components/ui/BulkActionBar";
 import { useToast } from "@/components/ui/Toast";
 import { runBulkAction, summarizeBulkResult } from "@/lib/bulkAction";
-import { Check, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronRight, GraduationCap, Pencil, Plus, Search, Trash2 } from "lucide-react";
 
 const TABS = ["Years", "Classes & sections", "Subjects", "Exams"] as const;
 type Tab = (typeof TABS)[number];
@@ -361,6 +361,8 @@ function ClassesSection({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [search, setSearch] = useState("");
+  const [levelFilter, setLevelFilter] = useState<"ALL" | "PRIMARY" | "SECONDARY">("ALL");
   const { show } = useToast();
 
   // Class/Section are permanent structures reused every year — the year
@@ -395,9 +397,38 @@ function ClassesSection({
     }
   }
 
+  const q = search.trim().toLowerCase();
+  const filtered = classes.filter(
+    (c) => (levelFilter === "ALL" || c.division.type === levelFilter) && (!q || c.name.toLowerCase().includes(q)),
+  );
+  const secondaryClasses = filtered.filter((c) => c.division.type === "SECONDARY");
+  const primaryClasses = filtered.filter((c) => c.division.type === "PRIMARY");
+
+  function renderRow(cls: ClassWithSections) {
+    return (
+      <ClassRow
+        key={cls.id}
+        schoolId={schoolId}
+        accessToken={accessToken}
+        cls={cls}
+        canManage={canManage}
+        selected={selectedIds.has(cls.id)}
+        onToggle={(checked) => toggle(cls.id, checked)}
+        onDeleted={() => {
+          setClasses((prev) => prev.filter((c) => c.id !== cls.id));
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            next.delete(cls.id);
+            return next;
+          });
+        }}
+      />
+    );
+  }
+
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         {years.length > 0 && (
           <FormField label="Academic Year" className="w-auto">
             <Select value={yearId} onChange={(e) => setYearId(e.target.value)} className="w-auto">
@@ -410,6 +441,19 @@ function ClassesSection({
             </Select>
           </FormField>
         )}
+        <FormField label="School Level" className="w-auto">
+          <Select value={levelFilter} onChange={(e) => setLevelFilter(e.target.value as typeof levelFilter)} className="w-auto">
+            <option value="ALL">All levels</option>
+            <option value="SECONDARY">Secondary</option>
+            <option value="PRIMARY">Primary</option>
+          </Select>
+        </FormField>
+        <FormField label="Search classes" className="w-auto">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-muted" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="e.g. Form 1" className="w-48 pl-9" />
+          </div>
+        </FormField>
         {canManage && (
           <Link href={`/schools/${schoolId}/academic/classes/new`} className="ml-auto">
             <Button icon={<Plus className="size-4" />}>Create class</Button>
@@ -427,27 +471,26 @@ function ClassesSection({
 
       {classes.length === 0 ? (
         <EmptyState title="No classes yet" description="Create your first class to start building the structure." />
+      ) : filtered.length === 0 ? (
+        <EmptyState title="No classes found" description="No classes match this academic year, level, and search." />
       ) : (
-        <div className="space-y-3">
-          {classes.map((cls) => (
-            <ClassRow
-              key={cls.id}
-              schoolId={schoolId}
-              accessToken={accessToken}
-              cls={cls}
-              canManage={canManage}
-              selected={selectedIds.has(cls.id)}
-              onToggle={(checked) => toggle(cls.id, checked)}
-              onDeleted={() => {
-                setClasses((prev) => prev.filter((c) => c.id !== cls.id));
-                setSelectedIds((prev) => {
-                  const next = new Set(prev);
-                  next.delete(cls.id);
-                  return next;
-                });
-              }}
-            />
-          ))}
+        <div className="space-y-8">
+          {secondaryClasses.length > 0 && (
+            <div>
+              <h3 className="mb-3 text-sm font-semibold text-foreground">Secondary Classes</h3>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {secondaryClasses.map(renderRow)}
+              </div>
+            </div>
+          )}
+          {primaryClasses.length > 0 && (
+            <div>
+              <h3 className="mb-3 text-sm font-semibold text-foreground">Primary Classes</h3>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {primaryClasses.map(renderRow)}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -485,6 +528,7 @@ function ClassRow({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const totalStudents = cls.sections.reduce((sum, s) => sum + s._count.enrollments, 0);
+  const isSecondary = cls.division.type === "SECONDARY";
 
   async function onDelete() {
     setDeleting(true);
@@ -502,53 +546,60 @@ function ClassRow({
 
   return (
     <>
-      <Card>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex gap-3">
-            {canManage && (
-              <input
-                type="checkbox"
-                checked={selected}
-                onChange={(e) => onToggle(e.target.checked)}
-                aria-label={`Select ${cls.name}`}
-                className="mt-1 size-4 shrink-0 rounded border-border text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-              />
-            )}
-            <div>
-              <p className="font-medium text-foreground">
-                {cls.name} <span className="text-sm font-normal text-foreground-soft">· {cls.division.type}</span>
-              </p>
-              <p className="mt-0.5 text-sm text-foreground-soft">
-                {cls.sections.length} Section{cls.sections.length === 1 ? "" : "s"} · {totalStudents} student
-                {totalStudents === 1 ? "" : "s"} · {cls._count.classSubjects} Subject{cls._count.classSubjects === 1 ? "" : "s"}
-              </p>
-              <p className="mt-1.5 text-sm text-foreground-muted">
-                {cls.sections.length === 0 ? "No sections yet." : cls.sections.map((s) => s.name).join(" · ")}
-              </p>
-            </div>
+      <Card className="flex flex-col">
+        <div className="flex items-start gap-2.5">
+          {canManage && (
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={(e) => onToggle(e.target.checked)}
+              aria-label={`Select ${cls.name}`}
+              className="mt-1 size-4 shrink-0 rounded border-border text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            />
+          )}
+          <div
+            className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${
+              isSecondary ? "bg-accent-soft text-accent" : "bg-success-soft text-success"
+            }`}
+          >
+            <GraduationCap className="size-5" />
           </div>
-          <div className="flex shrink-0 gap-2">
-            <Link href={`/schools/${schoolId}/academic/classes/${cls.id}`}>
-              <Button size="sm" variant="outline">
-                View
-              </Button>
-            </Link>
-            <Link href={`/schools/${schoolId}/academic/classes/${cls.id}`}>
-              <Button size="sm" variant="ghost">
-                Edit
-              </Button>
-            </Link>
-            {canManage && (
-              <Button
-                size="sm"
-                variant="danger"
-                icon={<Trash2 className="size-4" />}
-                onClick={() => setShowDeleteConfirm(true)}
-              >
-                Delete
-              </Button>
-            )}
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-semibold text-foreground">{cls.name}</p>
+            <Badge tone={isSecondary ? "accent" : "success"} className="mt-1">
+              {isSecondary ? "Secondary" : "Primary"}
+            </Badge>
           </div>
+        </div>
+
+        <div className="mt-4 space-y-1 text-sm text-foreground-soft">
+          <p>
+            {cls.sections.length} Section{cls.sections.length === 1 ? "" : "s"}
+          </p>
+          <p>
+            {totalStudents} student{totalStudents === 1 ? "" : "s"} · {cls._count.classSubjects} Subject
+            {cls._count.classSubjects === 1 ? "" : "s"}
+          </p>
+        </div>
+
+        <div className="mt-4 flex items-center gap-1.5">
+          <Link href={`/schools/${schoolId}/academic/classes/${cls.id}`} className="flex-1">
+            <Button size="sm" className="w-full" icon={<ChevronRight className="size-4" />}>
+              View Sections
+            </Button>
+          </Link>
+          <Link href={`/schools/${schoolId}/academic/classes/${cls.id}`}>
+            <Button size="sm" variant="ghost" icon={<Pencil className="size-4" />} aria-label={`Edit ${cls.name}`} />
+          </Link>
+          {canManage && (
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<Trash2 className="size-4" />}
+              onClick={() => setShowDeleteConfirm(true)}
+              aria-label={`Delete ${cls.name}`}
+            />
+          )}
         </div>
       </Card>
 

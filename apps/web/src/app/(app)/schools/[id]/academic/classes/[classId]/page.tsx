@@ -35,6 +35,16 @@ import { ArrowLeftRight, ChevronRight, GraduationCap, Pencil, Plus, Search, Tras
 // comment on the roster-loading effect below for why that mattered.
 type ClassRosterStudent = SectionStudent & { sectionName: string; className: string };
 
+// A subtle, cycling visual identity per section card — decorative only,
+// never a security boundary (isolation is enforced by classId/sectionId on
+// every request, not by which color a card happens to be).
+const SECTION_ACCENTS = [
+  { soft: "bg-accent-soft", avatar: "bg-white text-accent" },
+  { soft: "bg-success-soft", avatar: "bg-white text-success" },
+  { soft: "bg-purple-50", avatar: "bg-white text-purple-600" },
+  { soft: "bg-orange-50", avatar: "bg-white text-orange-600" },
+] as const;
+
 export default function ClassDetailPage({ params }: { params: Promise<{ id: string; classId: string }> }) {
   const { id: schoolId, classId } = use(params);
   const { user, accessToken } = useAuth();
@@ -727,11 +737,12 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
-                  {sections.map((s) => {
+                  {sections.map((s, index) => {
                     const rows = assignmentsBySection[s.id];
                     const subjectsHere = new Set(rows?.map((r) => r.subjectId)).size;
                     const teachersHere = new Set(rows?.map((r) => r.teacher.id)).size;
                     const isEditing = editingSectionId === s.id;
+                    const accent = SECTION_ACCENTS[index % SECTION_ACCENTS.length];
                     return (
                       <div key={s.id} className="rounded-xl border border-border p-4">
                         {isEditing ? (
@@ -770,19 +781,21 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                           </div>
                         ) : (
                           <>
-                            <div className="flex items-center gap-3">
-                              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-semibold text-accent">
-                                {s.name.charAt(0).toUpperCase()}
-                              </div>
-                              <div className="min-w-0">
-                                <p className="truncate font-medium text-foreground">Section {s.name}</p>
-                                <p className="text-xs text-foreground-muted">{cls?.name}</p>
+                            <div className={`-m-4 mb-0 rounded-t-xl border-b border-border px-4 py-3 ${accent.soft}`}>
+                              <div className="flex items-center gap-3">
+                                <div className={`flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${accent.avatar}`}>
+                                  {s.name.charAt(0).toUpperCase()}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="truncate font-medium text-foreground">Section {s.name}</p>
+                                  <p className="text-xs text-foreground-muted">{cls?.name}</p>
+                                </div>
                               </div>
                             </div>
 
                             <div className="mt-3.5 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
                               <Stat label="Students" value={s._count.enrollments} />
-                              <Stat label="Capacity" value={s.capacity === null ? "Unlimited" : s.capacity} />
+                              {s.capacity !== null && <Stat label="Capacity" value={s.capacity} />}
                               <Stat label="Subjects" value={rows ? subjectsHere : "…"} />
                               <Stat label="Teachers" value={rows ? teachersHere : "…"} />
                             </div>

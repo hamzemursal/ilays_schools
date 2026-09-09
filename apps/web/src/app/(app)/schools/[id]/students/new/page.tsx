@@ -1,11 +1,15 @@
 "use client";
 
 import { use } from "react";
+import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StudentWizard } from "@/features/students/wizard/StudentWizard";
 
 export default function NewStudentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: schoolId } = use(params);
+  const searchParams = useSearchParams();
+  const initialClassId = searchParams.get("classId") ?? undefined;
+  const initialSectionId = searchParams.get("sectionId") ?? undefined;
 
   return (
     <div>
@@ -19,7 +23,7 @@ export default function NewStudentPage({ params }: { params: Promise<{ id: strin
         ]}
       />
       <div className="mx-auto max-w-3xl p-4 sm:p-6">
-        <StudentWizard schoolId={schoolId} />
+        <StudentWizard schoolId={schoolId} initialClassId={initialClassId} initialSectionId={initialSectionId} />
       </div>
     </div>
   );

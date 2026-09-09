@@ -12,6 +12,7 @@ import {
   type Section,
   type SectionStudent,
   type SectionTeacherAssignment,
+  type Teacher,
 } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -21,11 +22,14 @@ import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
+import { useToast } from "@/components/ui/Toast";
 import {
   BookOpen,
   CalendarCheck,
   ClipboardCheck,
   GraduationCap,
+  Plus,
+  UserPlus,
   Users,
 } from "lucide-react";
 
@@ -71,16 +75,25 @@ export default function SectionWorkspacePage({
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load section"));
   }, [accessToken, schoolId, classId, sectionId]);
 
+  function refreshTeacherAssignments() {
+    if (!accessToken || !yearId) return;
+    api
+      .listSectionTeacherAssignments(accessToken, schoolId, classId, sectionId, yearId)
+      .then(setTeacherAssignments)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load teacher assignments"));
+  }
+
   useEffect(() => {
     if (!accessToken || !yearId) return;
     api
       .listSectionStudents(accessToken, schoolId, classId, sectionId, yearId)
       .then(setStudents)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load students"));
-    api
-      .listSectionTeacherAssignments(accessToken, schoolId, classId, sectionId, yearId)
-      .then(setTeacherAssignments)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load teacher assignments"));
+    refreshTeacherAssignments();
+    // refreshTeacherAssignments closes over the same accessToken/schoolId/
+    // classId/sectionId/yearId this effect already depends on — safe to
+    // omit, same reasoning as every other named-loader effect in this app.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, schoolId, classId, sectionId, yearId]);
 
   useEffect(() => {
@@ -159,11 +172,23 @@ export default function SectionWorkspacePage({
             teachersCount={teachersHere.size}
           />
         )}
-        {tab === "Students" && <StudentsTab schoolId={schoolId} students={students} />}
+        {tab === "Students" && <StudentsTab schoolId={schoolId} classId={classId} sectionId={sectionId} students={students} />}
         {tab === "Subjects" && (
           <SubjectsTab schoolId={schoolId} classSubjects={classSubjects} taughtSubjectIds={subjectsTaughtHere} />
         )}
-        {tab === "Teachers" && <TeachersTab schoolId={schoolId} assignments={teacherAssignments} yearName={yearName} />}
+        {tab === "Teachers" && (
+          <TeachersTab
+            schoolId={schoolId}
+            accessToken={accessToken!}
+            sectionId={sectionId}
+            yearId={yearId}
+            yearName={yearName}
+            assignments={teacherAssignments}
+            classSubjects={classSubjects}
+            taughtSubjectIds={subjectsTaughtHere}
+            onAssigned={refreshTeacherAssignments}
+          />
+        )}
         {tab === "Attendance" && <AttendanceTab href={attendanceHref()} />}
         {tab === "Exams & Results" && (
           <ExamsTab schoolId={schoolId} classId={classId} sectionId={sectionId} exams={examsForClass} yearName={yearName} />
@@ -173,11 +198,28 @@ export default function SectionWorkspacePage({
   );
 }
 
-function StatCard({ icon: Icon, label, value }: { icon: React.ComponentType<{ className?: string }>; label: string; value: React.ReactNode }) {
+const STAT_TONES = {
+  accent: "bg-accent-soft text-accent",
+  success: "bg-success-soft text-success",
+  purple: "bg-purple-50 text-purple-600",
+  orange: "bg-orange-50 text-orange-600",
+} as const;
+
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  tone = "accent",
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: React.ReactNode;
+  tone?: keyof typeof STAT_TONES;
+}) {
   return (
     <Card>
       <div className="flex items-center gap-3">
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
+        <div className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${STAT_TONES[tone]}`}>
           <Icon className="size-5" />
         </div>
         <div>
@@ -202,22 +244,57 @@ function OverviewTab({
 }) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <StatCard icon={Users} label="Students" value={studentsCount ?? "…"} />
-      <StatCard icon={BookOpen} label="Subjects taught" value={subjectsCount} />
-      <StatCard icon={GraduationCap} label="Teachers" value={teachersCount} />
-      <StatCard icon={ClipboardCheck} label="Capacity" value={section.capacity === null ? "Unlimited" : section.capacity} />
+      <StatCard icon={Users} label="Students" value={studentsCount ?? "…"} tone="accent" />
+      <StatCard icon={BookOpen} label="Subjects taught" value={subjectsCount} tone="purple" />
+      <StatCard icon={GraduationCap} label="Teachers" value={teachersCount} tone="success" />
+      {section.capacity !== null && <StatCard icon={ClipboardCheck} label="Capacity" value={section.capacity} tone="orange" />}
     </div>
   );
 }
 
-function StudentsTab({ schoolId, students }: { schoolId: string; students: SectionStudent[] | null }) {
+function StudentsTab({
+  schoolId,
+  classId,
+  sectionId,
+  students,
+}: {
+  schoolId: string;
+  classId: string;
+  sectionId: string;
+  students: SectionStudent[] | null;
+}) {
+  const addStudentHref = `/schools/${schoolId}/students/new?classId=${classId}&sectionId=${sectionId}`;
+
   if (!students) return <SkeletonCards count={2} />;
   if (students.length === 0) {
-    return <EmptyState icon={Users} title="No students in this section yet" description="Enroll a student into this section from Students → Add student." />;
+    return (
+      <EmptyState
+        icon={Users}
+        title="No students in this section yet"
+        description="Enroll a student directly into this class and section."
+        action={
+          <Link href={addStudentHref}>
+            <Button size="sm" icon={<UserPlus className="size-4" />}>
+              Add student
+            </Button>
+          </Link>
+        }
+      />
+    );
   }
   return (
     <Card padding="none">
-      <CardHeader title="Students" description={`${students.length} student(s) enrolled in this section.`} />
+      <CardHeader
+        title="Students"
+        description={`${students.length} student(s) enrolled in this section.`}
+        actions={
+          <Link href={addStudentHref}>
+            <Button size="sm" icon={<UserPlus className="size-4" />}>
+              Add student
+            </Button>
+          </Link>
+        }
+      />
       <div className="overflow-x-auto">
         <table className="w-full min-w-[480px] text-left text-sm">
           <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
@@ -291,19 +368,164 @@ function SubjectsTab({
   );
 }
 
+const ASSIGN_CHECKBOX_CLASS =
+  "size-4 shrink-0 rounded border-border text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40";
+
 function TeachersTab({
   schoolId,
-  assignments,
+  accessToken,
+  sectionId,
+  yearId,
   yearName,
+  assignments,
+  classSubjects,
+  taughtSubjectIds,
+  onAssigned,
 }: {
   schoolId: string;
-  assignments: SectionTeacherAssignment[] | null;
+  accessToken: string;
+  sectionId: string;
+  yearId: string;
   yearName: string;
+  assignments: SectionTeacherAssignment[] | null;
+  classSubjects: ClassSubjectRecord[] | null;
+  taughtSubjectIds: Set<string>;
+  onAssigned: () => void;
 }) {
+  const { show } = useToast();
+  const [showForm, setShowForm] = useState(false);
+  const [allTeachers, setAllTeachers] = useState<Teacher[] | null>(null);
+  const [teacherId, setTeacherId] = useState("");
+  const [subjectIds, setSubjectIds] = useState<Set<string>>(new Set());
+  const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+
+  function openForm() {
+    setShowForm(true);
+    setAssignError(null);
+    if (!allTeachers) api.listTeachers(accessToken, schoolId).then(setAllTeachers);
+  }
+
+  function toggleSubject(subjectId: string, checked: boolean) {
+    const next = new Set(subjectIds);
+    if (checked) next.add(subjectId);
+    else next.delete(subjectId);
+    setSubjectIds(next);
+  }
+
+  const assignableSubjects = (classSubjects ?? []).filter((cs) => !taughtSubjectIds.has(cs.subjectId));
+
+  async function onAssign() {
+    if (!teacherId || subjectIds.size === 0) return;
+    setAssigning(true);
+    setAssignError(null);
+    try {
+      const results = await Promise.allSettled(
+        Array.from(subjectIds).map((subjectId) =>
+          api.addTeacherAssignment(accessToken, schoolId, teacherId, { academicYearId: yearId, sectionId, subjectId }),
+        ),
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      const added = results.length - failed;
+      if (failed > 0) {
+        setAssignError(`Assigned ${added} of ${results.length} subject(s) — the rest failed.`);
+      } else {
+        show(`${added} subject assignment${added === 1 ? "" : "s"} added.`);
+        setShowForm(false);
+      }
+      setTeacherId("");
+      setSubjectIds(new Set());
+      onAssigned();
+    } catch (err) {
+      setAssignError(err instanceof ApiError ? err.message : "Failed to assign teacher");
+    } finally {
+      setAssigning(false);
+    }
+  }
+
   if (!assignments) return <SkeletonCards count={1} />;
+
   return (
     <Card padding="none">
-      <CardHeader title="Teachers" description={`Who teaches this section's subjects in ${yearName || "the selected year"}.`} />
+      <CardHeader
+        title="Teachers"
+        description={`Who teaches this section's subjects in ${yearName || "the selected year"}.`}
+        actions={
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" icon={<Plus className="size-4" />} onClick={openForm} disabled={showForm}>
+              Assign teacher
+            </Button>
+            <Link href={`/schools/${schoolId}/teachers/new`}>
+              <Button size="sm" variant="ghost" icon={<UserPlus className="size-4" />}>
+                Add new teacher
+              </Button>
+            </Link>
+          </div>
+        }
+      />
+
+      {showForm && (
+        <div className="space-y-3 border-b border-border bg-surface-soft p-5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-foreground-muted">Teacher</label>
+              <Select value={teacherId} onChange={(e) => setTeacherId(e.target.value)} disabled={!allTeachers}>
+                <option value="">{allTeachers ? "Select a teacher…" : "Loading…"}</option>
+                {allTeachers?.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.firstName} {t.lastName}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-foreground-muted">Subjects</label>
+            {assignableSubjects.length === 0 ? (
+              <p className="rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground-muted">
+                Every subject in this class is already assigned to a teacher for this section.
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-background p-2 sm:grid-cols-3">
+                {assignableSubjects.map((cs) => (
+                  <label
+                    key={cs.subjectId}
+                    className={`flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm ${
+                      subjectIds.has(cs.subjectId) ? "bg-accent-soft text-accent" : "hover:bg-surface-hover"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={subjectIds.has(cs.subjectId)}
+                      onChange={(e) => toggleSubject(cs.subjectId, e.target.checked)}
+                      className={ASSIGN_CHECKBOX_CLASS}
+                    />
+                    <span className="truncate font-medium">{cs.subject.name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {assignError && <Alert tone="danger">{assignError}</Alert>}
+
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              loading={assigning}
+              disabled={!teacherId || subjectIds.size === 0}
+              onClick={onAssign}
+            >
+              {subjectIds.size > 0 ? `Assign ${subjectIds.size} subject${subjectIds.size === 1 ? "" : "s"}` : "Assign"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setShowForm(false)} disabled={assigning}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
       {assignments.length === 0 ? (
         <div className="p-5">
           <EmptyState icon={GraduationCap} title="No teacher assigned to this section yet" />

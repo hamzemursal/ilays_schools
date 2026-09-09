@@ -19,7 +19,15 @@ import { emptyWizardState, WIZARD_STEPS, type WizardState } from "./types";
 
 type Phase = "wizard" | "duplicates" | "success";
 
-export function StudentWizard({ schoolId }: { schoolId: string }) {
+export function StudentWizard({
+  schoolId,
+  initialClassId,
+  initialSectionId,
+}: {
+  schoolId: string;
+  initialClassId?: string;
+  initialSectionId?: string;
+}) {
   const router = useRouter();
   const { accessToken } = useAuth();
   const { show } = useToast();
@@ -43,9 +51,22 @@ export function StudentWizard({ schoolId }: { schoolId: string }) {
         setYears(y);
         setClasses(c);
         const current = y.find((yr) => yr.isCurrent) ?? y[0];
-        if (current) setState((prev) => ({ ...prev, academicYearId: current.id }));
+        // initialClassId/initialSectionId arrive from a section workspace's
+        // "Add student" link — prefilled as a convenience default, not a
+        // lock, so the admin can still change them on this step if needed.
+        const presetClass = initialClassId ? c.find((cls) => cls.id === initialClassId) : undefined;
+        const presetSection = presetClass?.sections.find((s) => s.id === initialSectionId);
+        setState((prev) => ({
+          ...prev,
+          academicYearId: prev.academicYearId || current?.id || "",
+          classId: prev.classId || presetClass?.id || "",
+          sectionId: prev.sectionId || presetSection?.id || "",
+        }));
       })
       .catch((err) => setLoadError(err instanceof ApiError ? err.message : "Failed to load form data"));
+    // initialClassId/initialSectionId are read once, from the URL this
+    // component mounted with — not meant to re-trigger this load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, schoolId]);
 
   useEffect(() => {

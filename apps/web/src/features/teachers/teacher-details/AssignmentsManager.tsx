@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BookUser, Check, Pencil, Plus, Trash2 } from "lucide-react";
+import { BookUser, Check, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type AcademicYear, type ClassSubjectRecord, type ClassWithSections, type Teacher } from "@/lib/api";
 import { ApiError } from "@/lib/auth-context";
 import { teachersApi } from "../api";
@@ -12,6 +12,9 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FormField, Select } from "@/components/ui/FormControls";
 import { useToast } from "@/components/ui/Toast";
+
+const CHECKBOX_CLASS =
+  "size-4 shrink-0 rounded border-border text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40";
 
 type TeacherAssignment = Teacher["assignments"][number];
 
@@ -39,7 +42,7 @@ export function AssignmentsManager({
   const [academicYearId, setAcademicYearId] = useState("");
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
-  const [subjectId, setSubjectId] = useState("");
+  const [subjectIds, setSubjectIds] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TeacherAssignment | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -61,7 +64,7 @@ export function AssignmentsManager({
     setAcademicYearId("");
     setClassId("");
     setSectionId("");
-    setSubjectId("");
+    setSubjectIds(new Set());
     setEditing(true);
   }
 
@@ -69,26 +72,60 @@ export function AssignmentsManager({
     setAcademicYearId(newYearId);
     setClassId("");
     setSectionId("");
-    setSubjectId("");
+    setSubjectIds(new Set());
   }
 
   function onClassChange(newClassId: string) {
     setClassId(newClassId);
     setSectionId("");
-    setSubjectId("");
+    setSubjectIds(new Set());
   }
 
+  function onSectionChange(newSectionId: string) {
+    setSectionId(newSectionId);
+    setSubjectIds(new Set());
+  }
+
+  function toggleSubject(subjectId: string, checked: boolean) {
+    const next = new Set(subjectIds);
+    if (checked) next.add(subjectId);
+    else next.delete(subjectId);
+    setSubjectIds(next);
+  }
+
+  // Subjects this teacher already holds for the section currently picked
+  // above — checked against here (not just left for the backend's unique
+  // constraint to reject) so the list simply doesn't offer them again.
+  const alreadyAssignedSubjectIds = new Set(
+    teacher.assignments.filter((a) => a.academicYearId === academicYearId && a.section.id === sectionId).map((a) => a.subject.id),
+  );
+
   async function onAdd() {
-    if (!academicYearId || !classId || !sectionId || !subjectId) return;
+    if (!academicYearId || !classId || !sectionId || subjectIds.size === 0) return;
     setAdding(true);
     setError(null);
     try {
-      await teachersApi.addAssignment(accessToken, schoolId, teacher.id, { academicYearId, sectionId, subjectId });
+      const results = await Promise.allSettled(
+        Array.from(subjectIds).map((subjectId) =>
+          teachersApi.addAssignment(accessToken, schoolId, teacher.id, { academicYearId, sectionId, subjectId }),
+        ),
+      );
       const updated = await teachersApi.getOne(accessToken, schoolId, teacher.id);
       onChange(updated);
-      show("Assignment added.");
+
+      const failed = results.filter((r) => r.status === "rejected").length;
+      const added = results.length - failed;
+      if (failed > 0) {
+        const firstError = results.find((r): r is PromiseRejectedResult => r.status === "rejected")?.reason;
+        setError(
+          `Added ${added} of ${results.length} subject(s). ${firstError instanceof ApiError ? firstError.message : "Some assignments failed."}`,
+        );
+      } else {
+        show(`${added} subject assignment${added === 1 ? "" : "s"} added.`);
+      }
+      setSubjectIds(new Set());
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to add assignment");
+      setError(err instanceof ApiError ? err.message : "Failed to add assignments");
     } finally {
       setAdding(false);
     }
@@ -206,12 +243,7 @@ export function AssignmentsManager({
                 </Select>
               </FormField>
               <FormField label="Section" required className="w-auto">
-                <Select
-                  value={sectionId}
-                  onChange={(e) => setSectionId(e.target.value)}
-                  disabled={!classId}
-                  className="w-auto"
-                >
+                <Select value={sectionId} onChange={(e) => onSectionChange(e.target.value)} disabled={!classId} className="w-auto">
                   <option value="">Select section</option>
                   {(selectedClass?.sections ?? []).map((s) => (
                     <option key={s.id} value={s.id}>
@@ -220,24 +252,31 @@ export function AssignmentsManager({
                   ))}
                 </Select>
               </FormField>
-              <FormField label="Subject" required className="w-auto">
-                <ClassSubjectSelect
+            </div>
+
+            {classId && (
+              <div className="mt-3">
+                <ClassSubjectChecklist
                   key={classId}
                   accessToken={accessToken}
                   schoolId={schoolId}
                   classId={classId}
-                  value={subjectId}
-                  onChange={setSubjectId}
+                  selected={subjectIds}
+                  alreadyAssigned={alreadyAssignedSubjectIds}
+                  onToggle={toggleSubject}
                 />
-              </FormField>
+              </div>
+            )}
+
+            <div className="mt-3 flex items-center gap-2">
               <Button
                 size="sm"
                 icon={<Plus className="size-4" />}
                 loading={adding}
-                disabled={!academicYearId || !classId || !sectionId || !subjectId}
+                disabled={!academicYearId || !classId || !sectionId || subjectIds.size === 0}
                 onClick={onAdd}
               >
-                Add
+                {subjectIds.size > 0 ? `Add ${subjectIds.size} subject${subjectIds.size === 1 ? "" : "s"}` : "Add"}
               </Button>
             </div>
             {error && (
@@ -266,18 +305,20 @@ export function AssignmentsManager({
   );
 }
 
-function ClassSubjectSelect({
+function ClassSubjectChecklist({
   accessToken,
   schoolId,
   classId,
-  value,
-  onChange,
+  selected,
+  alreadyAssigned,
+  onToggle,
 }: {
   accessToken: string;
   schoolId: string;
   classId: string;
-  value: string;
-  onChange: (subjectId: string) => void;
+  selected: Set<string>;
+  alreadyAssigned: Set<string>;
+  onToggle: (subjectId: string, checked: boolean) => void;
 }) {
   const [subjects, setSubjects] = useState<ClassSubjectRecord[] | null>(null);
 
@@ -289,14 +330,49 @@ function ClassSubjectSelect({
       .catch(() => setSubjects([]));
   }, [accessToken, schoolId, classId]);
 
+  if (subjects === null) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-border px-3 py-4 text-sm text-foreground-muted">
+        <Loader2 className="size-4 animate-spin" /> Loading subjects…
+      </div>
+    );
+  }
+
+  if (subjects.length === 0) {
+    return (
+      <p className="rounded-lg border border-border px-3 py-4 text-sm text-foreground-muted">
+        This class has no subjects assigned yet — add subjects to it first, in Academic → Classes &amp; sections.
+      </p>
+    );
+  }
+
   return (
-    <Select value={value} onChange={(e) => onChange(e.target.value)} disabled={!classId || !subjects} className="w-auto">
-      <option value="">{classId && subjects === null ? "Loading…" : "Select subject"}</option>
-      {(subjects ?? []).map((cs) => (
-        <option key={cs.subjectId} value={cs.subjectId}>
-          {cs.subject.name}
-        </option>
-      ))}
-    </Select>
+    <div className="grid grid-cols-2 gap-1 rounded-lg border border-border p-2 sm:grid-cols-3 lg:grid-cols-4">
+      {subjects.map((cs) => {
+        const taken = alreadyAssigned.has(cs.subjectId);
+        return (
+          <label
+            key={cs.subjectId}
+            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${
+              taken
+                ? "cursor-not-allowed text-foreground-muted opacity-60"
+                : selected.has(cs.subjectId)
+                  ? "cursor-pointer bg-accent-soft text-accent"
+                  : "cursor-pointer hover:bg-surface-hover"
+            }`}
+            title={taken ? "Already assigned to this class & section" : undefined}
+          >
+            <input
+              type="checkbox"
+              checked={selected.has(cs.subjectId) || taken}
+              disabled={taken}
+              onChange={(e) => onToggle(cs.subjectId, e.target.checked)}
+              className={CHECKBOX_CLASS}
+            />
+            <span className="truncate font-medium">{cs.subject.name}</span>
+          </label>
+        );
+      })}
+    </div>
   );
 }

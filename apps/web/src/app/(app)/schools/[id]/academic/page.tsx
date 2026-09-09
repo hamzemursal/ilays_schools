@@ -827,6 +827,11 @@ function ExamRow({
   const [maxMarks, setMaxMarks] = useState("100");
   const [examDate, setExamDate] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  // Collapsed by default — with several exams on the page, an "Add a new
+  // subject" form permanently expanded under every single one turns simple
+  // browsing into a wall of dropdowns. Opening it is a deliberate action per
+  // exam, not the default view.
+  const [showAddSubjectForm, setShowAddSubjectForm] = useState(false);
   const { show } = useToast();
 
   async function onAddSubject(e: FormEvent) {
@@ -841,6 +846,7 @@ function ExamRow({
       });
       setExams((prev) => prev.map((ex) => (ex.id === exam.id ? { ...ex, examSubjects: [...ex.examSubjects, examSubject] } : ex)));
       setExamDate("");
+      setShowAddSubjectForm(false);
       show("Subject scheduled for this exam.");
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Failed to add subject");
@@ -932,31 +938,53 @@ function ExamRow({
       </Card>
 
       {canManage && classes.length > 0 && subjects.length > 0 && (
-        <Card padding="none">
-          <CardHeader title="Add a new subject" description="Schedule another class/subject for this same exam." />
-          <form onSubmit={onAddSubject} className="flex flex-wrap items-end gap-2 p-5">
-            <Select value={classId} onChange={(e) => setClassId(e.target.value)} className="w-auto">
-              {classes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-            <Select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} className="w-auto">
-              {subjects.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
-            <Input type="number" min={1} value={maxMarks} onChange={(e) => setMaxMarks(e.target.value)} placeholder="Max marks" className="w-28" />
-            <Input type="date" value={examDate} onChange={(e) => setExamDate(e.target.value)} className="w-auto" aria-label="Exam date" />
-            <Button type="submit" size="sm" variant="outline">
-              Add subject
+        <>
+          {!showAddSubjectForm ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              icon={<Plus className="size-3.5" />}
+              onClick={() => setShowAddSubjectForm(true)}
+            >
+              Add Subject
             </Button>
-            {formError && <p className="w-full text-sm text-danger">{formError}</p>}
-          </form>
-        </Card>
+          ) : (
+            <Card padding="none">
+              <CardHeader
+                title="Add a new subject"
+                description="Schedule another class/subject for this same exam."
+                actions={
+                  <Button type="button" size="sm" variant="ghost" onClick={() => setShowAddSubjectForm(false)}>
+                    Cancel
+                  </Button>
+                }
+              />
+              <form onSubmit={onAddSubject} className="flex flex-wrap items-end gap-2 p-5">
+                <Select value={classId} onChange={(e) => setClassId(e.target.value)} className="w-auto">
+                  {classes.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </Select>
+                <Select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} className="w-auto">
+                  {subjects.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+                <Input type="number" min={1} value={maxMarks} onChange={(e) => setMaxMarks(e.target.value)} placeholder="Max marks" className="w-28" />
+                <Input type="date" value={examDate} onChange={(e) => setExamDate(e.target.value)} className="w-auto" aria-label="Exam date" />
+                <Button type="submit" size="sm" variant="outline">
+                  Add subject
+                </Button>
+                {formError && <p className="w-full text-sm text-danger">{formError}</p>}
+              </form>
+            </Card>
+          )}
+        </>
       )}
     </div>
   );

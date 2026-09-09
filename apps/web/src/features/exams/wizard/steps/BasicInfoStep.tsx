@@ -12,8 +12,36 @@ const EXAM_TYPES: { value: ExamType; label: string }[] = [
   { value: "OTHER", label: "Other" },
 ];
 
-export function isBasicInfoValid(state: ExamWizardState): boolean {
-  return state.name.trim().length > 0 && state.academicYearId.length > 0;
+function formatDate(value: string): string {
+  return new Date(value).toLocaleDateString();
+}
+
+// Both dates are optional, but once either is set they must make sense
+// together — and against the academic year that actually contains this
+// exam. Returns a message to show (and to block "Next" on) or null when
+// everything lines up.
+export function dateRangeError(state: ExamWizardState, years: AcademicYear[]): string | null {
+  if (state.startDate && state.endDate && state.endDate < state.startDate) {
+    return "End Date can't be before Start Date.";
+  }
+
+  const year = years.find((y) => y.id === state.academicYearId);
+  if (year) {
+    const yearStart = year.startDate.slice(0, 10);
+    const yearEnd = year.endDate.slice(0, 10);
+    if (state.startDate && (state.startDate < yearStart || state.startDate > yearEnd)) {
+      return `Start Date must fall within ${year.name} (${formatDate(year.startDate)} – ${formatDate(year.endDate)}).`;
+    }
+    if (state.endDate && (state.endDate < yearStart || state.endDate > yearEnd)) {
+      return `End Date must fall within ${year.name} (${formatDate(year.startDate)} – ${formatDate(year.endDate)}).`;
+    }
+  }
+
+  return null;
+}
+
+export function isBasicInfoValid(state: ExamWizardState, years: AcademicYear[]): boolean {
+  return state.name.trim().length > 0 && state.academicYearId.length > 0 && dateRangeError(state, years) === null;
 }
 
 export function BasicInfoStep({
@@ -25,6 +53,16 @@ export function BasicInfoStep({
   years: AcademicYear[];
   onChange: (patch: Partial<ExamWizardState>) => void;
 }) {
+  const error = dateRangeError(state, years);
+
+  function onStartDateChange(value: string) {
+    // Exam Date (set in the Settings step) auto-follows Start Date until the
+    // admin deliberately edits it there — the two used to drift apart
+    // silently (Start Date corrected here, Exam Date left stale), which is
+    // exactly the mistake this keeps from happening again.
+    onChange(state.examDateTouched ? { startDate: value } : { startDate: value, examDate: value });
+  }
+
   return (
     <div className="space-y-5">
       <div>
@@ -66,12 +104,16 @@ export function BasicInfoStep({
         </FormField>
 
         <FormField label="Start Date" hint="Optional">
-          <Input type="date" value={state.startDate} onChange={(e) => onChange({ startDate: e.target.value })} />
+          <Input type="date" value={state.startDate} onChange={(e) => onStartDateChange(e.target.value)} />
         </FormField>
 
         <FormField label="End Date" hint="Optional">
           <Input type="date" value={state.endDate} onChange={(e) => onChange({ endDate: e.target.value })} />
         </FormField>
+
+        {error && (
+          <p className="sm:col-span-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>
+        )}
 
         <FormField label="Description" hint="Optional" className="sm:col-span-2">
           <Textarea

@@ -54,7 +54,7 @@ export function ExamWizard({ schoolId }: { schoolId: string }) {
   }
 
   const canProceed =
-    step === 0 ? isBasicInfoValid(state) : step === 1 ? isClassesSubjectsValid(state) : step === 2 ? isSettingsValid(state) : true;
+    step === 0 ? isBasicInfoValid(state, years) : step === 1 ? isClassesSubjectsValid(state) : step === 2 ? isSettingsValid(state) : true;
 
   async function submit() {
     if (!accessToken) return;

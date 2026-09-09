@@ -4,6 +4,16 @@ import { Alert } from "@/components/ui/Alert";
 import { FormField, Input } from "@/components/ui/FormControls";
 import type { ExamWizardState } from "../types";
 
+// Only meaningful once both bounds are known — Start Date/End Date are
+// optional, so an exam that never set them has nothing to check Exam Date
+// against.
+export function examDateError(state: ExamWizardState): string | null {
+  if (!state.examDate) return null;
+  if (state.startDate && state.examDate < state.startDate) return "Exam Date can't be before Start Date.";
+  if (state.endDate && state.examDate > state.endDate) return "Exam Date can't be after End Date.";
+  return null;
+}
+
 export function isSettingsValid(state: ExamWizardState): boolean {
   const max = Number(state.maxMarks);
   if (!state.maxMarks.trim() || !Number.isFinite(max) || max <= 0) return false;
@@ -11,6 +21,7 @@ export function isSettingsValid(state: ExamWizardState): boolean {
     const pass = Number(state.passingMark);
     if (!Number.isFinite(pass) || pass < 0 || pass > max) return false;
   }
+  if (examDateError(state) !== null) return false;
   return true;
 }
 
@@ -18,6 +29,7 @@ export function SettingsStep({ state, onChange }: { state: ExamWizardState; onCh
   const max = Number(state.maxMarks);
   const pass = state.passingMark.trim() ? Number(state.passingMark) : null;
   const passingMarkError = pass !== null && Number.isFinite(max) && pass > max ? "Passing mark can't exceed the maximum mark." : undefined;
+  const dateError = examDateError(state);
 
   return (
     <div className="space-y-5">
@@ -37,8 +49,17 @@ export function SettingsStep({ state, onChange }: { state: ExamWizardState; onCh
           <Input type="number" min={0} max={max || undefined} value={state.passingMark} onChange={(e) => onChange({ passingMark: e.target.value })} />
         </FormField>
 
-        <FormField label="Exam Date" hint="Optional — the sitting date for these subjects" className="sm:col-span-2">
-          <Input type="date" value={state.examDate} onChange={(e) => onChange({ examDate: e.target.value })} />
+        <FormField
+          label="Exam Date"
+          hint="Optional — the sitting date for these subjects. Follows Start Date until you change it here."
+          error={dateError ?? undefined}
+          className="sm:col-span-2"
+        >
+          <Input
+            type="date"
+            value={state.examDate}
+            onChange={(e) => onChange({ examDate: e.target.value, examDateTouched: true })}
+          />
         </FormField>
       </div>
 

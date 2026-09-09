@@ -12,6 +12,11 @@ export interface ExamWizardState {
   maxMarks: string;
   passingMark: string;
   examDate: string;
+  // False until the admin has deliberately edited Exam Date themselves —
+  // while false, Exam Date auto-follows Start Date, so the two dates can't
+  // silently drift apart the way they did before (Start Date corrected to
+  // fix an academic-year mismatch, Exam Date left behind at the old value).
+  examDateTouched: boolean;
 }
 
 export function emptyExamWizardState(defaultAcademicYearId: string): ExamWizardState {
@@ -27,6 +32,7 @@ export function emptyExamWizardState(defaultAcademicYearId: string): ExamWizardS
     maxMarks: "100",
     passingMark: "",
     examDate: "",
+    examDateTouched: false,
   };
 }
 

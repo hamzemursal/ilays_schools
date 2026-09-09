@@ -397,9 +397,16 @@ function ClassesSection({
     }
   }
 
+  // Only offer levels this school actually has — a school that has never
+  // had a Primary division shouldn't be shown "Primary" as a selectable
+  // filter, since it could never match anything real for them.
+  const hasSecondary = classes.some((c) => c.division.type === "SECONDARY");
+  const hasPrimary = classes.some((c) => c.division.type === "PRIMARY");
+  const showLevelFilter = hasSecondary && hasPrimary;
+
   const q = search.trim().toLowerCase();
   const filtered = classes.filter(
-    (c) => (levelFilter === "ALL" || c.division.type === levelFilter) && (!q || c.name.toLowerCase().includes(q)),
+    (c) => (!showLevelFilter || levelFilter === "ALL" || c.division.type === levelFilter) && (!q || c.name.toLowerCase().includes(q)),
   );
   const secondaryClasses = filtered.filter((c) => c.division.type === "SECONDARY");
   const primaryClasses = filtered.filter((c) => c.division.type === "PRIMARY");
@@ -441,13 +448,15 @@ function ClassesSection({
             </Select>
           </FormField>
         )}
-        <FormField label="School Level" className="w-auto">
-          <Select value={levelFilter} onChange={(e) => setLevelFilter(e.target.value as typeof levelFilter)} className="w-auto">
-            <option value="ALL">All levels</option>
-            <option value="SECONDARY">Secondary</option>
-            <option value="PRIMARY">Primary</option>
-          </Select>
-        </FormField>
+        {showLevelFilter && (
+          <FormField label="School Level" className="w-auto">
+            <Select value={levelFilter} onChange={(e) => setLevelFilter(e.target.value as typeof levelFilter)} className="w-auto">
+              <option value="ALL">All levels</option>
+              <option value="SECONDARY">Secondary</option>
+              <option value="PRIMARY">Primary</option>
+            </Select>
+          </FormField>
+        )}
         <FormField label="Search classes" className="w-auto">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-muted" />

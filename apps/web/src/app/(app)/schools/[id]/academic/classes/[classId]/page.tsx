@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import {
   api,
@@ -50,6 +50,12 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const { user, accessToken } = useAuth();
   const { show } = useToast();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Carried over from the class list's own Academic Year selector via
+  // "View Sections"/"Edit" (?year=...), so opening a class shows the same
+  // year you were already looking at — falls back to the current year once
+  // the year list loads, same as the list page and the Section Workspace.
+  const yearFromUrl = searchParams.get("year");
 
   const [cls, setCls] = useState<ClassWithSections | null>(null);
   const [allClasses, setAllClasses] = useState<ClassWithSections[] | null>(null);
@@ -59,7 +65,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const [subjects, setSubjects] = useState<ClassSubjectRecord[] | null>(null);
   const [allSubjects, setAllSubjects] = useState<Subject[]>([]);
   const [years, setYears] = useState<AcademicYear[]>([]);
-  const [yearId, setYearId] = useState("");
+  const [yearId, setYearId] = useState(yearFromUrl ?? "");
   const [assignmentsBySection, setAssignmentsBySection] = useState<Record<string, SectionTeacherAssignment[]>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -98,9 +104,8 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   async function loadAll() {
     if (!accessToken) return;
     try {
-      const [classes, secs, subs, y, allSubj] = await Promise.all([
+      const [classes, subs, y, allSubj] = await Promise.all([
         api.listClasses(accessToken, schoolId),
-        api.listSections(accessToken, schoolId, classId),
         api.listClassSubjects(accessToken, schoolId, classId),
         api.listAcademicYears(accessToken, schoolId),
         api.listSubjects(accessToken, schoolId),
@@ -112,7 +117,6 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
       }
       setCls(found);
       setAllClasses(classes);
-      setSections(secs);
       setSubjects(subs);
       setYears(y);
       setAllSubjects(allSubj);
@@ -132,6 +136,16 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, schoolId, classId]);
 
+  // Section student counts (and therefore the roster below) must be scoped
+  // to one academic year, the same way the class list page already is —
+  // Class/Section are permanent structures reused every year, so without a
+  // year filter a section with students actively enrolled in both 2026 and
+  // 2027 would show both cohorts combined as one inflated number.
+  useEffect(() => {
+    if (!accessToken || !yearId) return;
+    api.listSections(accessToken, schoolId, classId, yearId).then(setSections);
+  }, [accessToken, schoolId, classId, yearId]);
+
   // The roster used to come from GET /schools/:id/students (every student in
   // the school) filtered client-side by matching className/sectionName
   // strings — Class.name has no uniqueness constraint beyond
@@ -140,21 +154,21 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   // sections via listSectionStudents (the same backend-enforced,
   // classId+sectionId-scoped endpoint the Section Workspace uses) removes
   // that risk entirely — every row here is guaranteed to actually belong to
-  // this class.
+  // this class, for the selected academic year.
   useEffect(() => {
-    if (!accessToken || !sections || !cls) return;
+    if (!accessToken || !sections || !cls || !yearId) return;
     const className = cls.name;
     Promise.all(
       sections.map((s) =>
         api
-          .listSectionStudents(accessToken, schoolId, classId, s.id)
+          .listSectionStudents(accessToken, schoolId, classId, s.id, yearId)
           .then((rows) => rows.map((r) => ({ ...r, sectionName: s.name, className }))),
       ),
     ).then((results) => {
       const merged = results.flat().sort((a, b) => a.sectionName.localeCompare(b.sectionName) || a.rollNumber - b.rollNumber);
       setClassStudents(merged);
     });
-  }, [accessToken, schoolId, classId, sections, cls]);
+  }, [accessToken, schoolId, classId, sections, cls, yearId]);
 
   useEffect(() => {
     if (!accessToken || !sections || !yearId) return;
@@ -362,6 +376,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const transferDestinationClass = allClasses?.find((c) => c.id === effectiveToClassId);
   const schoolName = user?.schools.find((s) => s.id === schoolId)?.name ?? "School";
   const canManage = user?.permissions.includes("academic.manage") ?? false;
+  const yearName = years.find((y) => y.id === yearId)?.name ?? "";
   const unassignedSubjects = allSubjects.filter((s) => !subjects?.some((cs) => cs.subjectId === s.id));
 
   const studentSearchResults = (() => {
@@ -403,29 +418,43 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
           { label: schoolName },
         ]}
         actions={
-          cls && canManage ? (
+          cls && (
             <>
-              <Button
-                variant="outline"
-                size="sm"
-                icon={<ArrowLeftRight className="size-4" />}
-                onClick={() => setShowTransferForm((v) => !v)}
-              >
-                Class Transfer
-              </Button>
-              <Button variant="outline" size="sm" icon={<Pencil className="size-4" />} onClick={startRenameClass}>
-                Rename
-              </Button>
-              <Button
-                variant="danger"
-                size="sm"
-                icon={<Trash2 className="size-4" />}
-                onClick={() => setShowDeleteClass(true)}
-              >
-                Delete
-              </Button>
+              {years.length > 0 && (
+                <Select value={yearId} onChange={(e) => setYearId(e.target.value)} className="w-auto">
+                  {years.map((y) => (
+                    <option key={y.id} value={y.id}>
+                      {y.name}
+                      {y.isCurrent ? " (current)" : ""}
+                    </option>
+                  ))}
+                </Select>
+              )}
+              {canManage && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon={<ArrowLeftRight className="size-4" />}
+                    onClick={() => setShowTransferForm((v) => !v)}
+                  >
+                    Class Transfer
+                  </Button>
+                  <Button variant="outline" size="sm" icon={<Pencil className="size-4" />} onClick={startRenameClass}>
+                    Rename
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    icon={<Trash2 className="size-4" />}
+                    onClick={() => setShowDeleteClass(true)}
+                  >
+                    Delete
+                  </Button>
+                </>
+              )}
             </>
-          ) : undefined
+          )
         }
       />
 
@@ -729,7 +758,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
             <Card padding="none">
               <CardHeader
                 title="Sections"
-                description={`${sections.length} section(s) in this class — each one is managed independently.`}
+                description={`${sections.length} section(s) in this class for ${yearName || "the selected year"} — each one is managed independently.`}
               />
               {sections.length === 0 ? (
                 <div className="p-5">
@@ -802,7 +831,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
 
                             <div className="mt-4 flex flex-wrap gap-1.5">
                               <Link
-                                href={`/schools/${schoolId}/academic/classes/${classId}/sections/${s.id}`}
+                                href={`/schools/${schoolId}/academic/classes/${classId}/sections/${s.id}${yearId ? `?year=${yearId}` : ""}`}
                                 className="flex-1"
                               >
                                 <Button size="sm" variant="outline" className="w-full">
@@ -855,7 +884,9 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
               <CardHeader
                 title="Students"
                 description={
-                  classStudents ? `${classStudents.length} student(s) currently enrolled in this class.` : undefined
+                  classStudents
+                    ? `${classStudents.length} student(s) enrolled in this class for ${yearName || "the selected year"}.`
+                    : undefined
                 }
                 actions={
                   classStudents &&

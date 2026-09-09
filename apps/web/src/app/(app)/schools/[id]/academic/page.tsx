@@ -418,6 +418,7 @@ function ClassesSection({
         schoolId={schoolId}
         accessToken={accessToken}
         cls={cls}
+        yearId={yearId}
         canManage={canManage}
         selected={selectedIds.has(cls.id)}
         onToggle={(checked) => toggle(cls.id, checked)}
@@ -520,6 +521,7 @@ function ClassRow({
   schoolId,
   accessToken,
   cls,
+  yearId,
   canManage,
   selected,
   onToggle,
@@ -528,6 +530,7 @@ function ClassRow({
   schoolId: string;
   accessToken: string;
   cls: ClassWithSections;
+  yearId: string;
   canManage: boolean;
   selected: boolean;
   onToggle: (checked: boolean) => void;
@@ -538,6 +541,11 @@ function ClassRow({
   const [deleting, setDeleting] = useState(false);
   const totalStudents = cls.sections.reduce((sum, s) => sum + s._count.enrollments, 0);
   const isSecondary = cls.division.type === "SECONDARY";
+  // Carries the list page's currently-selected year into the class detail
+  // page so its own Sections/Students counts open already scoped to the
+  // same year you were just looking at, instead of silently aggregating
+  // every year's enrollments together.
+  const classHref = `/schools/${schoolId}/academic/classes/${cls.id}${yearId ? `?year=${yearId}` : ""}`;
 
   async function onDelete() {
     setDeleting(true);
@@ -592,12 +600,12 @@ function ClassRow({
         </div>
 
         <div className="mt-4 flex items-center gap-1.5">
-          <Link href={`/schools/${schoolId}/academic/classes/${cls.id}`} className="flex-1">
+          <Link href={classHref} className="flex-1">
             <Button size="sm" className="w-full" icon={<ChevronRight className="size-4" />}>
               View Sections
             </Button>
           </Link>
-          <Link href={`/schools/${schoolId}/academic/classes/${cls.id}`}>
+          <Link href={classHref}>
             <Button size="sm" variant="ghost" icon={<Pencil className="size-4" />} aria-label={`Edit ${cls.name}`} />
           </Link>
           {canManage && (

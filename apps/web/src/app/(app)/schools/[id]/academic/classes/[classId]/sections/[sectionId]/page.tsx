@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import {
   api,
@@ -43,11 +44,16 @@ export default function SectionWorkspacePage({
 }) {
   const { id: schoolId, classId, sectionId } = use(params);
   const { accessToken } = useAuth();
+  const searchParams = useSearchParams();
+  // Carried over from the class page's own year selector, same reasoning as
+  // that page carrying it from the class list — each step in the drill-down
+  // opens on the same year you were already looking at, one level up.
+  const yearFromUrl = searchParams.get("year");
 
   const [cls, setCls] = useState<ClassWithSections | null>(null);
   const [section, setSection] = useState<Section | null>(null);
   const [years, setYears] = useState<AcademicYear[]>([]);
-  const [yearId, setYearId] = useState("");
+  const [yearId, setYearId] = useState(yearFromUrl ?? "");
   const [students, setStudents] = useState<SectionStudent[] | null>(null);
   const [classSubjects, setClassSubjects] = useState<ClassSubjectRecord[] | null>(null);
   const [teacherAssignments, setTeacherAssignments] = useState<SectionTeacherAssignment[] | null>(null);

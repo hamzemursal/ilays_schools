@@ -39,6 +39,12 @@ export function AssignmentsManager({
   const [editing, setEditing] = useState(false);
   const [years, setYears] = useState<AcademicYear[]>([]);
   const [classes, setClasses] = useState<ClassWithSections[]>([]);
+  // Every teacher's assignments in this school — not just this one's — so
+  // the subject picker below can exclude a subject the moment ANY teacher
+  // already holds it for that class/section/year, not just this teacher.
+  // Result submission assumes a single teacher owns each (subject, section);
+  // see ExamSubject's schema comment.
+  const [allTeachers, setAllTeachers] = useState<Teacher[]>([]);
   const [academicYearId, setAcademicYearId] = useState("");
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
@@ -48,14 +54,22 @@ export function AssignmentsManager({
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  function refreshAllTeachers() {
+    return teachersApi.list(accessToken, schoolId).then(setAllTeachers);
+  }
+
   useEffect(() => {
     if (!canManage || !editing) return;
-    Promise.all([api.listAcademicYears(accessToken, schoolId), api.listClasses(accessToken, schoolId)]).then(
+    Promise.all([api.listAcademicYears(accessToken, schoolId), api.listClasses(accessToken, schoolId), refreshAllTeachers()]).then(
       ([y, c]) => {
         setYears(y);
         setClasses(c);
       },
     );
+    // refreshAllTeachers is stable for the lifetime of this component
+    // instance (closes over accessToken/schoolId props, not state) — safe
+    // to omit from deps the same way the fetch calls above are.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, schoolId, canManage, editing]);
 
   const selectedClass = classes.find((c) => c.id === classId);
@@ -93,11 +107,15 @@ export function AssignmentsManager({
     setSubjectIds(next);
   }
 
-  // Subjects this teacher already holds for the section currently picked
-  // above — checked against here (not just left for the backend's unique
-  // constraint to reject) so the list simply doesn't offer them again.
-  const alreadyAssignedSubjectIds = new Set(
-    teacher.assignments.filter((a) => a.academicYearId === academicYearId && a.section.id === sectionId).map((a) => a.subject.id),
+  // Subjects ANY teacher already holds for the section currently picked
+  // above — this teacher included. A subject/section is meant to have one
+  // owning teacher (see the comment on `allTeachers` above), so once
+  // someone holds it, it simply shouldn't be offered again here.
+  const takenSubjectIds = new Set(
+    allTeachers
+      .flatMap((t) => t.assignments)
+      .filter((a) => a.academicYearId === academicYearId && a.section.id === sectionId)
+      .map((a) => a.subject.id),
   );
 
   async function onAdd() {
@@ -110,7 +128,7 @@ export function AssignmentsManager({
           teachersApi.addAssignment(accessToken, schoolId, teacher.id, { academicYearId, sectionId, subjectId }),
         ),
       );
-      const updated = await teachersApi.getOne(accessToken, schoolId, teacher.id);
+      const [updated] = await Promise.all([teachersApi.getOne(accessToken, schoolId, teacher.id), refreshAllTeachers()]);
       onChange(updated);
 
       const failed = results.filter((r) => r.status === "rejected").length;
@@ -136,7 +154,7 @@ export function AssignmentsManager({
     setDeleting(true);
     try {
       await teachersApi.removeAssignment(accessToken, schoolId, teacher.id, deleteTarget.id);
-      const updated = await teachersApi.getOne(accessToken, schoolId, teacher.id);
+      const [updated] = await Promise.all([teachersApi.getOne(accessToken, schoolId, teacher.id), refreshAllTeachers()]);
       onChange(updated);
       show("Assignment deleted permanently.");
       setDeleteTarget(null);
@@ -262,7 +280,7 @@ export function AssignmentsManager({
                   schoolId={schoolId}
                   classId={classId}
                   selected={subjectIds}
-                  alreadyAssigned={alreadyAssignedSubjectIds}
+                  taken={takenSubjectIds}
                   onToggle={toggleSubject}
                 />
               </div>
@@ -310,14 +328,14 @@ function ClassSubjectChecklist({
   schoolId,
   classId,
   selected,
-  alreadyAssigned,
+  taken,
   onToggle,
 }: {
   accessToken: string;
   schoolId: string;
   classId: string;
   selected: Set<string>;
-  alreadyAssigned: Set<string>;
+  taken: Set<string>;
   onToggle: (subjectId: string, checked: boolean) => void;
 }) {
   const [subjects, setSubjects] = useState<ClassSubjectRecord[] | null>(null);
@@ -346,33 +364,38 @@ function ClassSubjectChecklist({
     );
   }
 
+  // Only ever offer subjects nobody holds yet for this class/section/year —
+  // a taken one already appears in the list above (this teacher) or belongs
+  // to a colleague, so re-offering it here would just invite a conflicting
+  // assignment.
+  const assignable = subjects.filter((cs) => !taken.has(cs.subjectId));
+
+  if (assignable.length === 0) {
+    return (
+      <p className="rounded-lg border border-border px-3 py-4 text-sm text-foreground-muted">
+        Every subject in this class is already assigned to a teacher for this section.
+      </p>
+    );
+  }
+
   return (
     <div className="grid grid-cols-2 gap-1 rounded-lg border border-border p-2 sm:grid-cols-3 lg:grid-cols-4">
-      {subjects.map((cs) => {
-        const taken = alreadyAssigned.has(cs.subjectId);
-        return (
-          <label
-            key={cs.subjectId}
-            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${
-              taken
-                ? "cursor-not-allowed text-foreground-muted opacity-60"
-                : selected.has(cs.subjectId)
-                  ? "cursor-pointer bg-accent-soft text-accent"
-                  : "cursor-pointer hover:bg-surface-hover"
-            }`}
-            title={taken ? "Already assigned to this class & section" : undefined}
-          >
-            <input
-              type="checkbox"
-              checked={selected.has(cs.subjectId) || taken}
-              disabled={taken}
-              onChange={(e) => onToggle(cs.subjectId, e.target.checked)}
-              className={CHECKBOX_CLASS}
-            />
-            <span className="truncate font-medium">{cs.subject.name}</span>
-          </label>
-        );
-      })}
+      {assignable.map((cs) => (
+        <label
+          key={cs.subjectId}
+          className={`flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm ${
+            selected.has(cs.subjectId) ? "bg-accent-soft text-accent" : "hover:bg-surface-hover"
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={selected.has(cs.subjectId)}
+            onChange={(e) => onToggle(cs.subjectId, e.target.checked)}
+            className={CHECKBOX_CLASS}
+          />
+          <span className="truncate font-medium">{cs.subject.name}</span>
+        </label>
+      ))}
     </div>
   );
 }

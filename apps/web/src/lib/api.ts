@@ -304,6 +304,16 @@ export interface SectionTeacherAssignment {
   teacher: { id: string; firstName: string; lastName: string };
 }
 
+export interface SectionStudent {
+  enrollmentId: string;
+  studentId: string;
+  firstName: string;
+  lastName: string;
+  studentNumber: string;
+  rollNumber: number;
+  sex: Sex;
+}
+
 export type Sex = "MALE" | "FEMALE";
 export type GuardianRelationship = "FATHER" | "MOTHER" | "GUARDIAN" | "OTHER";
 
@@ -1550,6 +1560,17 @@ export const api = {
   ) =>
     request<SectionTeacherAssignment[]>(
       `/schools/${schoolId}/classes/${classId}/sections/${sectionId}/teacher-assignments?academicYearId=${academicYearId}`,
+      { accessToken },
+    ),
+  listSectionStudents: (
+    accessToken: string,
+    schoolId: string,
+    classId: string,
+    sectionId: string,
+    academicYearId?: string,
+  ) =>
+    request<SectionStudent[]>(
+      `/schools/${schoolId}/classes/${classId}/sections/${sectionId}/students${qs({ academicYearId })}`,
       { accessToken },
     ),
 

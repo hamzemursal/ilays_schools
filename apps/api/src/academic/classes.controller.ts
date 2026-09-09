@@ -121,6 +121,21 @@ export class ClassesController {
     return this.classes.assignSubject(user, schoolId, classId, dto);
   }
 
+  // Gated on students.view (not academic.view) — this returns student roster
+  // data, so it follows the same permission as every other student list,
+  // not the academic-structure permission the rest of this controller uses.
+  @RequirePermissions("students.view")
+  @Get(":classId/sections/:sectionId/students")
+  listSectionStudents(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("classId") classId: string,
+    @Param("sectionId") sectionId: string,
+    @Query("academicYearId") academicYearId?: string,
+  ) {
+    return this.classes.listSectionStudents(user, schoolId, classId, sectionId, academicYearId);
+  }
+
   @RequirePermissions("academic.view")
   @Get(":classId/sections/:sectionId/teacher-assignments")
   listSectionTeacherAssignments(

@@ -268,6 +268,41 @@ export class ClassesService {
     });
   }
 
+  // Real, ID-scoped roster for exactly this section — unlike
+  // StudentsService.listForSchool (a school-wide, name-matched display list),
+  // this is the backend-enforced source for "this section's students, and
+  // only this section's students" that the Section Workspace's Students tab
+  // needs: filtered by sectionId itself, not by comparing denormalized
+  // class/section name strings client-side.
+  async listSectionStudents(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    classId: string,
+    sectionId: string,
+    academicYearId?: string,
+  ) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    await this.getClassInSchoolOrThrow(schoolId, classId);
+    const section = await this.prisma.section.findFirst({ where: { id: sectionId, classId } });
+    if (!section) throw new NotFoundException("Section not found in this class");
+
+    const enrollments = await this.prisma.studentEnrollment.findMany({
+      where: { sectionId, status: "ACTIVE", ...(academicYearId ? { academicYearId } : {}) },
+      include: { student: true },
+      orderBy: { rollNumber: "asc" },
+    });
+
+    return enrollments.map((e) => ({
+      enrollmentId: e.id,
+      studentId: e.studentId,
+      firstName: e.student.firstName,
+      lastName: e.student.lastName,
+      studentNumber: e.studentNumber,
+      rollNumber: e.rollNumber,
+      sex: e.student.sex,
+    }));
+  }
+
   async assignSubject(actor: AuthenticatedUser, schoolId: string, classId: string, dto: AssignSubjectDto) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     await this.getClassInSchoolOrThrow(schoolId, classId);

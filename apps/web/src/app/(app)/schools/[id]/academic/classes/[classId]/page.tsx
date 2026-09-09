@@ -701,98 +701,109 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
             )}
 
             <Card padding="none">
-              <CardHeader title="Sections" description={`${sections.length} section(s) in this class.`} />
+              <CardHeader
+                title="Sections"
+                description={`${sections.length} section(s) in this class — each one is managed independently.`}
+              />
               {sections.length === 0 ? (
                 <div className="p-5">
                   <EmptyState icon={GraduationCap} title="No sections yet" description="Add a section below." />
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[480px] text-left text-sm">
-                    <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
-                      <tr>
-                        <th className="px-5 py-2.5">Section</th>
-                        <th className="px-5 py-2.5">Capacity</th>
-                        <th className="px-5 py-2.5">Enrolled</th>
-                        {canManage && <th className="px-5 py-2.5 text-right">Actions</th>}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {sections.map((s) =>
-                        editingSectionId === s.id ? (
-                          <tr key={s.id}>
-                            <td className="px-5 py-2.5">
-                              <Input
-                                value={sectionEditName}
-                                onChange={(e) => setSectionEditName(e.target.value)}
-                                className="max-w-[120px]"
+                <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
+                  {sections.map((s) => {
+                    const rows = assignmentsBySection[s.id];
+                    const subjectsHere = new Set(rows?.map((r) => r.subjectId)).size;
+                    const teachersHere = new Set(rows?.map((r) => r.teacher.id)).size;
+                    const isEditing = editingSectionId === s.id;
+                    return (
+                      <div key={s.id} className="rounded-xl border border-border p-4">
+                        {isEditing ? (
+                          <div className="space-y-2.5">
+                            <Input
+                              value={sectionEditName}
+                              onChange={(e) => setSectionEditName(e.target.value)}
+                              placeholder="Section name"
+                            />
+                            <Input
+                              type="number"
+                              min={1}
+                              value={sectionEditCapacity}
+                              onChange={(e) => setSectionEditCapacity(e.target.value)}
+                              placeholder="Unlimited"
+                            />
+                            <div className="flex justify-end gap-1.5">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                icon={<Check className="size-4" />}
+                                loading={savingSectionId === s.id}
+                                disabled={!sectionEditName.trim()}
+                                onClick={() => onSaveSection(s.id)}
+                                aria-label="Save"
                               />
-                            </td>
-                            <td className="px-5 py-2.5">
-                              <Input
-                                type="number"
-                                min={1}
-                                value={sectionEditCapacity}
-                                onChange={(e) => setSectionEditCapacity(e.target.value)}
-                                placeholder="Unlimited"
-                                className="max-w-[120px]"
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                icon={<X className="size-4" />}
+                                onClick={() => setEditingSectionId(null)}
+                                disabled={savingSectionId === s.id}
+                                aria-label="Cancel"
                               />
-                            </td>
-                            <td className="px-5 py-2.5 text-foreground-soft">{s._count.enrollments}</td>
-                            <td className="px-5 py-2.5">
-                              <div className="flex justify-end gap-1.5">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  icon={<Check className="size-4" />}
-                                  loading={savingSectionId === s.id}
-                                  disabled={!sectionEditName.trim()}
-                                  onClick={() => onSaveSection(s.id)}
-                                  aria-label="Save"
-                                />
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  icon={<X className="size-4" />}
-                                  onClick={() => setEditingSectionId(null)}
-                                  disabled={savingSectionId === s.id}
-                                  aria-label="Cancel"
-                                />
-                              </div>
-                            </td>
-                          </tr>
+                            </div>
+                          </div>
                         ) : (
-                          <tr key={s.id}>
-                            <td className="px-5 py-3 font-medium text-foreground">{s.name}</td>
-                            <td className="px-5 py-3 text-foreground-soft">{s.capacity === null ? "Unlimited" : s.capacity}</td>
-                            <td className="px-5 py-3 text-foreground-soft">{s._count.enrollments}</td>
-                            {canManage && (
-                              <td className="px-5 py-3">
-                                <div className="flex justify-end gap-1.5">
+                          <>
+                            <div className="flex items-center gap-3">
+                              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-semibold text-accent">
+                                {s.name.charAt(0).toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="truncate font-medium text-foreground">Section {s.name}</p>
+                                <p className="text-xs text-foreground-muted">{cls?.name}</p>
+                              </div>
+                            </div>
+
+                            <div className="mt-3.5 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+                              <Stat label="Students" value={s._count.enrollments} />
+                              <Stat label="Capacity" value={s.capacity === null ? "Unlimited" : s.capacity} />
+                              <Stat label="Subjects" value={rows ? subjectsHere : "…"} />
+                              <Stat label="Teachers" value={rows ? teachersHere : "…"} />
+                            </div>
+
+                            <div className="mt-4 flex flex-wrap gap-1.5">
+                              <Link
+                                href={`/schools/${schoolId}/academic/classes/${classId}/sections/${s.id}`}
+                                className="flex-1"
+                              >
+                                <Button size="sm" variant="outline" className="w-full">
+                                  View Section
+                                </Button>
+                              </Link>
+                              {canManage && (
+                                <>
                                   <Button
                                     size="sm"
                                     variant="ghost"
                                     icon={<Pencil className="size-4" />}
                                     onClick={() => startEditSection(s)}
-                                  >
-                                    Edit
-                                  </Button>
+                                    aria-label={`Edit Section ${s.name}`}
+                                  />
                                   <Button
                                     size="sm"
-                                    variant="danger"
+                                    variant="ghost"
                                     icon={<Trash2 className="size-4" />}
                                     onClick={() => setDeleteSectionTarget(s)}
-                                  >
-                                    Delete
-                                  </Button>
-                                </div>
-                              </td>
-                            )}
-                          </tr>
-                        ),
-                      )}
-                    </tbody>
-                  </table>
+                                    aria-label={`Delete Section ${s.name}`}
+                                  />
+                                </>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
               {canManage && (
@@ -984,6 +995,15 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-xs text-foreground-muted">{label}</p>
+      <p className="font-medium text-foreground">{value}</p>
     </div>
   );
 }

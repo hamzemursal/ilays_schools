@@ -6,7 +6,8 @@
     "dev": "next dev -p 3010",
     "build": "next build",
     "start": "next start -p 3010",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "lucide-react": "^1.35.0",

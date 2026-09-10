@@ -24,7 +24,12 @@ test("Super Admin creates a school with zero auto-seeded students/teachers", asy
   // substring while it's still visible.
   await expect(page.getByText(schoolName, { exact: true })).toBeVisible();
 
-  await page.getByText(schoolName, { exact: true }).click();
+  // The school's name itself isn't a link — only the card's own "View
+  // School" button is (rendered as a Button nested inside a Link, same
+  // ambiguous-role case as "Add student" elsewhere — match on visible text).
+  // Scoped to this school's own card since every card has one.
+  const schoolCard = page.locator("div.rounded-xl").filter({ hasText: schoolName });
+  await schoolCard.getByText("View School", { exact: true }).click();
   await expect(page).toHaveURL(/\/schools\/[a-f0-9-]+\/dashboard/);
 
   // Each StatCard is a "div.rounded-xl" containing its label ("Students",

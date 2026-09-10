@@ -1,13 +1,32 @@
 import { expect, type Page } from "@playwright/test";
 import { generate } from "otplib";
+import { existsSync, readFileSync, writeFileSync } from "fs";
+import { join } from "path";
 
-// Populated the first time an account completes 2FA setup (mandatory or
-// voluntary), so a later loginAt call for the same email — a genuinely
-// separate test; 2FA state persists in the one shared database for the
-// whole CI run/worker — can get through the ordinary MFA challenge screen
-// instead of hitting (and failing on) the one-time setup screen it no
-// longer shows.
-const totpSecretsByEmail = new Map<string, string>();
+// Persisted to a file, not just an in-memory module map: Playwright doesn't
+// guarantee module state survives across different spec *files* even with
+// workers: 1 (each file can run in its own worker process), but 2FA state
+// itself persists in the one shared database for the whole CI run — so an
+// account that completed setup in one file's test still needs its secret
+// available to a later file's test logging into the same account. workers:
+// 1 also means genuinely sequential execution, so no concurrent-write race
+// on this file.
+const SECRETS_FILE = join(__dirname, ".totp-secrets.json");
+
+function readSecrets(): Record<string, string> {
+  if (!existsSync(SECRETS_FILE)) return {};
+  try {
+    return JSON.parse(readFileSync(SECRETS_FILE, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+function rememberSecret(email: string, secret: string) {
+  const secrets = readSecrets();
+  secrets[email] = secret;
+  writeFileSync(SECRETS_FILE, JSON.stringify(secrets));
+}
 
 export async function loginAt(page: Page, loginPath: string, email: string, password: string) {
   await page.goto(loginPath);
@@ -31,7 +50,7 @@ export async function loginAt(page: Page, loginPath: string, email: string, pass
     .catch(() => false);
   if (setupGate) {
     const secret = await page.locator("code").innerText();
-    totpSecretsByEmail.set(email, secret);
+    rememberSecret(email, secret);
     const code = await generate({ secret });
     await page.getByPlaceholder("123456").fill(code);
     await page.getByRole("button", { name: "Confirm" }).click();
@@ -41,7 +60,7 @@ export async function loginAt(page: Page, loginPath: string, email: string, pass
     return;
   }
 
-  const knownSecret = totpSecretsByEmail.get(email);
+  const knownSecret = readSecrets()[email];
   if (knownSecret) {
     const code = await generate({ secret: knownSecret });
     await page.getByPlaceholder("123456").fill(code);

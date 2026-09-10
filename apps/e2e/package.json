@@ -8,6 +8,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",
+    "@types/node": "^20",
     "otplib": "^13.0.0"
   }
 }

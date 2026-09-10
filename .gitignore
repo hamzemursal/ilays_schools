@@ -18,3 +18,4 @@ packages/database/generated/
 apps/e2e/test-results/
 apps/e2e/playwright-report/
 apps/e2e/blob-report/
+apps/e2e/fixtures/.totp-secrets.json

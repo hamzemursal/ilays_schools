@@ -132,6 +132,9 @@ importers:
       '@playwright/test':
         specifier: ^1.49.1
         version: 1.63.0
+      '@types/node':
+        specifier: ^20
+        version: 20.19.43
       otplib:
         specifier: ^13.0.0
         version: 13.5.0

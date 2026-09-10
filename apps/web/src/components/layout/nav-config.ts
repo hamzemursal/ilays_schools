@@ -20,6 +20,8 @@ import {
   KeyRound,
   Milestone,
   ClipboardList,
+  Briefcase,
+  CalendarClock,
 } from "lucide-react";
 import type { Profile } from "@/lib/api";
 
@@ -47,6 +49,14 @@ export function schoolNavItems(user: Profile, schoolId: string): NavItem[] {
   }
   if (has("teachers.view")) {
     items.push({ label: "Teachers", href: `/schools/${schoolId}/teachers`, icon: UserSquare2 });
+  }
+  if (has("staff.view")) {
+    items.push({ label: "Staff", href: `/schools/${schoolId}/staff`, icon: Briefcase });
+  }
+  // Lands on Leave Requests — the more frequent of HR's two current
+  // surfaces; Staff Attendance is one click away from there.
+  if (has("hr.leave.view") || has("hr.attendance.view")) {
+    items.push({ label: "HR", href: `/schools/${schoolId}/hr/leave-requests`, icon: CalendarClock });
   }
   if (has("guardians.view")) {
     items.push({ label: "Parents", href: `/schools/${schoolId}/parents`, icon: Contact });
@@ -128,6 +138,13 @@ export function orgNavItems(user: Profile): NavItem[] {
   }
   if (user.permissions.includes("schools.view") && user.permissions.includes("results.approve")) {
     items.push({ label: "Results Review", href: "/results-review", icon: ClipboardList });
+  }
+  // Central Finance is its own audience (CENTRAL_FINANCE_VIEWER/MANAGER, plus
+  // Super/Organization Admin) — deliberately not co-gated on schools.view like
+  // the entries above, since a Central Finance role has no reason to hold that
+  // separate permission.
+  if (user.permissions.includes("finance.central.view")) {
+    items.push({ label: "Central Finance", href: "/finance", icon: Wallet });
   }
   return items;
 }

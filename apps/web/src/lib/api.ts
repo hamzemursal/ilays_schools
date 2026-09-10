@@ -151,6 +151,11 @@ export interface Profile {
   guardianId: string | null;
   studentId: string | null;
   mustChangePassword: boolean;
+  // Required for SUPER_ADMIN/ORGANIZATION_ADMIN with no TOTP secret set —
+  // see JwtAuthGuard's own matching backend enforcement. Every other role
+  // can still enable 2FA voluntarily from /account; this only ever gates
+  // those two.
+  mustSetup2FA: boolean;
 }
 
 export type SchoolType = "PRIMARY" | "SECONDARY" | "PRIMARY_AND_SECONDARY";
@@ -939,6 +944,7 @@ export interface Invoice {
 }
 
 export interface SchoolInvoice extends Invoice {
+  enrollmentId: string;
   studentId: string;
   firstName: string;
   lastName: string;
@@ -950,6 +956,217 @@ export interface Payment {
   method: PaymentMethod;
   reference: string | null;
   paidAt: string;
+  status: "POSTED" | "REVERSED";
+}
+
+// ---------------------------------------------------------------------------
+// Student Fee Ledger extensions — Billing Periods, Charges (the recurring
+// counterpart to Invoice), Fee Adjustments, ZAAD (PaymentSubmission),
+// Expenses, and the Finance dashboards. See the Phase 1 architecture report
+// for why Charge/Invoice are deliberately separate models.
+// ---------------------------------------------------------------------------
+
+export interface FinanceDashboardSummary {
+  totalCharged: number;
+  totalCollected: number;
+  outstanding: number;
+  cashCollection: number;
+  zaadCollection: number;
+  pendingZaadVerification: { count: number; amount: number };
+  expensesTotal: number;
+  payrollTotal: number;
+  netFinancialPosition: number;
+}
+
+export interface CentralFinanceSummary {
+  schools: (FinanceDashboardSummary & { schoolId: string; schoolName: string; academicYear: { id: string; name: string } | null })[];
+  totals: Omit<FinanceDashboardSummary, "pendingZaadVerification"> & { pendingZaadCount: number; pendingZaadAmount: number };
+}
+
+export interface BillingPeriod {
+  id: string;
+  schoolId: string;
+  academicYearId: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+}
+
+export type ChargeStatus = "OUTSTANDING" | "PARTIALLY_PAID" | "PAID" | "CANCELLED";
+
+export interface SchoolCharge {
+  id: string;
+  amount: number;
+  status: ChargeStatus;
+  dueDate: string | null;
+  paid: number;
+  feeStructure: { id: string; name: string };
+  billingPeriod: { id: string; name: string } | null;
+  enrollmentId: string;
+  studentId: string;
+  firstName: string;
+  lastName: string;
+}
+
+export type FeeAdjustmentType = "DISCOUNT" | "SCHOLARSHIP" | "CORRECTION" | "WAIVER";
+export type FeeAdjustmentStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export interface FeeAdjustment {
+  id: string;
+  schoolId: string;
+  enrollmentId: string;
+  invoiceId: string | null;
+  chargeId: string | null;
+  type: FeeAdjustmentType;
+  amount: string;
+  reason: string;
+  status: FeeAdjustmentStatus;
+  requestedByUserId: string;
+  approvedByUserId: string | null;
+  createdAt: string;
+}
+
+export type PaymentSubmissionStatus = "PENDING" | "VERIFIED" | "REJECTED";
+
+export interface PaymentSubmission {
+  id: string;
+  schoolId: string;
+  studentId: string;
+  student?: { id: string; firstName: string; lastName: string };
+  invoiceId: string | null;
+  chargeId: string | null;
+  amount: string;
+  provider: string;
+  providerTransactionReference: string | null;
+  payerPhone: string | null;
+  payerName: string | null;
+  submittedByUserId: string | null;
+  note: string | null;
+  status: PaymentSubmissionStatus;
+  verifiedByUserId: string | null;
+  verifiedAt: string | null;
+  rejectionReason: string | null;
+  createdAt: string;
+}
+
+export interface ExpenseCategory {
+  id: string;
+  schoolId: string;
+  name: string;
+}
+
+export type ExpenseStatus = "PENDING" | "APPROVED" | "REJECTED" | "PAID";
+
+export interface Expense {
+  id: string;
+  schoolId: string;
+  expenseCategoryId: string | null;
+  expenseCategory: { id: string; name: string } | null;
+  description: string;
+  amount: string;
+  expenseDate: string;
+  status: ExpenseStatus;
+  recordedByUserId: string;
+  approvedByUserId: string | null;
+  approvedAt: string | null;
+  createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Payroll — Teachers and Staff both eligible; every model here references
+// exactly one of teacherId/staffId.
+// ---------------------------------------------------------------------------
+
+export interface SalaryHistoryRecord {
+  id: string;
+  schoolId: string;
+  teacherId: string | null;
+  staffId: string | null;
+  basicSalary: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdByUserId: string;
+  createdAt: string;
+}
+
+export type AdvanceStatus = "ACTIVE" | "COMPLETED" | "CANCELLED";
+
+export interface StaffAdvance {
+  id: string;
+  schoolId: string;
+  teacherId: string | null;
+  staffId: string | null;
+  amount: string;
+  repaymentPerPeriod: string;
+  status: AdvanceStatus;
+  issuedByUserId: string;
+  issuedAt: string;
+  notes: string | null;
+  totalRepaid: number;
+  remainingBalance: number;
+}
+
+export type PayrollPeriodStatus = "OPEN" | "CLOSED";
+
+export interface PayrollPeriod {
+  id: string;
+  schoolId: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  status: PayrollPeriodStatus;
+}
+
+export type PayslipStatus = "DRAFT" | "CALCULATED" | "REVIEWED" | "APPROVED" | "PAID";
+export type PayslipLineType = "ALLOWANCE" | "BONUS" | "DEDUCTION" | "ADVANCE_REPAYMENT" | "OTHER";
+
+export interface PayslipLineItem {
+  id: string;
+  payslipId: string;
+  type: PayslipLineType;
+  label: string;
+  amount: string;
+}
+
+export interface StudentLedgerEntry {
+  id: string;
+  kind: "INVOICE" | "CHARGE";
+  amount: number;
+  status: string;
+  dueDate: string | null;
+  paid: number;
+  feeStructure: { id: string; name: string };
+  billingPeriod?: { id: string; name: string } | null;
+  payments: Payment[];
+}
+
+export interface StudentLedger {
+  summary: { totalCharged: number; totalPaid: number; totalAdjustments: number; balance: number };
+  invoices: StudentLedgerEntry[];
+  charges: StudentLedgerEntry[];
+  adjustments: FeeAdjustment[];
+}
+
+export interface Payslip {
+  id: string;
+  payrollPeriodId: string;
+  schoolId: string;
+  teacherId: string | null;
+  staffId: string | null;
+  teacher: { id: string; firstName: string; lastName: string } | null;
+  staff: { id: string; firstName: string; lastName: string } | null;
+  basicSalary: string;
+  grossSalary: string;
+  netSalary: string;
+  status: PayslipStatus;
+  preparedByUserId: string | null;
+  reviewedByUserId: string | null;
+  reviewedAt: string | null;
+  approvedByUserId: string | null;
+  approvedAt: string | null;
+  paidByUserId: string | null;
+  paidAt: string | null;
+  lineItems: PayslipLineItem[];
 }
 
 export interface DashboardSetup {
@@ -1133,6 +1350,136 @@ export interface TeacherDocument {
   sizeBytes: number;
   uploadedAt: string;
   url: string;
+}
+
+// ---------------------------------------------------------------------------
+// Staff & HR — Staff is the non-teaching workforce, a sibling domain to
+// Teacher (never merged); Department is a per-school configurable lookup.
+// ---------------------------------------------------------------------------
+
+export type StaffStatus = "ACTIVE" | "ON_LEAVE" | "INACTIVE";
+export type DepartmentStatus = "ACTIVE" | "ARCHIVED";
+
+export interface Department {
+  id: string;
+  schoolId: string;
+  name: string;
+  status: DepartmentStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Staff {
+  id: string;
+  userId: string | null;
+  departmentId: string | null;
+  department: { id: string; name: string; status: DepartmentStatus } | null;
+  staffNumber: string;
+  firstName: string;
+  lastName: string;
+  sex: Sex | null;
+  dateOfBirth: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  jobTitle: string | null;
+  employmentDate: string | null;
+  status: StaffStatus;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
+}
+
+export interface CreateStaffInput {
+  firstName: string;
+  lastName: string;
+  staffNumber?: string;
+  departmentId?: string;
+  jobTitle?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  employmentDate?: string;
+}
+
+export interface UpdateStaffInput {
+  firstName?: string;
+  lastName?: string;
+  sex?: Sex;
+  dateOfBirth?: string;
+  departmentId?: string;
+  jobTitle?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  employmentDate?: string;
+  status?: StaffStatus;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+}
+
+export interface CreateDepartmentInput {
+  name: string;
+}
+
+export interface UpdateDepartmentInput {
+  name?: string;
+  status?: DepartmentStatus;
+}
+
+export type LeaveType = "ANNUAL" | "SICK" | "UNPAID" | "OTHER";
+export type LeaveStatus = "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+
+// Exactly one of teacherId/staffId is ever set — same convention as the
+// backend model this mirrors.
+export interface LeaveRequest {
+  id: string;
+  schoolId: string;
+  teacherId: string | null;
+  staffId: string | null;
+  teacher: { id: string; firstName: string; lastName: string } | null;
+  staff: { id: string; firstName: string; lastName: string } | null;
+  type: LeaveType;
+  startDate: string;
+  endDate: string;
+  reason: string | null;
+  status: LeaveStatus;
+  requestedByUserId: string;
+  decidedByUserId: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  createdAt: string;
+}
+
+export interface CreateLeaveRequestInput {
+  teacherId?: string;
+  staffId?: string;
+  type: LeaveType;
+  startDate: string;
+  endDate: string;
+  reason?: string;
+}
+
+export type StaffAttendanceStatus = "PRESENT" | "ABSENT" | "LATE" | "LEAVE" | "EXCUSED";
+
+export interface StaffAttendanceRecord {
+  id: string;
+  schoolId: string;
+  teacherId: string | null;
+  staffId: string | null;
+  teacher: { id: string; firstName: string; lastName: string } | null;
+  staff: { id: string; firstName: string; lastName: string } | null;
+  date: string;
+  status: StaffAttendanceStatus;
+  note: string | null;
+  markedByUserId: string;
+}
+
+export interface MarkStaffAttendanceInput {
+  teacherId?: string;
+  staffId?: string;
+  date: string;
+  status: StaffAttendanceStatus;
+  note?: string;
 }
 
 export interface AttendanceSummaryRow {
@@ -1388,8 +1735,15 @@ export interface Form1TransitionResult {
   }[];
 }
 
-export type ImportBatchStatus = "PROCESSING" | "NEEDS_REVIEW" | "COMPLETED";
-export type ImportRowStatus = "PENDING" | "CREATED" | "DUPLICATE_PENDING" | "ERROR" | "SKIPPED";
+export type ImportBatchStatus =
+  | "PROCESSING"
+  | "STAGING"
+  | "NEEDS_REVIEW"
+  | "READY_FOR_REVIEW"
+  | "COMMITTING"
+  | "COMPLETED"
+  | "FAILED";
+export type ImportRowStatus = "PENDING" | "READY" | "CREATED" | "DUPLICATE_PENDING" | "ERROR" | "SKIPPED";
 
 export interface ImportRow {
   id: string;
@@ -1418,9 +1772,32 @@ export interface ImportBatchDetail extends ImportBatch {
   rows: ImportRow[];
 }
 
+export interface LoginTokens {
+  accessToken: string;
+  sessionId: string;
+}
+
+export interface MfaChallenge {
+  mfaRequired: true;
+  mfaToken: string;
+}
+
 export const api = {
   login: (email: string, password: string) =>
-    request<{ accessToken: string; sessionId: string }>("/auth/login", { method: "POST", body: { email, password } }),
+    request<LoginTokens | MfaChallenge>("/auth/login", { method: "POST", body: { email, password } }),
+
+  getTotpStatus: (accessToken: string) => request<{ enabled: boolean }>("/auth/totp/status", { accessToken }),
+  setupTotp: (accessToken: string) =>
+    request<{ secret: string; otpauthUri: string; qrCodeDataUri: string }>("/auth/totp/setup", {
+      method: "POST",
+      accessToken,
+    }),
+  enableTotp: (accessToken: string, secret: string, code: string) =>
+    request<{ recoveryCodes: string[] }>("/auth/totp/enable", { method: "POST", body: { secret, code }, accessToken }),
+  disableTotp: (accessToken: string, password: string) =>
+    request<{ success: boolean }>("/auth/totp/disable", { method: "POST", body: { password }, accessToken }),
+  verifyLoginTotp: (mfaToken: string, params: { code?: string; recoveryCode?: string }) =>
+    request<LoginTokens>("/auth/totp/verify-login", { method: "POST", body: { mfaToken, ...params } }),
   // sessionId tells the backend which of this browser's several possible
   // refresh-token cookies belongs to this tab's session — see AuthController.
   // Omitted only when this tab has never had one (falls back to the legacy
@@ -1811,6 +2188,45 @@ export const api = {
   getTeacherPhotoUrl: (accessToken: string, schoolId: string, teacherId: string) =>
     request<{ url: string; uploadedAt: string }>(`/schools/${schoolId}/teachers/${teacherId}/photo`, { accessToken }),
 
+  listStaff: (accessToken: string, schoolId: string) =>
+    request<Staff[]>(`/schools/${schoolId}/staff`, { accessToken }),
+  createStaffMember: (accessToken: string, schoolId: string, body: CreateStaffInput) =>
+    request<Staff>(`/schools/${schoolId}/staff`, { method: "POST", body, accessToken }),
+  getStaffMember: (accessToken: string, schoolId: string, staffId: string) =>
+    request<Staff>(`/schools/${schoolId}/staff/${staffId}`, { accessToken }),
+  updateStaffMember: (accessToken: string, schoolId: string, staffId: string, body: UpdateStaffInput) =>
+    request<Staff>(`/schools/${schoolId}/staff/${staffId}`, { method: "PATCH", body, accessToken }),
+  deleteStaffMember: (accessToken: string, schoolId: string, staffId: string) =>
+    request<{ success: boolean }>(`/schools/${schoolId}/staff/${staffId}`, { method: "DELETE", accessToken }),
+
+  listDepartments: (accessToken: string, schoolId: string) =>
+    request<Department[]>(`/schools/${schoolId}/departments`, { accessToken }),
+  createDepartment: (accessToken: string, schoolId: string, body: CreateDepartmentInput) =>
+    request<Department>(`/schools/${schoolId}/departments`, { method: "POST", body, accessToken }),
+  updateDepartment: (accessToken: string, schoolId: string, departmentId: string, body: UpdateDepartmentInput) =>
+    request<Department>(`/schools/${schoolId}/departments/${departmentId}`, { method: "PATCH", body, accessToken }),
+
+  listLeaveRequests: (accessToken: string, schoolId: string, status?: LeaveStatus) =>
+    request<LeaveRequest[]>(`/schools/${schoolId}/leave-requests${qs({ status })}`, { accessToken }),
+  createLeaveRequest: (accessToken: string, schoolId: string, body: CreateLeaveRequestInput) =>
+    request<LeaveRequest>(`/schools/${schoolId}/leave-requests`, { method: "POST", body, accessToken }),
+  approveLeaveRequest: (accessToken: string, schoolId: string, leaveRequestId: string) =>
+    request<LeaveRequest>(`/schools/${schoolId}/leave-requests/${leaveRequestId}/approve`, {
+      method: "POST",
+      accessToken,
+    }),
+  rejectLeaveRequest: (accessToken: string, schoolId: string, leaveRequestId: string, reason: string) =>
+    request<LeaveRequest>(`/schools/${schoolId}/leave-requests/${leaveRequestId}/reject`, {
+      method: "POST",
+      body: { reason },
+      accessToken,
+    }),
+
+  listStaffAttendance: (accessToken: string, schoolId: string, date?: string) =>
+    request<StaffAttendanceRecord[]>(`/schools/${schoolId}/staff-attendance${qs({ date })}`, { accessToken }),
+  markStaffAttendance: (accessToken: string, schoolId: string, body: MarkStaffAttendanceInput) =>
+    request<StaffAttendanceRecord>(`/schools/${schoolId}/staff-attendance`, { method: "POST", body, accessToken }),
+
   uploadSchoolLogo: (accessToken: string, schoolId: string, file: File) =>
     uploadFile<{ id: string }>(`/schools/${schoolId}/logo`, file, "logo", accessToken),
   removeSchoolLogo: (accessToken: string, schoolId: string) =>
@@ -2126,6 +2542,150 @@ export const api = {
   getDashboardSummary: (accessToken: string, schoolId: string, academicYearId?: string) =>
     request<DashboardSummary>(`/schools/${schoolId}/dashboard-summary${qs({ academicYearId })}`, { accessToken }),
 
+  getFinanceDashboardSummary: (accessToken: string, schoolId: string, academicYearId?: string) =>
+    request<FinanceDashboardSummary>(`/schools/${schoolId}/finance/dashboard-summary${qs({ academicYearId })}`, {
+      accessToken,
+    }),
+  getCentralFinanceSummary: (accessToken: string) =>
+    request<CentralFinanceSummary>(`/central-finance/dashboard-summary`, { accessToken }),
+
+  listBillingPeriods: (accessToken: string, schoolId: string, academicYearId?: string) =>
+    request<BillingPeriod[]>(`/schools/${schoolId}/billing-periods${qs({ academicYearId })}`, { accessToken }),
+  createBillingPeriod: (
+    accessToken: string,
+    schoolId: string,
+    body: { academicYearId: string; name: string; startDate: string; endDate: string },
+  ) => request<BillingPeriod>(`/schools/${schoolId}/billing-periods`, { method: "POST", body, accessToken }),
+
+  listCharges: (accessToken: string, schoolId: string, status?: ChargeStatus) =>
+    request<SchoolCharge[]>(`/schools/${schoolId}/charges${qs({ status })}`, { accessToken }),
+  generateCharges: (accessToken: string, schoolId: string, feeStructureId: string, billingPeriodId: string) =>
+    request<{ createdCount: number; eligibleEnrollments: number }>(
+      `/schools/${schoolId}/fee-structures/${feeStructureId}/billing-periods/${billingPeriodId}/generate-charges`,
+      { method: "POST", accessToken },
+    ),
+  recordChargePayment: (
+    accessToken: string,
+    chargeId: string,
+    body: { amount: number; method?: PaymentMethod; reference?: string },
+  ) => request<Payment>(`/charges/${chargeId}/payments`, { method: "POST", body, accessToken }),
+  listChargePayments: (accessToken: string, chargeId: string) =>
+    request<Payment[]>(`/charges/${chargeId}/payments`, { accessToken }),
+
+  reversePayment: (accessToken: string, paymentId: string, reason: string) =>
+    request<Payment>(`/payments/${paymentId}/reverse`, { method: "POST", body: { reason }, accessToken }),
+
+  listFeeAdjustments: (accessToken: string, schoolId: string, enrollmentId?: string) =>
+    request<FeeAdjustment[]>(`/schools/${schoolId}/fee-adjustments${qs({ enrollmentId })}`, { accessToken }),
+  createFeeAdjustment: (
+    accessToken: string,
+    schoolId: string,
+    body: {
+      enrollmentId: string;
+      invoiceId?: string;
+      chargeId?: string;
+      type: FeeAdjustmentType;
+      amount: number;
+      reason: string;
+    },
+  ) => request<FeeAdjustment>(`/schools/${schoolId}/fee-adjustments`, { method: "POST", body, accessToken }),
+
+  listPaymentSubmissions: (accessToken: string, schoolId: string, status?: PaymentSubmissionStatus) =>
+    request<PaymentSubmission[]>(`/schools/${schoolId}/payment-submissions${qs({ status })}`, { accessToken }),
+  createPaymentSubmission: (
+    accessToken: string,
+    schoolId: string,
+    body: { studentId: string; amount: number; provider?: string; providerTransactionReference?: string; payerPhone?: string; payerName?: string; note?: string },
+  ) => request<PaymentSubmission>(`/schools/${schoolId}/payment-submissions`, { method: "POST", body, accessToken }),
+  verifyPaymentSubmission: (
+    accessToken: string,
+    schoolId: string,
+    id: string,
+    body: { invoiceId?: string; chargeId?: string },
+  ) => request<PaymentSubmission>(`/schools/${schoolId}/payment-submissions/${id}/verify`, { method: "POST", body, accessToken }),
+  rejectPaymentSubmission: (accessToken: string, schoolId: string, id: string, reason: string) =>
+    request<PaymentSubmission>(`/schools/${schoolId}/payment-submissions/${id}/reject`, {
+      method: "POST",
+      body: { reason },
+      accessToken,
+    }),
+
+  submitMyPaymentNotice: (
+    accessToken: string,
+    studentId: string,
+    body: { amount: number; provider?: string; providerTransactionReference?: string; payerPhone?: string; payerName?: string; note?: string },
+  ) => request<PaymentSubmission>(`/guardians/me/children/${studentId}/payment-submissions`, { method: "POST", body, accessToken }),
+  listMyPaymentSubmissions: (accessToken: string) =>
+    request<PaymentSubmission[]>(`/guardians/me/payment-submissions`, { accessToken }),
+
+  listExpenseCategories: (accessToken: string, schoolId: string) =>
+    request<ExpenseCategory[]>(`/schools/${schoolId}/expense-categories`, { accessToken }),
+  createExpenseCategory: (accessToken: string, schoolId: string, name: string) =>
+    request<ExpenseCategory>(`/schools/${schoolId}/expense-categories`, { method: "POST", body: { name }, accessToken }),
+
+  listExpenses: (accessToken: string, schoolId: string, status?: ExpenseStatus) =>
+    request<Expense[]>(`/schools/${schoolId}/expenses${qs({ status })}`, { accessToken }),
+  createExpense: (
+    accessToken: string,
+    schoolId: string,
+    body: { expenseCategoryId?: string; description: string; amount: number; expenseDate: string },
+  ) => request<Expense>(`/schools/${schoolId}/expenses`, { method: "POST", body, accessToken }),
+  approveExpense: (accessToken: string, schoolId: string, id: string) =>
+    request<Expense>(`/schools/${schoolId}/expenses/${id}/approve`, { method: "POST", accessToken }),
+  rejectExpense: (accessToken: string, schoolId: string, id: string, reason: string) =>
+    request<Expense>(`/schools/${schoolId}/expenses/${id}/reject`, { method: "POST", body: { reason }, accessToken }),
+  markExpensePaid: (accessToken: string, schoolId: string, id: string) =>
+    request<Expense>(`/schools/${schoolId}/expenses/${id}/mark-paid`, { method: "POST", accessToken }),
+
+  listSalaryHistory: (accessToken: string, schoolId: string, teacherId?: string, staffId?: string) =>
+    request<SalaryHistoryRecord[]>(`/schools/${schoolId}/salary-history${qs({ teacherId, staffId })}`, { accessToken }),
+  createSalaryHistory: (
+    accessToken: string,
+    schoolId: string,
+    body: { teacherId?: string; staffId?: string; basicSalary: number; effectiveFrom?: string },
+  ) => request<SalaryHistoryRecord>(`/schools/${schoolId}/salary-history`, { method: "POST", body, accessToken }),
+
+  listStaffAdvances: (accessToken: string, schoolId: string, teacherId?: string, staffId?: string) =>
+    request<StaffAdvance[]>(`/schools/${schoolId}/staff-advances${qs({ teacherId, staffId })}`, { accessToken }),
+  createStaffAdvance: (
+    accessToken: string,
+    schoolId: string,
+    body: { teacherId?: string; staffId?: string; amount: number; repaymentPerPeriod: number; notes?: string },
+  ) => request<StaffAdvance>(`/schools/${schoolId}/staff-advances`, { method: "POST", body, accessToken }),
+
+  listPayrollPeriods: (accessToken: string, schoolId: string) =>
+    request<PayrollPeriod[]>(`/schools/${schoolId}/payroll-periods`, { accessToken }),
+  createPayrollPeriod: (accessToken: string, schoolId: string, body: { name: string; startDate: string; endDate: string }) =>
+    request<PayrollPeriod>(`/schools/${schoolId}/payroll-periods`, { method: "POST", body, accessToken }),
+  closePayrollPeriod: (accessToken: string, schoolId: string, id: string) =>
+    request<PayrollPeriod>(`/schools/${schoolId}/payroll-periods/${id}/close`, { method: "POST", accessToken }),
+
+  listPayslips: (accessToken: string, schoolId: string, payrollPeriodId?: string, status?: PayslipStatus) =>
+    request<Payslip[]>(`/schools/${schoolId}/payslips${qs({ payrollPeriodId, status })}`, { accessToken }),
+  createPayslip: (
+    accessToken: string,
+    schoolId: string,
+    payrollPeriodId: string,
+    body: { teacherId?: string; staffId?: string; basicSalary?: number },
+  ) => request<Payslip>(`/schools/${schoolId}/payroll-periods/${payrollPeriodId}/payslips`, { method: "POST", body, accessToken }),
+  addPayslipLineItem: (
+    accessToken: string,
+    schoolId: string,
+    payslipId: string,
+    body: { type: Exclude<PayslipLineType, "ADVANCE_REPAYMENT">; label: string; amount: number },
+  ) => request<PayslipLineItem>(`/schools/${schoolId}/payslips/${payslipId}/line-items`, { method: "POST", body, accessToken }),
+  calculatePayslip: (accessToken: string, schoolId: string, payslipId: string) =>
+    request<Payslip>(`/schools/${schoolId}/payslips/${payslipId}/calculate`, { method: "POST", accessToken }),
+  reviewPayslip: (accessToken: string, schoolId: string, payslipId: string) =>
+    request<Payslip>(`/schools/${schoolId}/payslips/${payslipId}/review`, { method: "POST", accessToken }),
+  approvePayslip: (accessToken: string, schoolId: string, payslipId: string) =>
+    request<Payslip>(`/schools/${schoolId}/payslips/${payslipId}/approve`, { method: "POST", accessToken }),
+  payPayslip: (accessToken: string, schoolId: string, payslipId: string) =>
+    request<Payslip>(`/schools/${schoolId}/payslips/${payslipId}/pay`, { method: "POST", accessToken }),
+
+  getStudentLedger: (accessToken: string, studentId: string) =>
+    request<StudentLedger>(`/students/${studentId}/ledger`, { accessToken }),
+
   getEnrollmentReport: (accessToken: string, schoolId: string, academicYearId: string) =>
     request<EnrollmentReportRow[]>(`/schools/${schoolId}/reports/enrollment${qs({ academicYearId })}`, { accessToken }),
   getAttendanceReport: (accessToken: string, schoolId: string, academicYearId: string, from?: string, to?: string) =>
@@ -2165,6 +2725,11 @@ export const api = {
     request<ImportBatchDetail>(`/schools/${schoolId}/imports/students/${batchId}/rows/${rowId}/resolve`, {
       method: "POST",
       body: { action },
+      accessToken,
+    }),
+  commitImportBatch: (accessToken: string, schoolId: string, batchId: string) =>
+    request<ImportBatchDetail>(`/schools/${schoolId}/imports/students/${batchId}/commit`, {
+      method: "POST",
       accessToken,
     }),
 

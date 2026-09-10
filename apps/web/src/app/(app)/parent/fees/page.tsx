@@ -1,16 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type MyChildInvoice } from "@/lib/api";
+import { api, type MyChildInvoice, type PaymentSubmission, type PaymentSubmissionStatus } from "@/lib/api";
 import { useSelectedChild } from "@/features/parent-portal/SelectedChildContext";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { Card } from "@/components/ui/Card";
+import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { FormField, Input, Textarea } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
-import { Wallet, Users } from "lucide-react";
+import { useToast } from "@/components/ui/Toast";
+import { Wallet, Users, Send } from "lucide-react";
 
 const STATUS_TONE: Record<string, "success" | "warning" | "danger"> = {
   PAID: "success",
@@ -18,7 +21,13 @@ const STATUS_TONE: Record<string, "success" | "warning" | "danger"> = {
   UNPAID: "danger",
 };
 
-const TABS = ["Current Fees", "Outstanding Balance", "Payment History"] as const;
+const SUBMISSION_STATUS_TONE: Record<PaymentSubmissionStatus, "success" | "warning" | "danger"> = {
+  VERIFIED: "success",
+  PENDING: "warning",
+  REJECTED: "danger",
+};
+
+const TABS = ["Current Fees", "Outstanding Balance", "Payment History", "Submit Payment"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function ParentFeesPage() {
@@ -160,7 +169,116 @@ function FeesContent({ accessToken, studentId, tab }: { accessToken: string; stu
           )}
         </Card>
       )}
+
+      {tab === "Submit Payment" && <ZaadSubmissionSection accessToken={accessToken} studentId={studentId} />}
     </>
+  );
+}
+
+function ZaadSubmissionSection({ accessToken, studentId }: { accessToken: string; studentId: string }) {
+  const [submissions, setSubmissions] = useState<PaymentSubmission[] | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [amount, setAmount] = useState("");
+  const [reference, setReference] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const { show } = useToast();
+
+  function load() {
+    api
+      .listMyPaymentSubmissions(accessToken)
+      .then((all) => {
+        setSubmissions(all.filter((s) => s.studentId === studentId));
+        setHistoryError(null);
+      })
+      .catch((err) => setHistoryError(err instanceof ApiError ? err.message : "Failed to load submissions"));
+  }
+
+  useEffect(load, [accessToken, studentId]);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+    setSubmitting(true);
+    try {
+      await api.submitMyPaymentNotice(accessToken, studentId, {
+        amount: Number(amount),
+        providerTransactionReference: reference || undefined,
+      });
+      setAmount("");
+      setReference("");
+      show("Payment notice submitted. It will be verified by the school.");
+      load();
+    } catch (err) {
+      setFormError(err instanceof ApiError ? err.message : "Failed to submit payment notice");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <Card>
+        <CardHeader title="Report a ZAAD payment" description="Sent an amount via ZAAD? Let the school know so they can verify it." />
+        <form onSubmit={onSubmit} className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <FormField label="Amount">
+            <Input required type="number" min={0.01} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </FormField>
+          <FormField label="Reference (optional)">
+            <Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Transaction ID" />
+          </FormField>
+          <div className="flex items-end">
+            <Button type="submit" loading={submitting} className="w-full" icon={<Send className="size-4" />}>
+              Submit
+            </Button>
+          </div>
+          {formError && (
+            <Alert tone="danger" className="sm:col-span-3">
+              {formError}
+            </Alert>
+          )}
+        </form>
+      </Card>
+
+      <Card padding="none">
+        <div className="border-b border-border px-5 py-3">
+          <h2 className="text-sm font-semibold text-foreground">Submission history</h2>
+        </div>
+        {historyError ? (
+          <div className="p-5">
+            <Alert tone="danger">{historyError}</Alert>
+          </div>
+        ) : !submissions ? (
+          <div className="p-5">
+            <SkeletonCards count={1} />
+          </div>
+        ) : submissions.length === 0 ? (
+          <div className="p-5">
+            <EmptyState icon={Wallet} title="No payment notices submitted yet" />
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {submissions
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+              .map((s) => (
+                <div key={s.id} className="flex items-center justify-between p-4">
+                  <div>
+                    <p className="font-medium text-foreground">{Number(s.amount).toFixed(2)}</p>
+                    <p className="text-sm text-foreground-soft">
+                      {new Date(s.createdAt).toLocaleDateString()}
+                      {s.providerTransactionReference ? ` · Ref: ${s.providerTransactionReference}` : ""}
+                    </p>
+                    {s.status === "REJECTED" && s.rejectionReason && (
+                      <p className="mt-1 text-sm text-danger">Reason: {s.rejectionReason}</p>
+                    )}
+                  </div>
+                  <Badge tone={SUBMISSION_STATUS_TONE[s.status]}>{s.status}</Badge>
+                </div>
+              ))}
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }
 

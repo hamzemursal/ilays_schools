@@ -215,17 +215,40 @@ export class GuardianPortalService {
     }));
   }
 
+  // Invoice (one-time) and Charge (recurring/billing-period) are separate
+  // models on the write side (see the schema comment on Charge for why),
+  // but this parent-facing view has always presented them as one flat list
+  // of "things owed" — so both are queried and merged here.
   async myChildInvoices(actor: AuthenticatedUser, studentId: string) {
     await this.guardians.assertGuardianCanAccessStudent(actor, studentId);
 
-    const invoices = await this.prisma.invoice.findMany({
-      where: { enrollment: { studentId } },
-      include: { feeStructure: true, payments: { orderBy: { paidAt: "desc" } } },
-      orderBy: { createdAt: "desc" },
-    });
+    const postedPaid = (payments: { status: string; amount: unknown }[]) =>
+      payments.filter((p) => p.status === "POSTED").reduce((sum, p) => sum + Number(p.amount), 0);
 
-    return invoices.map((inv) => {
-      const paid = inv.payments.reduce((sum, p) => sum + Number(p.amount), 0);
+    const [invoices, charges] = await Promise.all([
+      this.prisma.invoice.findMany({
+        where: { enrollment: { studentId } },
+        include: { feeStructure: true, payments: { orderBy: { paidAt: "desc" } } },
+        orderBy: { createdAt: "desc" },
+      }),
+      this.prisma.charge.findMany({
+        where: { enrollment: { studentId } },
+        include: { feeStructure: true, billingPeriod: true, payments: { orderBy: { paidAt: "desc" } } },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
+
+    const toPayments = (payments: { id: string; amount: unknown; method: string; paidAt: Date; reference: string | null }[]) =>
+      payments.map((p) => ({
+        id: p.id,
+        amount: Number(p.amount),
+        method: p.method,
+        paidAt: p.paidAt,
+        reference: p.reference,
+      }));
+
+    const fromInvoices = invoices.map((inv) => {
+      const paid = postedPaid(inv.payments);
       return {
         id: inv.id,
         feeName: inv.feeStructure.name,
@@ -234,15 +257,25 @@ export class GuardianPortalService {
         balance: Number(inv.amount) - paid,
         status: inv.status,
         dueDate: inv.dueDate,
-        payments: inv.payments.map((p) => ({
-          id: p.id,
-          amount: Number(p.amount),
-          method: p.method,
-          paidAt: p.paidAt,
-          reference: p.reference,
-        })),
+        payments: toPayments(inv.payments),
       };
     });
+
+    const fromCharges = charges.map((c) => {
+      const paid = postedPaid(c.payments);
+      return {
+        id: c.id,
+        feeName: c.billingPeriod ? `${c.feeStructure.name} — ${c.billingPeriod.name}` : c.feeStructure.name,
+        amount: Number(c.amount),
+        paid,
+        balance: Number(c.amount) - paid,
+        status: c.status,
+        dueDate: c.dueDate,
+        payments: toPayments(c.payments),
+      };
+    });
+
+    return [...fromInvoices, ...fromCharges];
   }
 
   // Announcements for every school any of this guardian's active children

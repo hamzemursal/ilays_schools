@@ -19,6 +19,11 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { GuardianCard } from "@/features/guardians/components/GuardianCard";
 import { GuardianForm } from "@/features/guardians/forms/GuardianForm";
 import { useToast } from "@/components/ui/Toast";
+import { TabBar } from "@/components/ui/TabBar";
+import { StudentFeesTab } from "@/features/finance/student-ledger/StudentFeesTab";
+
+const TABS = ["Overview", "Fees & Payments"] as const;
+type Tab = (typeof TABS)[number];
 
 const STATUS_TONE: Record<StudentDetail["currentStatus"], "success" | "accent" | "neutral" | "warning"> = {
   ACTIVE: "success",
@@ -46,6 +51,7 @@ export function StudentProfile({ studentId }: { studentId: string }) {
   const [editing, setEditing] = useState(searchParams.get("edit") === "1");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [tab, setTab] = useState<Tab>("Overview");
 
   // Same idea for "Print Profile" (?print=1) — the browser's own print
   // dialog is the whole feature; no dedicated print page/template needed.
@@ -94,6 +100,12 @@ export function StudentProfile({ studentId }: { studentId: string }) {
   const canDelete = user?.permissions.includes("students.archive") ?? false;
   const canManageGuardians = user?.permissions.includes("guardians.manage") ?? false;
   const canTransfer = (user?.permissions.includes("transfers.create") ?? false) && !!activeEnrollment;
+  // Financial data is opt-in visibility, not default — a Teacher viewing a
+  // student's profile never sees this tab at all, per the non-negotiable
+  // "Teachers should NOT see student financial information by default" rule.
+  const canViewFees = user?.permissions.includes("finance.ledger.view") ?? false;
+  const canRecordPayments = user?.permissions.includes("payments.record") ?? false;
+  const visibleTabs = TABS.filter((t) => t !== "Fees & Payments" || canViewFees);
 
   return (
     <div className="space-y-5">
@@ -161,6 +173,12 @@ export function StudentProfile({ studentId }: { studentId: string }) {
         onCancel={() => setShowDeleteConfirm(false)}
       />
 
+      {visibleTabs.length > 1 && <TabBar tabs={visibleTabs} active={tab} onChange={setTab} />}
+
+      {tab === "Fees & Payments" && canViewFees && accessToken ? (
+        <StudentFeesTab accessToken={accessToken} studentId={student.id} canRecordPayments={canRecordPayments} />
+      ) : (
+        <>
       {editing && accessToken && (
         <EditStudentForm
           accessToken={accessToken}
@@ -324,6 +342,8 @@ export function StudentProfile({ studentId }: { studentId: string }) {
       {canTransfer && activeEnrollment && accessToken && (
         <TransferRequestCard accessToken={accessToken} studentId={student.id} fromSchoolName={activeEnrollment.school.name} />
       )}
+        </>
+      )}
     </div>
   );
 }
@@ -483,6 +503,7 @@ function TransferRequestCard({
         const filtered = list.filter((s) => s.name !== fromSchoolName);
         setSchools(filtered);
         if (filtered[0]) setToSchoolId(filtered[0].id);
+        setError(null);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load schools"));
   }, [open, accessToken, fromSchoolName]);

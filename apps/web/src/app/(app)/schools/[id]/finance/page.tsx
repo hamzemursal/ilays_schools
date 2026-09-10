@@ -5,9 +5,12 @@ import { useAuth, ApiError } from "@/lib/auth-context";
 import {
   api,
   type AcademicYear,
+  type BillingPeriod,
   type ClassWithSections,
   type FeeStructure,
+  type PayrollPeriod,
   type PaymentMethod,
+  type SchoolCharge,
   type SchoolInvoice,
 } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -18,17 +21,48 @@ import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
+import { TabBar } from "@/components/ui/TabBar";
 import { useToast } from "@/components/ui/Toast";
 import { Download, Plus } from "lucide-react";
+import { FinanceDashboardTab } from "@/features/finance/dashboard/FinanceDashboardTab";
+import { BillingPeriodsTab } from "@/features/finance/billing-periods/BillingPeriodsTab";
+import { ChargesTab } from "@/features/finance/charges/ChargesTab";
+import { FeeAdjustmentsTab } from "@/features/finance/adjustments/FeeAdjustmentsTab";
+import { ZaadReviewTab } from "@/features/finance/zaad/ZaadReviewTab";
+import { ExpensesTab } from "@/features/finance/expenses/ExpensesTab";
+import { SalaryHistoryTab } from "@/features/payroll/salary-history/SalaryHistoryTab";
+import { StaffAdvancesTab } from "@/features/payroll/advances/StaffAdvancesTab";
+import { PayrollPeriodsTab } from "@/features/payroll/periods/PayrollPeriodsTab";
+import { PayslipsTab } from "@/features/payroll/payslips/PayslipsTab";
+
+const TABS = [
+  "Dashboard",
+  "Fee Structures",
+  "Invoices",
+  "Billing Periods",
+  "Charges",
+  "Adjustments",
+  "ZAAD Review",
+  "Expenses",
+  "Salary History",
+  "Advances",
+  "Payroll Periods",
+  "Payslips",
+] as const;
+type Tab = (typeof TABS)[number];
 
 export default function FinancePage({ params }: { params: Promise<{ id: string }> }) {
   const { id: schoolId } = use(params);
   const { user, accessToken } = useAuth();
+  const [tab, setTab] = useState<Tab>("Dashboard");
 
   const [years, setYears] = useState<AcademicYear[]>([]);
   const [classes, setClasses] = useState<ClassWithSections[]>([]);
   const [feeStructures, setFeeStructures] = useState<FeeStructure[]>([]);
   const [invoices, setInvoices] = useState<SchoolInvoice[]>([]);
+  const [billingPeriods, setBillingPeriods] = useState<BillingPeriod[]>([]);
+  const [charges, setCharges] = useState<SchoolCharge[]>([]);
+  const [payrollPeriods, setPayrollPeriods] = useState<PayrollPeriod[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,12 +73,18 @@ export default function FinancePage({ params }: { params: Promise<{ id: string }
       api.listClasses(accessToken, schoolId),
       api.listFeeStructures(accessToken, schoolId),
       api.listSchoolInvoices(accessToken, schoolId),
+      api.listBillingPeriods(accessToken, schoolId),
+      api.listCharges(accessToken, schoolId),
+      api.listPayrollPeriods(accessToken, schoolId),
     ])
-      .then(([y, c, fs, inv]) => {
+      .then(([y, c, fs, inv, bp, ch, pp]) => {
         setYears(y);
         setClasses(c);
         setFeeStructures(fs);
         setInvoices(inv);
+        setBillingPeriods(bp);
+        setCharges(ch);
+        setPayrollPeriods(pp);
         setLoaded(true);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load finance data"));
@@ -52,12 +92,47 @@ export default function FinancePage({ params }: { params: Promise<{ id: string }
 
   const canManageFees = user?.permissions.includes("fees.manage") ?? false;
   const canRecordPayments = user?.permissions.includes("payments.record") ?? false;
+  const canViewDashboard = user?.permissions.includes("finance.dashboard.view") ?? false;
+  const canManageAdjustments = user?.permissions.includes("finance.adjustments.manage") ?? false;
+  const canVerifyZaad = user?.permissions.includes("finance.payments.verify") ?? false;
+  const canViewExpenses = user?.permissions.includes("expenses.view") ?? false;
+  const canCreateExpenses = user?.permissions.includes("expenses.create") ?? false;
+  const canApproveExpenses = user?.permissions.includes("expenses.approve") ?? false;
+  const canViewPayroll = user?.permissions.includes("payroll.view") ?? false;
+  const canPreparePayroll = user?.permissions.includes("payroll.prepare") ?? false;
+  const canReviewPayroll = user?.permissions.includes("payroll.review") ?? false;
+  const canApprovePayroll = user?.permissions.includes("payroll.approve") ?? false;
+  const canPayPayroll = user?.permissions.includes("payroll.pay") ?? false;
   const schoolName = user?.schools.find((s) => s.id === schoolId)?.name ?? "School";
+
+  async function refreshPayrollPeriods() {
+    if (!accessToken) return;
+    setPayrollPeriods(await api.listPayrollPeriods(accessToken, schoolId));
+  }
 
   async function refreshInvoices() {
     if (!accessToken) return;
     setInvoices(await api.listSchoolInvoices(accessToken, schoolId));
   }
+
+  const visibleTabs = TABS.filter((t) => {
+    if (t === "Dashboard") return canViewDashboard;
+    if (t === "Adjustments") return canManageAdjustments;
+    if (t === "ZAAD Review") return canVerifyZaad;
+    if (t === "Expenses") return canViewExpenses;
+    if (t === "Salary History" || t === "Advances" || t === "Payroll Periods" || t === "Payslips") return canViewPayroll;
+    return true;
+  });
+
+  // Falls back once permissions are known and the default ("Dashboard")
+  // isn't actually visible to this actor — e.g. an Accountant who can
+  // record payments but not view the dashboard.
+  useEffect(() => {
+    if (visibleTabs.length > 0 && !visibleTabs.includes(tab)) {
+      setTab(visibleTabs[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleTabs.join(",")]);
 
   return (
     <div>
@@ -67,6 +142,8 @@ export default function FinancePage({ params }: { params: Promise<{ id: string }
         breadcrumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Finance" }]}
       />
 
+      <TabBar tabs={visibleTabs} active={tab} onChange={setTab} />
+
       <div className="space-y-6 p-4 sm:p-6">
         {error ? (
           <Alert tone="danger">{error}</Alert>
@@ -74,25 +151,96 @@ export default function FinancePage({ params }: { params: Promise<{ id: string }
           <SkeletonCards count={3} />
         ) : (
           <>
-            <FeeStructuresSection
-              schoolId={schoolId}
-              accessToken={accessToken!}
-              years={years}
-              classes={classes}
-              feeStructures={feeStructures}
-              setFeeStructures={setFeeStructures}
-              onGenerated={refreshInvoices}
-              canManage={canManageFees}
-            />
+            {tab === "Dashboard" && canViewDashboard && (
+              <FinanceDashboardTab accessToken={accessToken!} schoolId={schoolId} />
+            )}
 
-            <InvoicesSection
-              schoolId={schoolId}
-              accessToken={accessToken!}
-              invoices={invoices}
-              setInvoices={setInvoices}
-              canRecordPayments={canRecordPayments}
-              canExport={user?.permissions.includes("exports.create") ?? false}
-            />
+            {tab === "Fee Structures" && (
+              <FeeStructuresSection
+                schoolId={schoolId}
+                accessToken={accessToken!}
+                years={years}
+                classes={classes}
+                feeStructures={feeStructures}
+                setFeeStructures={setFeeStructures}
+                onGenerated={refreshInvoices}
+                canManage={canManageFees}
+              />
+            )}
+
+            {tab === "Invoices" && (
+              <InvoicesSection
+                schoolId={schoolId}
+                accessToken={accessToken!}
+                invoices={invoices}
+                setInvoices={setInvoices}
+                canRecordPayments={canRecordPayments}
+                canExport={user?.permissions.includes("exports.create") ?? false}
+              />
+            )}
+
+            {tab === "Billing Periods" && (
+              <BillingPeriodsTab accessToken={accessToken!} schoolId={schoolId} years={years} canManage={canManageFees} />
+            )}
+
+            {tab === "Charges" && (
+              <ChargesTab
+                accessToken={accessToken!}
+                schoolId={schoolId}
+                feeStructures={feeStructures}
+                billingPeriods={billingPeriods}
+                canManage={canManageFees}
+                canRecordPayments={canRecordPayments}
+              />
+            )}
+
+            {tab === "Adjustments" && canManageAdjustments && (
+              <FeeAdjustmentsTab
+                accessToken={accessToken!}
+                schoolId={schoolId}
+                invoices={invoices}
+                charges={charges}
+                canManage={canManageAdjustments}
+              />
+            )}
+
+            {tab === "ZAAD Review" && canVerifyZaad && (
+              <ZaadReviewTab accessToken={accessToken!} schoolId={schoolId} invoices={invoices} charges={charges} canVerify={canVerifyZaad} />
+            )}
+
+            {tab === "Expenses" && canViewExpenses && (
+              <ExpensesTab accessToken={accessToken!} schoolId={schoolId} canCreate={canCreateExpenses} canApprove={canApproveExpenses} />
+            )}
+
+            {tab === "Salary History" && canViewPayroll && (
+              <SalaryHistoryTab accessToken={accessToken!} schoolId={schoolId} canManage={canPreparePayroll} />
+            )}
+
+            {tab === "Advances" && canViewPayroll && (
+              <StaffAdvancesTab accessToken={accessToken!} schoolId={schoolId} canManage={canPreparePayroll} />
+            )}
+
+            {tab === "Payroll Periods" && canViewPayroll && (
+              <PayrollPeriodsTab
+                accessToken={accessToken!}
+                schoolId={schoolId}
+                canManage={canPreparePayroll}
+                canClose={canApprovePayroll}
+                onChanged={refreshPayrollPeriods}
+              />
+            )}
+
+            {tab === "Payslips" && canViewPayroll && (
+              <PayslipsTab
+                accessToken={accessToken!}
+                schoolId={schoolId}
+                payrollPeriods={payrollPeriods}
+                canPrepare={canPreparePayroll}
+                canReview={canReviewPayroll}
+                canApprove={canApprovePayroll}
+                canPay={canPayPayroll}
+              />
+            )}
           </>
         )}
       </div>

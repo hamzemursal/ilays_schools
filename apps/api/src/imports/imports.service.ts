@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from "@nestjs/common";
 import { parse } from "csv-parse/sync";
 import { GuardianRelationship, Sex, type Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
@@ -6,26 +6,59 @@ import { SchoolsService } from "../schools/schools.service";
 import { StudentsService } from "../students/students.service";
 import { AuditService } from "../audit/audit.service";
 import { AuditAction, AuditModuleName } from "../audit/audit-actions";
+import { resolveAuthenticatedUser } from "../auth/resolve-authenticated-user";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import type { CreateStudentDto } from "../students/dto/create-student.dto";
 
 const REQUIRED_COLUMNS = ["firstName", "lastName", "dateOfBirth", "sex", "academicYear", "className", "sectionName"];
 
-interface DuplicateCandidate {
-  id: string;
-  firstName: string;
-  lastName: string;
-  dateOfBirth: string;
-}
-
+// A staged, two-phase pipeline — nothing is ever written to the Student
+// table until an admin has seen the full row-level report and explicitly
+// commits. Phase 1 (stage): parse + validate + duplicate-check every row,
+// writing only ImportRow outcomes (READY/DUPLICATE_PENDING/ERROR). Phase 2
+// (commit, a separate admin action): create a real Student for every READY
+// row. Both phases run in the background (fired from the controller-facing
+// methods without being awaited) so a large CSV never blocks the request or
+// risks an HTTP timeout — see uploadStudentsCsv/commitStudents.
+//
+// This runs in-process rather than on a Redis-backed queue (BullMQ) —
+// deliberate: Redis isn't a reliable dependency in this project today (see
+// RedisModule/HealthController, which already treats it as optional
+// everywhere else), and making a core admin workflow depend on it would be
+// a regression, not an improvement. The trade-off is durability: if the API
+// process restarts mid-stage or mid-commit, in-flight work stops. onModuleInit
+// below covers that by resuming any batch still STAGING/COMMITTING on boot —
+// safe to do unconditionally only because this app runs as a single
+// instance; a horizontally-scaled deployment would need a real lock here.
 @Injectable()
-export class ImportsService {
+export class ImportsService implements OnModuleInit {
+  private readonly logger = new Logger(ImportsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly schools: SchoolsService,
     private readonly students: StudentsService,
     private readonly audit: AuditService,
   ) {}
+
+  async onModuleInit() {
+    const stuck = await this.prisma.importBatch.findMany({
+      where: { status: { in: ["STAGING", "COMMITTING"] } },
+    });
+    for (const batch of stuck) {
+      this.logger.warn(`Resuming import batch ${batch.id} (was ${batch.status} at boot)`);
+      if (batch.status === "STAGING") {
+        this.stageBatch(batch.id, batch.organizationId, batch.schoolId).catch((err) => this.markFailed(batch.id, err));
+      } else {
+        const actor = await resolveAuthenticatedUser(this.prisma, batch.uploadedByUserId);
+        if (actor) {
+          this.commitBatch(batch.id, actor, batch.schoolId).catch((err) => this.markFailed(batch.id, err));
+        } else {
+          await this.markFailed(batch.id, new Error("Uploading user no longer exists"));
+        }
+      }
+    }
+  }
 
   async uploadStudentsCsv(actor: AuthenticatedUser, schoolId: string, file: Express.Multer.File) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
@@ -51,14 +84,25 @@ export class ImportsService {
         uploadedByUserId: actor.id,
         fileName: file.originalname,
         totalRows: records.length,
+        status: "STAGING",
       },
     });
 
-    for (let i = 0; i < records.length; i++) {
-      await this.processRow(actor, schoolId, batch.id, i + 2, records[i]);
-    }
+    await this.prisma.importRow.createMany({
+      data: records.map((raw, i) => ({ batchId: batch.id, rowNumber: i + 2, rawData: raw, status: "PENDING" as const })),
+    });
 
-    return this.finalizeBatch(actor, schoolId, batch.id);
+    // Not awaited — the request returns with the batch in STAGING; the
+    // frontend polls getBatch until it leaves that state.
+    this.stageBatch(batch.id, actor.organizationId!, schoolId).catch((err) => this.markFailed(batch.id, err));
+
+    // Re-fetched with rows included (all PENDING at this instant) so the
+    // response shape matches every other batch-detail response the
+    // frontend gets from getBatch/resolveRow/commitStudents.
+    return this.prisma.importBatch.findUniqueOrThrow({
+      where: { id: batch.id },
+      include: { rows: { orderBy: { rowNumber: "asc" } } },
+    });
   }
 
   async listBatches(actor: AuthenticatedUser, schoolId: string) {
@@ -76,6 +120,10 @@ export class ImportsService {
     return batch;
   }
 
+  // Pre-commit only — resolves a DUPLICATE_PENDING row to either READY
+  // (admin confirmed it's a different person; created once commitStudents
+  // runs) or SKIPPED. Never creates a Student directly, unlike the old
+  // single-phase flow.
   async resolveRow(actor: AuthenticatedUser, schoolId: string, batchId: string, rowId: string, action: "confirm" | "skip") {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     const row = await this.prisma.importRow.findFirst({ where: { id: rowId, batchId, batch: { schoolId } } });
@@ -84,86 +132,142 @@ export class ImportsService {
       throw new BadRequestException("This row isn't awaiting a duplicate decision");
     }
 
-    if (action === "skip") {
-      await this.prisma.importRow.update({ where: { id: rowId }, data: { status: "SKIPPED" } });
-    } else {
+    await this.prisma.importRow.update({
+      where: { id: rowId },
+      data:
+        action === "skip"
+          ? { status: "SKIPPED" }
+          : { status: "READY", duplicateCandidates: undefined, errorMessage: null },
+    });
+
+    return this.refreshCounts(batchId);
+  }
+
+  // The explicit admin action the whole staged flow exists for — nothing
+  // before this point ever touches the Student table. Refuses while any
+  // row is still DUPLICATE_PENDING so nothing gets silently skipped.
+  async commitStudents(actor: AuthenticatedUser, schoolId: string, batchId: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    const batch = await this.prisma.importBatch.findFirst({ where: { id: batchId, schoolId } });
+    if (!batch) throw new NotFoundException("Import batch not found");
+    if (batch.status !== "READY_FOR_REVIEW") {
+      throw new BadRequestException(`This batch is ${batch.status.toLowerCase().replace("_", " ")}, not ready to commit`);
+    }
+    const stillPending = await this.prisma.importRow.count({ where: { batchId, status: "DUPLICATE_PENDING" } });
+    if (stillPending > 0) {
+      throw new BadRequestException(`${stillPending} row(s) still need a duplicate decision before this can be committed`);
+    }
+
+    await this.prisma.importBatch.update({ where: { id: batchId }, data: { status: "COMMITTING" } });
+    this.commitBatch(batchId, actor, schoolId).catch((err) => this.markFailed(batchId, err));
+
+    return this.getBatch(actor, schoolId, batchId);
+  }
+
+  // --- Background phases ---------------------------------------------------
+
+  private async stageBatch(batchId: string, organizationId: string, schoolId: string) {
+    const rows = await this.prisma.importRow.findMany({ where: { batchId, status: "PENDING" } });
+
+    for (const row of rows) {
       const raw = row.rawData as Record<string, string>;
-      const dto = await this.buildDto(schoolId, raw, true);
-      if (!dto.ok) {
-        await this.prisma.importRow.update({ where: { id: rowId }, data: { status: "ERROR", errorMessage: dto.error } });
+      // false here is purely for readability — buildDto's confirmDespiteDuplicates
+      // value only matters once a dto reaches students.create(), which never
+      // happens during staging; the actual duplicate decision is the
+      // findDuplicateCandidates call right below.
+      const built = await this.buildDto(schoolId, raw, false);
+      if (!built.ok) {
+        await this.prisma.importRow.update({ where: { id: row.id }, data: { status: "ERROR", errorMessage: built.error } });
+        continue;
+      }
+
+      const dateOfBirth = new Date(built.dto.dateOfBirth);
+      const candidates = await this.students.findDuplicateCandidates(organizationId, built.dto, dateOfBirth);
+      if (candidates.length > 0) {
+        await this.prisma.importRow.update({
+          where: { id: row.id },
+          data: { status: "DUPLICATE_PENDING", duplicateCandidates: candidates as unknown as Prisma.InputJsonValue },
+        });
       } else {
-        try {
-          const created = await this.students.create(actor, schoolId, dto.dto);
-          await this.prisma.importRow.update({
-            where: { id: rowId },
-            data: { status: "CREATED", studentId: created.student.id, errorMessage: null, duplicateCandidates: undefined },
-          });
-        } catch (err) {
-          await this.prisma.importRow.update({
-            where: { id: rowId },
-            data: { status: "ERROR", errorMessage: err instanceof Error ? err.message : "Failed to create student" },
-          });
-        }
+        await this.prisma.importRow.update({ where: { id: row.id }, data: { status: "READY" } });
       }
     }
 
-    return this.finalizeBatch(actor, schoolId, batchId);
+    await this.refreshCounts(batchId, "READY_FOR_REVIEW");
   }
 
-  private async processRow(
-    actor: AuthenticatedUser,
-    schoolId: string,
-    batchId: string,
-    rowNumber: number,
-    raw: Record<string, string>,
-  ) {
-    const dto = await this.buildDto(schoolId, raw, false);
-    if (!dto.ok) {
-      await this.prisma.importRow.create({
-        data: { batchId, rowNumber, rawData: raw, status: "ERROR", errorMessage: dto.error },
-      });
-      return;
-    }
+  private async commitBatch(batchId: string, actor: AuthenticatedUser, schoolId: string) {
+    const rows = await this.prisma.importRow.findMany({ where: { batchId, status: "READY" } });
 
-    try {
-      const created = await this.students.create(actor, schoolId, dto.dto);
-      await this.prisma.importRow.create({
-        data: { batchId, rowNumber, rawData: raw, status: "CREATED", studentId: created.student.id },
-      });
-    } catch (err) {
-      if (err instanceof ConflictException) {
-        const body = err.getResponse();
-        const candidates =
-          typeof body === "object" && body && "possibleDuplicates" in body
-            ? (body as { possibleDuplicates: DuplicateCandidate[] }).possibleDuplicates
-            : null;
-        if (candidates) {
-          await this.prisma.importRow.create({
-            data: {
-              batchId,
-              rowNumber,
-              rawData: raw,
-              status: "DUPLICATE_PENDING",
-              duplicateCandidates: candidates as unknown as Prisma.InputJsonValue,
-            },
-          });
-          return;
-        }
+    for (const row of rows) {
+      const raw = row.rawData as Record<string, string>;
+      // confirmDespiteDuplicates: true — the duplicate decision (if any) was
+      // already made during staging/resolveRow; re-running that check here
+      // would either be redundant (no duplicate) or wrongly re-block a row
+      // an admin explicitly confirmed.
+      const built = await this.buildDto(schoolId, raw, true);
+      if (!built.ok) {
+        await this.prisma.importRow.update({ where: { id: row.id }, data: { status: "ERROR", errorMessage: built.error } });
+        continue;
       }
-      await this.prisma.importRow.create({
-        data: {
-          batchId,
-          rowNumber,
-          rawData: raw,
-          status: "ERROR",
-          errorMessage: err instanceof Error ? err.message : "Failed to create student",
-        },
-      });
+      try {
+        const created = await this.students.create(actor, schoolId, built.dto);
+        await this.prisma.importRow.update({
+          where: { id: row.id },
+          data: { status: "CREATED", studentId: created.student.id },
+        });
+      } catch (err) {
+        await this.prisma.importRow.update({
+          where: { id: row.id },
+          data: { status: "ERROR", errorMessage: err instanceof Error ? err.message : "Failed to create student" },
+        });
+      }
     }
+
+    const rowsFinal = await this.prisma.importRow.findMany({ where: { batchId } });
+    const createdCount = rowsFinal.filter((r) => r.status === "CREATED").length;
+    const errorCount = rowsFinal.filter((r) => r.status === "ERROR").length;
+    const skippedCount = rowsFinal.filter((r) => r.status === "SKIPPED").length;
+
+    const batch = await this.prisma.importBatch.update({
+      where: { id: batchId },
+      data: { status: "COMPLETED", createdCount, errorCount, skippedCount, completedAt: new Date() },
+    });
+
+    // One STUDENT_CREATED event per row already came from students.create()
+    // itself — this is only the batch-level summary.
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId,
+      action: AuditAction.STUDENT_IMPORTED,
+      module: AuditModuleName.STUDENTS,
+      resourceType: "ImportBatch",
+      resourceId: batchId,
+      severity: errorCount > 0 ? "WARNING" : "INFO",
+      after: { createdCount, errorCount, skippedCount, totalRows: batch.totalRows },
+    });
   }
 
-  // Shared between the first pass and row resolution — the CSV row is the
-  // single source of truth for both, so the mapping only lives here once.
+  private async refreshCounts(batchId: string, andSetStatus?: "READY_FOR_REVIEW") {
+    const rows = await this.prisma.importRow.findMany({ where: { batchId } });
+    const pendingCount = rows.filter((r) => r.status === "DUPLICATE_PENDING").length;
+    const errorCount = rows.filter((r) => r.status === "ERROR").length;
+
+    return this.prisma.importBatch.update({
+      where: { id: batchId },
+      data: { pendingCount, errorCount, ...(andSetStatus ? { status: andSetStatus } : {}) },
+      include: { rows: { orderBy: { rowNumber: "asc" } } },
+    });
+  }
+
+  private async markFailed(batchId: string, err: unknown) {
+    this.logger.error(`Import batch ${batchId} failed`, err instanceof Error ? err.stack : String(err));
+    await this.prisma.importBatch.update({ where: { id: batchId }, data: { status: "FAILED" } }).catch(() => undefined);
+  }
+
+  // Shared between staging and commit — the CSV row is the single source of
+  // truth for both, so the mapping only lives here once.
   private async buildDto(
     schoolId: string,
     raw: Record<string, string>,
@@ -251,43 +355,5 @@ export class ImportsService {
         confirmDespiteDuplicates,
       },
     };
-  }
-
-  private async finalizeBatch(actor: AuthenticatedUser, schoolId: string, batchId: string) {
-    const rows = await this.prisma.importRow.findMany({ where: { batchId } });
-    const createdCount = rows.filter((r) => r.status === "CREATED").length;
-    const errorCount = rows.filter((r) => r.status === "ERROR").length;
-    const pendingCount = rows.filter((r) => r.status === "DUPLICATE_PENDING").length;
-    const skippedCount = rows.filter((r) => r.status === "SKIPPED").length;
-    const status = pendingCount > 0 ? "NEEDS_REVIEW" : "COMPLETED";
-
-    const batch = await this.prisma.importBatch.update({
-      where: { id: batchId },
-      data: {
-        createdCount,
-        errorCount,
-        pendingCount,
-        skippedCount,
-        status,
-        completedAt: status === "COMPLETED" ? new Date() : null,
-      },
-      include: { rows: { orderBy: { rowNumber: "asc" } } },
-    });
-
-    if (status === "COMPLETED") {
-      await this.audit.record({
-        actor,
-        organizationId: actor.organizationId,
-        schoolId,
-        action: AuditAction.STUDENT_IMPORTED,
-        module: AuditModuleName.STUDENTS,
-        resourceType: "ImportBatch",
-        resourceId: batchId,
-        severity: errorCount > 0 ? "WARNING" : "INFO",
-        after: { createdCount, errorCount, skippedCount, totalRows: batch.totalRows },
-      });
-    }
-
-    return batch;
   }
 }

@@ -50,4 +50,10 @@ export class ImportsController {
   ) {
     return this.imports.resolveRow(user, schoolId, batchId, rowId, dto.action);
   }
+
+  @RequirePermissions("imports.create")
+  @Post(":batchId/commit")
+  commit(@CurrentUser() user: AuthenticatedUser, @Param("schoolId") schoolId: string, @Param("batchId") batchId: string) {
+    return this.imports.commitStudents(user, schoolId, batchId);
+  }
 }

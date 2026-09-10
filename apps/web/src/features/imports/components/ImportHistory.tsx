@@ -5,10 +5,14 @@ import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { History } from "lucide-react";
 
-const STATUS_TONE: Record<ImportBatch["status"], "neutral" | "warning" | "success"> = {
+const STATUS_TONE: Record<ImportBatch["status"], "neutral" | "warning" | "success" | "danger" | "accent"> = {
   PROCESSING: "neutral",
+  STAGING: "accent",
   NEEDS_REVIEW: "warning",
+  READY_FOR_REVIEW: "warning",
+  COMMITTING: "accent",
   COMPLETED: "success",
+  FAILED: "danger",
 };
 
 export function ImportHistory({ batches, onSelect }: { batches: ImportBatch[]; onSelect: (batchId: string) => void }) {

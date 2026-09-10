@@ -5,6 +5,7 @@ export const importsApi = {
   list: api.listImportBatches,
   getOne: api.getImportBatch,
   resolveRow: api.resolveImportRow,
+  commit: api.commitImportBatch,
 };
 
 export const STUDENTS_IMPORT_TEMPLATE = [

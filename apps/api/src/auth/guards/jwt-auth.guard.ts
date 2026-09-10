@@ -1,12 +1,14 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { Reflector } from "@nestjs/core";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
+import { ALLOW_PASSWORD_CHANGE_REQUIRED_KEY } from "../decorators/allow-password-change-required.decorator";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { AuthenticatedUser } from "../types/authenticated-user";
 
@@ -48,6 +50,19 @@ export class JwtAuthGuard implements CanActivate {
 
     if (!user || user.status !== "ACTIVE") {
       throw new UnauthorizedException("Account is not active");
+    }
+
+    // Mirrors AppShell's frontend gate, which only blocks rendering — a
+    // direct API call bypassed it entirely until this check existed. Only
+    // the two routes the password-change flow itself needs stay reachable.
+    if (user.mustChangePassword) {
+      const exempt = this.reflector.getAllAndOverride<boolean>(ALLOW_PASSWORD_CHANGE_REQUIRED_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+      if (!exempt) {
+        throw new ForbiddenException("Password must be changed before continuing");
+      }
     }
 
     const roles = user.roles.map((ur) => ur.role.name);

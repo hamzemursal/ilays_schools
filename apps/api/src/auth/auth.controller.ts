@@ -6,6 +6,7 @@ import { AcceptInviteDto } from "./dto/accept-invite.dto";
 import { ChangePasswordDto } from "./dto/change-password.dto";
 import { RefreshSessionDto } from "./dto/refresh-session.dto";
 import { Public } from "./decorators/public.decorator";
+import { AllowPasswordChangeRequired } from "./decorators/allow-password-change-required.decorator";
 import { CurrentUser } from "./decorators/current-user.decorator";
 import { PrismaService } from "../prisma/prisma.service";
 import { DocumentsService } from "../documents/documents.service";
@@ -108,6 +109,7 @@ export class AuthController {
     return { accessToken: tokens.accessToken, sessionId: tokens.sessionId };
   }
 
+  @AllowPasswordChangeRequired()
   @Get("me")
   async me(@CurrentUser() user: AuthenticatedUser) {
     const [schools, teacher, guardian, student, self, logoUrls] = await Promise.all([
@@ -131,6 +133,7 @@ export class AuthController {
     };
   }
 
+  @AllowPasswordChangeRequired()
   @Post("change-password")
   async changePassword(@CurrentUser() user: AuthenticatedUser, @Body() dto: ChangePasswordDto) {
     await this.auth.changeMyPassword(user.id, dto.currentPassword, dto.newPassword);

@@ -12,7 +12,10 @@ test("adding a student with the same name + DOB as an existing one is flagged be
   await loginAt(page, "/admin/login", ADMIN.email, ADMIN.password);
   await expect(page).toHaveURL(/\/dashboard/);
 
-  await page.goto("/students");
+  // No bare /students route — School Admin's Students page is nested under
+  // its school id (see nav-config.ts), so it has to be reached by clicking
+  // the actual sidebar link rather than guessing the URL.
+  await page.getByRole("link", { name: "Students" }).click();
   // Rendered as a Button nested inside a Link — ambiguous accessible role,
   // so match on visible text rather than assuming "link" or "button".
   await page.getByText("Add student", { exact: true }).click();

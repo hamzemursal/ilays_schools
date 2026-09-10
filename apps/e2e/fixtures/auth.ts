@@ -1,6 +1,14 @@
 import { expect, type Page } from "@playwright/test";
 import { generate } from "otplib";
 
+// Populated the first time an account completes 2FA setup (mandatory or
+// voluntary), so a later loginAt call for the same email — a genuinely
+// separate test; 2FA state persists in the one shared database for the
+// whole CI run/worker — can get through the ordinary MFA challenge screen
+// instead of hitting (and failing on) the one-time setup screen it no
+// longer shows.
+const totpSecretsByEmail = new Map<string, string>();
+
 export async function loginAt(page: Page, loginPath: string, email: string, password: string) {
   await page.goto(loginPath);
   await page.getByPlaceholder(/you@school\.com|Student Login ID/i).fill(email);
@@ -23,12 +31,21 @@ export async function loginAt(page: Page, loginPath: string, email: string, pass
     .catch(() => false);
   if (setupGate) {
     const secret = await page.locator("code").innerText();
+    totpSecretsByEmail.set(email, secret);
     const code = await generate({ secret });
     await page.getByPlaceholder("123456").fill(code);
     await page.getByRole("button", { name: "Confirm" }).click();
     await expect(page.getByText("Save your recovery codes")).toBeVisible();
     await page.getByRole("checkbox").check();
     await page.getByRole("button", { name: "Done" }).click();
+    return;
+  }
+
+  const knownSecret = totpSecretsByEmail.get(email);
+  if (knownSecret) {
+    const code = await generate({ secret: knownSecret });
+    await page.getByPlaceholder("123456").fill(code);
+    await page.getByRole("button", { name: "Verify" }).click();
   }
 }
 

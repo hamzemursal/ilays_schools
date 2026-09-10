@@ -22,7 +22,9 @@ test("enable 2FA, log in through the MFA challenge, then disable it again", asyn
   await expect(page.getByText("Save your recovery codes")).toBeVisible();
   await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Done" }).click();
-  await expect(page.getByText("Enabled")).toBeVisible();
+  // Not just getByText: matches both the "Not enabled" badge (as a
+  // substring) and the "Two-factor authentication enabled." toast.
+  await expect(page.getByText("Enabled", { exact: true })).toBeVisible();
 
   await signOut(page);
 

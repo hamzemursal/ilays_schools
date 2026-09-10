@@ -306,7 +306,10 @@ export class DocumentsService {
     this.assertValidDocument(file);
     const extension = extensionFor(file.mimetype);
     const storageKey = `result-submissions/${resultSubmissionId}/${randomUUID()}.${extension}`;
-    await this.storage.upload(storageKey, file.buffer, file.mimetype);
+    // Private, not the public upload() every other document type uses — an
+    // exam paper is exactly the case where a leaked link staying valid
+    // forever is a real problem (results/exam content ahead of results day).
+    await this.storage.uploadPrivate(storageKey, file.buffer, file.mimetype);
 
     return this.prisma.mediaFile.create({
       data: {
@@ -341,7 +344,7 @@ export class DocumentsService {
       sizeBytes: latest.sizeBytes,
       uploadedByUserId: latest.uploadedByUserId,
       uploadedAt: latest.createdAt,
-      url: await this.storage.getSignedDownloadUrl(latest.storageKey, latest.mimeType),
+      url: await this.storage.getPrivateDownloadUrl(latest.storageKey, latest.mimeType),
     };
   }
 

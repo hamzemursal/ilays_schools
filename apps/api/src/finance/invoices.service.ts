@@ -69,6 +69,7 @@ export class InvoicesService {
 
     return invoices.map((inv) => ({
       ...this.toView(inv),
+      enrollmentId: inv.enrollmentId,
       studentId: inv.enrollment.studentId,
       firstName: inv.enrollment.student.firstName,
       lastName: inv.enrollment.student.lastName,

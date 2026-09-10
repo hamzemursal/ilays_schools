@@ -57,6 +57,17 @@ export class AttendanceService {
     }
   }
 
+  // Comparing the raw "YYYY-MM-DD" strings directly (not Date objects) sorts
+  // exactly like chronological order for this format, so there's no
+  // timezone-parsing pitfall to worry about — attendance genuinely can't be
+  // taken for a day that, from the server's own clock, hasn't happened yet.
+  private assertNotFutureDate(dateString: string) {
+    const todayString = new Date().toISOString().slice(0, 10);
+    if (dateString > todayString) {
+      throw new BadRequestException("Attendance cannot be marked for a future date");
+    }
+  }
+
   private async getSectionInSchoolOrThrow(schoolId: string, sectionId: string) {
     const section = await this.prisma.section.findFirst({
       where: { id: sectionId, class: { division: { schoolId } } },
@@ -116,6 +127,7 @@ export class AttendanceService {
   async saveDraft(actor: AuthenticatedUser, schoolId: string, sectionId: string, dto: MarkAttendanceDto) {
     await this.assertCanAccessSection(actor, schoolId, sectionId);
     await this.getSectionInSchoolOrThrow(schoolId, sectionId);
+    this.assertNotFutureDate(dto.date);
 
     const enrollmentIds = dto.entries.map((e) => e.enrollmentId);
     const validEnrollments = await this.prisma.studentEnrollment.findMany({
@@ -163,6 +175,7 @@ export class AttendanceService {
   async mark(actor: AuthenticatedUser, schoolId: string, sectionId: string, dto: MarkAttendanceDto) {
     await this.assertCanAccessSection(actor, schoolId, sectionId);
     await this.getSectionInSchoolOrThrow(schoolId, sectionId);
+    this.assertNotFutureDate(dto.date);
 
     const enrollmentIds = dto.entries.map((e) => e.enrollmentId);
     const validEnrollments = await this.prisma.studentEnrollment.findMany({

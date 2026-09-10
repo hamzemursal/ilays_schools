@@ -18,6 +18,11 @@ import { useToast } from "@/components/ui/Toast";
 import { CheckCircle2, CheckCheck, ClipboardCheck, FileClock, Save } from "lucide-react";
 import { UnsavedAttendanceDialog } from "@/features/attendance/UnsavedAttendanceDialog";
 
+// Attendance can't be taken for a day that hasn't happened yet — this caps
+// the date picker itself, backed up by the same check server-side
+// (AttendanceService.assertNotFutureDate) since a picker's max is UX only.
+const TODAY = new Date().toISOString().slice(0, 10);
+
 const STATUSES: { value: AttendanceStatus; label: string; on: string }[] = [
   { value: "PRESENT", label: "Present", on: "bg-success text-white" },
   { value: "ABSENT", label: "Absent", on: "bg-danger text-white" },
@@ -206,6 +211,7 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
                 id="date"
                 type="date"
                 value={date}
+                max={TODAY}
                 onChange={(e) => {
                   const newDate = e.target.value;
                   attemptAction(() => setDate(newDate));

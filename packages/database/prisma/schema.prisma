@@ -65,6 +65,22 @@ model School {
   importBatches ImportBatch[]
   announcements Announcement[]
 
+  // Workforce / HR / Payroll / Finance foundation (Phase 1)
+  departments        Department[]
+  staff              Staff[]
+  billingPeriods     BillingPeriod[]
+  charges            Charge[]
+  feeAdjustments     FeeAdjustment[]
+  paymentSubmissions PaymentSubmission[]
+  expenseCategories  ExpenseCategory[]
+  expenses           Expense[]
+  salaryHistory      SalaryHistory[]
+  payrollPeriods     PayrollPeriod[]
+  payslips           Payslip[]
+  staffAdvances      StaffAdvance[]
+  leaveRequests      LeaveRequest[]
+  staffAttendances   StaffAttendance[]
+
   @@unique([organizationId, name])
   @@map("schools")
 }
@@ -86,6 +102,9 @@ model AcademicYear {
   assignments   TeacherAssignment[]
   exams         Exam[]
   feeStructures FeeStructure[]
+
+  billingPeriods BillingPeriod[]
+  charges        Charge[]
 
   @@unique([schoolId, name])
   @@map("academic_years")
@@ -233,6 +252,8 @@ model Student {
   guardians   StudentGuardian[]
   transfers   Transfer[]
 
+  paymentSubmissions PaymentSubmission[]
+
   @@index([organizationId, lastName, dateOfBirth])
   @@map("students")
 }
@@ -277,6 +298,8 @@ model StudentEnrollment {
   attendanceDrafts AttendanceDraft[]
   results          Result[]
   invoices         Invoice[]
+  charges          Charge[]
+  feeAdjustments   FeeAdjustment[]
 
   // Roll number is unique per school+year+class+section — but only among
   // rows sharing the same `status`. Including status in the tuple (rather
@@ -474,6 +497,16 @@ model Teacher {
 
   assignments TeacherAssignment[]
 
+  // Payroll / HR foundation (Phase 1) — a Teacher is payroll-eligible
+  // alongside Staff; see SalaryHistory/Payslip/StaffAdvance/LeaveRequest/
+  // StaffAttendance below, all of which reference exactly one of
+  // teacherId/staffId, never both.
+  salaryHistory    SalaryHistory[]
+  payslips         Payslip[]
+  advances         StaffAdvance[]
+  leaveRequests    LeaveRequest[]
+  staffAttendances StaffAttendance[]
+
   @@unique([schoolId, employeeNumber])
   @@map("teachers")
 }
@@ -494,6 +527,158 @@ model TeacherAssignment {
 
   @@unique([teacherId, sectionId, subjectId, academicYearId])
   @@map("teacher_assignments")
+}
+
+// ---------------------------------------------------------------------------
+// Staff & HR — Staff is the non-teaching workforce, deliberately a sibling
+// model to Teacher rather than a shared "Employee" supertype: Teacher already
+// carries subject/section/assignment concepts that don't apply to Staff, and
+// splitting them keeps each domain's UI and queries simple without a risky
+// refactor of the existing, working Teacher module. Department is a plain
+// per-school configurable lookup, never a hard-coded list (e.g. no dedicated
+// Librarian/Driver modules).
+// ---------------------------------------------------------------------------
+
+enum DepartmentStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+model Department {
+  id       String @id @default(uuid())
+  schoolId String
+  school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  name   String
+  status DepartmentStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  staff Staff[]
+
+  @@unique([schoolId, name])
+  @@map("departments")
+}
+
+enum StaffStatus {
+  ACTIVE
+  ON_LEAVE
+  INACTIVE
+}
+
+model Staff {
+  id           String      @id @default(uuid())
+  userId       String?     @unique
+  user         User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  schoolId     String
+  school       School      @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  staffNumber    String
+  firstName      String
+  lastName       String
+  sex            Sex?
+  dateOfBirth    DateTime?
+  phone          String?
+  email          String?
+  address        String?
+  jobTitle       String?
+  employmentDate DateTime?
+  status         StaffStatus @default(ACTIVE)
+
+  emergencyContactName  String?
+  emergencyContactPhone String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  salaryHistory    SalaryHistory[]
+  payslips         Payslip[]
+  advances         StaffAdvance[]
+  leaveRequests    LeaveRequest[]
+  staffAttendances StaffAttendance[]
+
+  @@unique([schoolId, staffNumber])
+  @@map("staff")
+}
+
+enum LeaveType {
+  ANNUAL
+  SICK
+  UNPAID
+  OTHER
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+// Exactly one of teacherId/staffId is set on every row below — the same
+// two-real-foreign-keys pattern already used by Notification
+// (guardianId/userId), not an unenforced polymorphic id column.
+model LeaveRequest {
+  id        String   @id @default(uuid())
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  teacherId String?
+  teacher   Teacher? @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  staffId   String?
+  staff     Staff?   @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  type      LeaveType
+  startDate DateTime    @db.Date
+  endDate   DateTime    @db.Date
+  reason    String?
+  status    LeaveStatus @default(PENDING)
+
+  requestedByUserId String
+  decidedByUserId   String?
+  decidedAt         DateTime?
+  decisionNote      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([teacherId, status])
+  @@index([staffId, status])
+  @@map("leave_requests")
+}
+
+enum StaffAttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  LEAVE
+  EXCUSED
+}
+
+// Deliberately separate from Attendance/AttendanceStatus (student
+// attendance) — same shape, wholly different domain; workforce attendance
+// must never be mixed with student attendance.
+model StaffAttendance {
+  id        String   @id @default(uuid())
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  teacherId String?
+  teacher   Teacher? @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  staffId   String?
+  staff     Staff?   @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  date           DateTime              @db.Date
+  status         StaffAttendanceStatus
+  markedByUserId String
+  note           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([teacherId, staffId, date])
+  @@map("staff_attendance")
 }
 
 // ---------------------------------------------------------------------------
@@ -602,7 +787,7 @@ model ExamSubject {
   subjectId String
   subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
 
-  maxMarks Int       @default(100)
+  maxMarks    Int       @default(100)
   // Stored, not enforced anywhere — this system has no pass/fail policy (see
   // the Phase 8 print-sheet decision not to compute a pass rate), so this is
   // configuration an admin can record, not a value anything currently
@@ -729,6 +914,13 @@ model Result {
 // silently changes an already-issued invoice.
 // ---------------------------------------------------------------------------
 
+enum FeeFrequency {
+  ONE_TIME
+  MONTHLY
+  TERMLY
+  ANNUAL
+}
+
 model FeeStructure {
   id             String       @id @default(uuid())
   schoolId       String
@@ -741,10 +933,19 @@ model FeeStructure {
   name   String
   amount Decimal @db.Decimal(10, 2)
 
+  // Defaults to ONE_TIME so every existing row keeps its current, unchanged
+  // meaning (one Invoice per enrollment, exactly today's behavior).
+  // MONTHLY/TERMLY fee structures are billed via the new Charge model below,
+  // never by weakening Invoice's own one-per-enrollment uniqueness.
+  frequency     FeeFrequency @default(ONE_TIME)
+  effectiveFrom DateTime?    @db.Date
+  effectiveTo   DateTime?    @db.Date
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   invoices Invoice[]
+  charges  Charge[]
 
   @@unique([schoolId, academicYearId, classId, name])
   @@map("fee_structures")
@@ -770,7 +971,9 @@ model Invoice {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  payments Payment[]
+  payments           Payment[]
+  feeAdjustments     FeeAdjustment[]
+  paymentSubmissions PaymentSubmission[]
 
   // One invoice per fee per enrollment — generating twice must not double-bill.
   @@unique([enrollmentId, feeStructureId])
@@ -785,10 +988,28 @@ enum PaymentMethod {
   OTHER
 }
 
+enum PaymentStatus {
+  POSTED
+  REVERSED
+}
+
+// A Payment row is only ever created once money has actually been received
+// and matched — cash is posted immediately (unchanged from today); a ZAAD
+// claim only produces a Payment once PaymentSubmission below is verified.
+// There is deliberately no PENDING status here: "pending" lives entirely in
+// PaymentSubmission, so a Payment row itself always means "this posted to
+// the ledger." REVERSED exists so a mistaken payment can be corrected
+// without ever deleting the row (financial history must not be deleted).
 model Payment {
-  id        String  @id @default(uuid())
-  invoiceId String
-  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  id        String   @id @default(uuid())
+  // Exactly one of invoiceId/chargeId is set — a payment posts against
+  // either a one-time Invoice or a recurring Charge, never both. invoiceId
+  // was NOT NULL before this migration; every existing row already has a
+  // value, so relaxing it to optional is a pure loosening, not a data change.
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  chargeId  String?
+  charge    Charge?  @relation(fields: [chargeId], references: [id], onDelete: Restrict)
 
   amount           Decimal       @db.Decimal(10, 2)
   method           PaymentMethod @default(CASH)
@@ -796,9 +1017,421 @@ model Payment {
   recordedByUserId String
   paidAt           DateTime      @default(now())
 
+  status           PaymentStatus @default(POSTED)
+  reversedByUserId String?
+  reversedAt       DateTime?
+  reversalReason   String?
+
+  // Human-facing receipt number (e.g. "REC-2026-000123"), assigned by the
+  // service layer at posting time. Nullable so existing historical payments
+  // (which never had one) remain valid without a backfill.
+  receiptNumber String? @unique
+
+  // Traces a ZAAD-originated payment back to the claim that produced it.
+  // Null for cash payments and for any payment that predates ZAAD support.
+  paymentSubmissionId String?            @unique
+  paymentSubmission   PaymentSubmission? @relation(fields: [paymentSubmissionId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
 
   @@map("payments")
+}
+
+// ---------------------------------------------------------------------------
+// Recurring billing, adjustments & ZAAD — additive extensions of the Finance
+// domain above. Invoice/Payment's existing one-time-fee behavior is
+// completely untouched by everything in this section.
+// ---------------------------------------------------------------------------
+
+model BillingPeriod {
+  id             String       @id @default(uuid())
+  schoolId       String
+  school         School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicYearId String
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+
+  name      String // e.g. "January 2026" or "Term 1"
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+
+  createdAt DateTime @default(now())
+
+  charges Charge[]
+
+  @@unique([schoolId, academicYearId, name])
+  @@map("billing_periods")
+}
+
+enum ChargeStatus {
+  OUTSTANDING
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+// Generalizes Invoice to support recurring (monthly/termly) billing.
+// Deliberately a separate model rather than adding billingPeriodId onto
+// Invoice: Invoice's existing @@unique([enrollmentId, feeStructureId]) is
+// what guarantees "generating twice never double-bills" for the one-time
+// fee flow today, and Postgres treats NULLs as distinct within a unique
+// index — adding a nullable billingPeriodId to that same constraint would
+// silently remove the guarantee for every existing one-time invoice. Charge
+// gets its own, equally strict constraint instead; Invoice is untouched.
+model Charge {
+  id              String            @id @default(uuid())
+  schoolId        String
+  school          School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicYearId  String
+  academicYear    AcademicYear      @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  enrollmentId    String
+  enrollment      StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  feeStructureId  String
+  feeStructure    FeeStructure      @relation(fields: [feeStructureId], references: [id], onDelete: Restrict)
+  billingPeriodId String?
+  billingPeriod   BillingPeriod?    @relation(fields: [billingPeriodId], references: [id], onDelete: Restrict)
+
+  amount  Decimal      @db.Decimal(10, 2)
+  dueDate DateTime?    @db.Date
+  status  ChargeStatus @default(OUTSTANDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments           Payment[]
+  feeAdjustments     FeeAdjustment[]
+  paymentSubmissions PaymentSubmission[]
+
+  @@unique([enrollmentId, feeStructureId, billingPeriodId])
+  @@index([schoolId, status])
+  @@map("charges")
+}
+
+enum FeeAdjustmentType {
+  DISCOUNT
+  SCHOLARSHIP
+  CORRECTION
+  WAIVER
+}
+
+enum FeeAdjustmentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Never mutates Invoice.amount/Charge.amount directly — an adjustment is its
+// own auditable row. A student's balance is always derived as
+// charges - posted payments +/- approved adjustments, never an in-place edit
+// to a charge/invoice amount.
+model FeeAdjustment {
+  id           String            @id @default(uuid())
+  schoolId     String
+  school       School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  enrollmentId String
+  enrollment   StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  invoiceId    String?
+  invoice      Invoice?          @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  chargeId     String?
+  charge       Charge?           @relation(fields: [chargeId], references: [id], onDelete: Restrict)
+
+  type   FeeAdjustmentType
+  amount Decimal             @db.Decimal(10, 2)
+  reason String
+  status FeeAdjustmentStatus @default(APPROVED)
+
+  requestedByUserId String
+  approvedByUserId  String?
+  approvedAt        DateTime?
+
+  effectiveFrom DateTime? @db.Date
+  effectiveTo   DateTime? @db.Date
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enrollmentId])
+  @@index([schoolId, status])
+  @@map("fee_adjustments")
+}
+
+enum PaymentSubmissionStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+// A ZAAD (or any future mobile-money provider) claim — deliberately NOT a
+// Payment row. A Payment only ever gets created once Finance verifies this
+// and posts it, so a pending or rejected submission can never be mistaken
+// for money that has actually reduced a student's balance. Supports both the
+// Parent Portal submission path (submittedByUserId set) and the
+// finance-discovers-a-direct-deposit path (submittedByUserId null, invoiceId/
+// chargeId matched by Finance during verification). providerTransactionReference
+// is a plain, provider-agnostic string — never assumed to match a specific
+// format — so an official ZAAD API integration later only needs to create
+// rows here (pre-verified or auto-matched); the Payment-posting logic below
+// it does not change.
+model PaymentSubmission {
+  id        String  @id @default(uuid())
+  schoolId  String
+  school    School  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  chargeId  String?
+  charge    Charge?  @relation(fields: [chargeId], references: [id], onDelete: SetNull)
+
+  amount                       Decimal @db.Decimal(10, 2)
+  provider                     String // e.g. "ZAAD" — a plain string, not an enum, so a new provider needs no schema change
+  providerTransactionReference String?
+  payerPhone                   String?
+  payerName                    String?
+  submittedByUserId            String? // null when Finance entered a direct deposit Finance discovered, not a parent submission
+  note                         String?
+
+  status           PaymentSubmissionStatus @default(PENDING)
+  verifiedByUserId String?
+  verifiedAt       DateTime?
+  rejectionReason  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payment Payment?
+
+  // Duplicate-submission protection, scoped per school+provider. Rows without
+  // a reference yet (parent hasn't provided one) aren't deduped by this
+  // index — Postgres treats each NULL as distinct — so those still require
+  // manual duplicate review by Finance at verification time.
+  @@unique([schoolId, provider, providerTransactionReference])
+  @@index([schoolId, status])
+  @@map("payment_submissions")
+}
+
+// ---------------------------------------------------------------------------
+// Expenses — school-level spending, separate from payroll and student fees.
+// Category is a configurable per-school lookup, same reasoning as Department.
+// ---------------------------------------------------------------------------
+
+model ExpenseCategory {
+  id       String @id @default(uuid())
+  schoolId String
+  school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  name String
+
+  createdAt DateTime @default(now())
+
+  expenses Expense[]
+
+  @@unique([schoolId, name])
+  @@map("expense_categories")
+}
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+}
+
+model Expense {
+  id                String           @id @default(uuid())
+  schoolId          String
+  school            School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  expenseCategoryId String?
+  expenseCategory   ExpenseCategory? @relation(fields: [expenseCategoryId], references: [id], onDelete: SetNull)
+
+  description String
+  amount      Decimal       @db.Decimal(10, 2)
+  expenseDate DateTime      @db.Date
+  status      ExpenseStatus @default(PENDING)
+
+  recordedByUserId String
+  approvedByUserId String?
+  approvedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([schoolId, status])
+  @@map("expenses")
+}
+
+// ---------------------------------------------------------------------------
+// Payroll — Teachers AND Staff are eligible; this is a Finance/HR domain,
+// never part of the Teacher/Staff list UI itself. Every model below
+// references exactly one of teacherId/staffId, same convention as
+// LeaveRequest/StaffAttendance above.
+// ---------------------------------------------------------------------------
+
+model SalaryHistory {
+  id        String   @id @default(uuid())
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  teacherId String?
+  teacher   Teacher? @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  staffId   String?
+  staff     Staff?   @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  basicSalary   Decimal   @db.Decimal(10, 2)
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date // null = currently in effect — a raise inserts a new row, never overwrites this one
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+
+  @@index([teacherId, effectiveFrom])
+  @@index([staffId, effectiveFrom])
+  @@map("salary_history")
+}
+
+enum PayrollPeriodStatus {
+  OPEN
+  CLOSED
+}
+
+model PayrollPeriod {
+  id       String @id @default(uuid())
+  schoolId String
+  school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  name      String // e.g. "January 2026"
+  startDate DateTime            @db.Date
+  endDate   DateTime            @db.Date
+  status    PayrollPeriodStatus @default(OPEN)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payslips Payslip[]
+
+  @@unique([schoolId, name])
+  @@map("payroll_periods")
+}
+
+enum PayslipStatus {
+  DRAFT
+  CALCULATED
+  REVIEWED
+  APPROVED
+  PAID
+}
+
+// Draft -> Calculated -> Reviewed -> Approved -> Paid, with the actual
+// permission checks for each transition enforced in the service layer
+// (payroll.prepare/review/approve/pay), not by this schema.
+model Payslip {
+  id              String        @id @default(uuid())
+  payrollPeriodId String
+  payrollPeriod   PayrollPeriod @relation(fields: [payrollPeriodId], references: [id], onDelete: Restrict)
+  schoolId        String
+  school          School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  teacherId       String?
+  teacher         Teacher?      @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  staffId         String?
+  staff           Staff?        @relation(fields: [staffId], references: [id], onDelete: Restrict)
+
+  basicSalary Decimal       @db.Decimal(10, 2)
+  grossSalary Decimal       @db.Decimal(10, 2)
+  netSalary   Decimal       @db.Decimal(10, 2)
+  status      PayslipStatus @default(DRAFT)
+
+  preparedByUserId String?
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  paidByUserId     String?
+  paidAt           DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lineItems         PayslipLineItem[]
+  advanceRepayments AdvanceRepayment[]
+
+  @@unique([payrollPeriodId, teacherId, staffId])
+  @@index([schoolId, status])
+  @@map("payslips")
+}
+
+enum PayslipLineType {
+  ALLOWANCE
+  BONUS
+  DEDUCTION
+  ADVANCE_REPAYMENT
+  OTHER
+}
+
+// One flexible, itemized line-item table rather than separate
+// Allowance/Deduction/Bonus models — each row is individually auditable,
+// which is what the underlying requirement actually needs.
+model PayslipLineItem {
+  id        String  @id @default(uuid())
+  payslipId String
+  payslip   Payslip @relation(fields: [payslipId], references: [id], onDelete: Cascade)
+
+  type   PayslipLineType
+  label  String
+  amount Decimal         @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now())
+
+  @@map("payslip_line_items")
+}
+
+enum AdvanceStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model StaffAdvance {
+  id        String   @id @default(uuid())
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  teacherId String?
+  teacher   Teacher? @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  staffId   String?
+  staff     Staff?   @relation(fields: [staffId], references: [id], onDelete: Restrict)
+
+  amount             Decimal       @db.Decimal(10, 2)
+  repaymentPerPeriod Decimal       @db.Decimal(10, 2)
+  status             AdvanceStatus @default(ACTIVE)
+  issuedByUserId     String
+  issuedAt           DateTime      @default(now())
+  notes              String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  repayments AdvanceRepayment[]
+
+  @@index([teacherId])
+  @@index([staffId])
+  @@map("staff_advances")
+}
+
+// Every repayment is its own row rather than a running balance field on
+// StaffAdvance — the outstanding balance is always derived as
+// amount - sum(repayments), the same "derive, never overwrite" rule as the
+// student fee ledger.
+model AdvanceRepayment {
+  id             String       @id @default(uuid())
+  staffAdvanceId String
+  staffAdvance   StaffAdvance @relation(fields: [staffAdvanceId], references: [id], onDelete: Restrict)
+  payslipId      String?
+  payslip        Payslip?     @relation(fields: [payslipId], references: [id], onDelete: SetNull)
+
+  amount    Decimal  @db.Decimal(10, 2)
+  appliedAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+
+  @@map("advance_repayments")
 }
 
 // ---------------------------------------------------------------------------
@@ -920,19 +1553,47 @@ model User {
   // change until AuthService.changeMyPassword clears it.
   mustChangePassword Boolean    @default(false)
 
+  // TOTP secret, AES-256-GCM encrypted at rest (see totp/totp-encryption.util.ts)
+  // — never stored or returned in plaintext once enabled. Null means 2FA is
+  // not enabled; totpEnabledAt null/non-null is the actual enabled flag
+  // (mirrors mustChangePassword's "one nullable column is the whole state
+  // machine" shape) rather than a separate boolean that could drift from it.
+  totpSecret    String?
+  totpEnabledAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  schools       UserSchool[]
-  roles         UserRole[]
-  refreshTokens RefreshToken[]
-  invitations   Invitation[]
-  guardian      Guardian?
-  teacher       Teacher?
-  student       Student?
-  notifications Notification[]
+  schools            UserSchool[]
+  roles              UserRole[]
+  refreshTokens      RefreshToken[]
+  invitations        Invitation[]
+  guardian           Guardian?
+  teacher            Teacher?
+  student            Student?
+  staff              Staff?
+  notifications      Notification[]
+  totpRecoveryCodes  TotpRecoveryCode[]
 
   @@map("users")
+}
+
+// Generated once, all 10 at a time, the moment TOTP is enabled — never
+// regenerated individually. Each is single-use (usedAt set the moment it's
+// consumed as a login fallback) and hashed the same way a password is
+// (argon2), never stored or logged in plaintext after the one response that
+// shows them to the user at enable-time.
+model TotpRecoveryCode {
+  id       String    @id @default(uuid())
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash String
+  usedAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("totp_recovery_codes")
 }
 
 model UserSchool {
@@ -1045,6 +1706,7 @@ enum MediaOwnerType {
   TEACHER
   SCHOOL
   RESULT_SUBMISSION
+  STAFF
 }
 
 // PHOTO is always "the latest one wins" (see DocumentsService.getPhotoUrl).
@@ -1149,12 +1811,25 @@ model AuditLog {
 
 enum ImportBatchStatus {
   PROCESSING
+  // STAGING/READY_FOR_REVIEW/COMMITTING/FAILED are the new staged-pipeline
+  // states (rows are validated + duplicate-checked before anything is
+  // created — see ImportsService); PROCESSING/NEEDS_REVIEW are kept only
+  // for whatever pre-existing rows already carry that value, never written
+  // by new code.
+  STAGING
   NEEDS_REVIEW
+  READY_FOR_REVIEW
+  COMMITTING
   COMPLETED
+  FAILED
 }
 
 enum ImportRowStatus {
   PENDING
+  // Validated and duplicate-checked, would create cleanly — nothing has
+  // been written to the Student table yet. Only the commit step turns a
+  // READY row into CREATED.
+  READY
   CREATED
   DUPLICATE_PENDING
   ERROR

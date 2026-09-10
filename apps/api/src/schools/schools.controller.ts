@@ -39,6 +39,18 @@ export class SchoolsController {
     return this.schools.getSystemSummary(user);
   }
 
+  // Must come before ":id" for the same reason as "directory"/"system-summary"
+  // above. Gated on "academic.view", not "schools.view" — this exists so the
+  // Class detail page's clean URL (a School Admin lacks schools.view
+  // entirely, by design) can resolve its own school segment. It returns
+  // exactly what findOneAccessibleOrThrow already would for that same actor
+  // and school, just reached via a slug instead of a raw id.
+  @RequirePermissions("academic.view")
+  @Get("by-identifier/:identifier")
+  resolveIdentifier(@CurrentUser() user: AuthenticatedUser, @Param("identifier") identifier: string) {
+    return this.schools.resolveIdentifierOrThrow(user, identifier);
+  }
+
   @RequirePermissions("schools.view")
   @Get(":id")
   get(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {

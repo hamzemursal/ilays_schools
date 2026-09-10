@@ -6,6 +6,7 @@ import { AuditService } from "../audit/audit.service";
 import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateSchoolDto } from "./dto/create-school.dto";
+import { slugify } from "../common/slug";
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -180,6 +181,25 @@ export class SchoolsService {
     });
     if (!school) throw new NotFoundException("School not found");
     return school;
+  }
+
+  // Backs the clean-URL school segment (e.g. "/schools/xaafuun/..."). Tries
+  // a real ID first — every existing UUID-based link keeps working
+  // unchanged — and only falls back to a slug match if that misses. The
+  // slug comparison runs entirely over `accessibleWhere(actor)`'s own
+  // result set, so a slug can never resolve to a school outside what
+  // findOneAccessibleOrThrow would already allow; this is not a separate,
+  // weaker check, it's the same one with an extra lookup strategy.
+  async resolveIdentifierOrThrow(actor: AuthenticatedUser, identifier: string) {
+    const byId = await this.prisma.school.findFirst({
+      where: { AND: [this.accessibleWhere(actor), { id: identifier }] },
+    });
+    if (byId) return byId;
+
+    const candidates = await this.prisma.school.findMany({ where: this.accessibleWhere(actor) });
+    const bySlug = candidates.find((s) => slugify(s.name) === identifier.toLowerCase());
+    if (!bySlug) throw new NotFoundException("School not found");
+    return bySlug;
   }
 
   // Deliberately NOT scoped by accessibleWhere()'s schoolIds restriction —

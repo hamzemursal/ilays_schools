@@ -28,6 +28,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { StudentsTable } from "@/features/students/tables/StudentsTable";
 import { DECORATIVE_TONE_PARTS } from "@/components/ui/decorativeTones";
+import { classSlug as toClassSlug, slugify } from "@/lib/slug";
 import { ArrowLeftRight, GraduationCap, Pencil, Plus, Printer, Search, Trash2, Check, X } from "lucide-react";
 
 type RosterAttendanceFilter = "ALL" | "EXCELLENT" | "GOOD" | "NEEDS_ATTENTION";
@@ -42,17 +43,94 @@ const SECTION_ACCENTS = [
   { soft: DECORATIVE_TONE_PARTS.amber.soft, avatar: `bg-white ${DECORATIVE_TONE_PARTS.amber.text}` },
 ] as const;
 
+// The URL segment for school/class (and the "?year=" query param) is a
+// human-readable slug, not a raw id — "xaafuun", "secondary-1", "2027".
+// This wrapper resolves each one to its real database id up front (the
+// backend re-validates the exact same authorization it always has for
+// every one of these lookups — see SchoolsService/ClassesService/
+// AcademicYearsService's resolveIdentifierOrThrow methods) and only then
+// renders the real page below, completely unchanged, working with real
+// ids exactly as it always did. A real id (an old bookmarked link) works
+// here too — the backend tries an id match before falling back to a slug.
 export default function ClassDetailPage({ params }: { params: Promise<{ id: string; classId: string }> }) {
-  const { id: schoolId, classId } = use(params);
+  const { id: schoolSlug, classId: classSlugParam } = use(params);
+  const { accessToken } = useAuth();
+  const searchParams = useSearchParams();
+  const yearFromUrl = searchParams.get("year");
+
+  const [resolved, setResolved] = useState<{
+    schoolId: string;
+    schoolName: string;
+    classId: string;
+    yearId: string | null;
+  } | null>(null);
+  const [resolveError, setResolveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    let cancelled = false;
+    // Resetting before a fresh resolve (not just on unmount) is deliberate —
+    // navigating from one class's clean URL straight to another's must not
+    // briefly render the previous class's now-stale resolved ids.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setResolved(null);
+    setResolveError(null);
+    (async () => {
+      try {
+        const school = await api.resolveSchool(accessToken, schoolSlug);
+        const cls = await api.resolveClass(accessToken, school.id, classSlugParam);
+        const year = yearFromUrl ? await api.resolveAcademicYear(accessToken, school.id, yearFromUrl) : null;
+        if (!cancelled) {
+          setResolved({ schoolId: school.id, schoolName: school.name, classId: cls.id, yearId: year?.id ?? null });
+        }
+      } catch (err) {
+        if (!cancelled) setResolveError(err instanceof ApiError ? err.message : "Class not found");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, schoolSlug, classSlugParam, yearFromUrl]);
+
+  if (resolveError) {
+    return (
+      <div className="p-4 sm:p-6">
+        <Alert tone="danger">{resolveError}</Alert>
+      </div>
+    );
+  }
+  if (!resolved) {
+    return (
+      <div className="p-4 sm:p-6">
+        <SkeletonCards count={3} />
+      </div>
+    );
+  }
+
+  return (
+    <ClassDetailPageInner
+      schoolId={resolved.schoolId}
+      schoolName={resolved.schoolName}
+      classId={resolved.classId}
+      initialYearId={resolved.yearId}
+    />
+  );
+}
+
+function ClassDetailPageInner({
+  schoolId,
+  schoolName,
+  classId,
+  initialYearId,
+}: {
+  schoolId: string;
+  schoolName: string;
+  classId: string;
+  initialYearId: string | null;
+}) {
   const { user, accessToken } = useAuth();
   const { show } = useToast();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  // Carried over from the class list's own Academic Year selector via
-  // "View Sections"/"Edit" (?year=...), so opening a class shows the same
-  // year you were already looking at — falls back to the current year once
-  // the year list loads, same as the list page and the Section Workspace.
-  const yearFromUrl = searchParams.get("year");
 
   const [cls, setCls] = useState<ClassWithSections | null>(null);
   const [allClasses, setAllClasses] = useState<ClassWithSections[] | null>(null);
@@ -65,7 +143,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   const [subjects, setSubjects] = useState<ClassSubjectRecord[] | null>(null);
   const [allSubjects, setAllSubjects] = useState<Subject[]>([]);
   const [years, setYears] = useState<AcademicYear[]>([]);
-  const [yearId, setYearId] = useState(yearFromUrl ?? "");
+  const [yearId, setYearId] = useState(initialYearId ?? "");
   const [assignmentsBySection, setAssignmentsBySection] = useState<Record<string, SectionTeacherAssignment[]>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -378,7 +456,6 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   const transferDestinationClass = allClasses?.find((c) => c.id === effectiveToClassId);
-  const schoolName = user?.schools.find((s) => s.id === schoolId)?.name ?? "School";
   const canManage = user?.permissions.includes("academic.manage") ?? false;
   const canBulkTransfer = (user?.permissions.includes("transfers.create") && user?.permissions.includes("transfers.approve")) ?? false;
   const yearName = years.find((y) => y.id === yearId)?.name ?? "";
@@ -863,7 +940,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
 
                             <div className="mt-4 flex flex-wrap gap-1.5">
                               <Link
-                                href={`/schools/${schoolId}/academic/classes/${classId}/sections/${s.id}${yearId ? `?year=${yearId}` : ""}`}
+                                href={`/schools/${slugify(schoolName)}/academic/classes/${cls ? toClassSlug(cls.division.type, cls.level) : classId}/sections/${slugify(s.name)}${yearName ? `?year=${encodeURIComponent(yearName)}` : ""}`}
                                 className="flex-1"
                               >
                                 <Button size="sm" variant="outline" className="w-full">

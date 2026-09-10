@@ -103,3 +103,71 @@ describe("ClassesService.bulkTransfer", () => {
     });
   });
 });
+
+describe("ClassesService.resolveIdentifierOrThrow / resolveSectionIdentifierOrThrow", () => {
+  let prisma: {
+    class: { findFirst: jest.Mock };
+    section: { findFirst: jest.Mock };
+  };
+  let schools: { findOneAccessibleOrThrow: jest.Mock };
+  let service: ClassesService;
+
+  const SECONDARY_1 = { id: "class-real-id", level: 1, divisionId: "div-secondary" };
+
+  beforeEach(() => {
+    prisma = { class: { findFirst: jest.fn() }, section: { findFirst: jest.fn() } };
+    schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
+    service = new ClassesService(
+      prisma as unknown as PrismaService,
+      schools as unknown as SchoolsService,
+      {} as unknown as AuditService,
+    );
+  });
+
+  it("resolves a real class id directly, checking school access first", async () => {
+    prisma.class.findFirst.mockResolvedValue(SECONDARY_1);
+
+    const result = await service.resolveIdentifierOrThrow(ACTOR, "school-1", "class-real-id");
+
+    expect(schools.findOneAccessibleOrThrow).toHaveBeenCalledWith(ACTOR, "school-1");
+    expect(result).toBe(SECONDARY_1);
+  });
+
+  it("falls back to a (division, level) slug match, scoped to the given school", async () => {
+    prisma.class.findFirst.mockImplementation((args) => {
+      // First call: by-id lookup (misses). Second call: composite slug lookup.
+      if (args.where.id) return Promise.resolve(null);
+      return Promise.resolve(SECONDARY_1);
+    });
+
+    const result = await service.resolveIdentifierOrThrow(ACTOR, "school-1", "secondary-1");
+
+    expect(result).toBe(SECONDARY_1);
+    expect(prisma.class.findFirst).toHaveBeenLastCalledWith({
+      where: { level: 1, division: { schoolId: "school-1", type: "SECONDARY" } },
+    });
+  });
+
+  it("rejects a malformed class slug without querying the database for it", async () => {
+    prisma.class.findFirst.mockResolvedValue(null);
+
+    await expect(service.resolveIdentifierOrThrow(ACTOR, "school-1", "not-a-real-slug")).rejects.toThrow(
+      "Class not found in this school",
+    );
+    // Only the by-id attempt should have run — a slug that doesn't even
+    // parse never reaches a second query.
+    expect(prisma.class.findFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolveSectionIdentifierOrThrow falls back to a case-insensitive name match within the given class", async () => {
+    prisma.class.findFirst.mockResolvedValue(SECONDARY_1); // getClassInSchoolOrThrow
+    prisma.section.findFirst.mockImplementation((args) => {
+      if (args.where.id) return Promise.resolve(null);
+      return Promise.resolve({ id: "section-real-id", name: "A", classId: "class-real-id" });
+    });
+
+    const result = await service.resolveSectionIdentifierOrThrow(ACTOR, "school-1", "class-real-id", "a");
+
+    expect(result).toEqual({ id: "section-real-id", name: "A", classId: "class-real-id" });
+  });
+});

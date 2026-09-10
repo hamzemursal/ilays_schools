@@ -1465,6 +1465,26 @@ export const api = {
   listDivisions: (accessToken: string, schoolId: string) =>
     request<Division[]>(`/schools/${schoolId}/divisions`, { accessToken }),
 
+  // Clean-URL resolvers — each takes a real id (kept working, unchanged)
+  // or a human-readable slug, and returns the real row. The backend runs
+  // the exact same authorization it always has; a slug can only ever
+  // resolve to something the caller is already allowed to see.
+  resolveSchool: (accessToken: string, identifier: string) =>
+    request<School>(`/schools/by-identifier/${encodeURIComponent(identifier)}`, { accessToken }),
+  resolveClass: (accessToken: string, schoolId: string, identifier: string) =>
+    request<ClassWithSections>(`/schools/${schoolId}/classes/by-identifier/${encodeURIComponent(identifier)}`, {
+      accessToken,
+    }),
+  resolveSection: (accessToken: string, schoolId: string, classId: string, identifier: string) =>
+    request<Section>(
+      `/schools/${schoolId}/classes/${classId}/sections/by-identifier/${encodeURIComponent(identifier)}`,
+      { accessToken },
+    ),
+  resolveAcademicYear: (accessToken: string, schoolId: string, identifier: string) =>
+    request<AcademicYear>(`/schools/${schoolId}/academic-years/by-identifier/${encodeURIComponent(identifier)}`, {
+      accessToken,
+    }),
+
   listAcademicYears: (accessToken: string, schoolId: string) =>
     request<AcademicYear[]>(`/schools/${schoolId}/academic-years`, { accessToken }),
   createAcademicYear: (

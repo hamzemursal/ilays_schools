@@ -16,6 +16,19 @@ export class AcademicYearsController {
     return this.academicYears.list(user, schoolId);
   }
 
+  // Backs the clean-URL "?year=" query param — resolves an identifier (a
+  // real id, or the year's own name, e.g. "2027") to the real row. Same
+  // "academic.view" gate as list() above.
+  @RequirePermissions("academic.view")
+  @Get("by-identifier/:identifier")
+  resolveIdentifier(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("identifier") identifier: string,
+  ) {
+    return this.academicYears.resolveIdentifierOrThrow(user, schoolId, identifier);
+  }
+
   @RequirePermissions("academic.manage")
   @Post()
   create(

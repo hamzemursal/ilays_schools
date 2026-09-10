@@ -12,6 +12,7 @@ import { UpdateSectionDto } from "./dto/update-section.dto";
 import { AssignSubjectDto } from "./dto/assign-subject.dto";
 import { BulkTransferClassDto } from "./dto/bulk-transfer-class.dto";
 import { isRestrictedForeignKeyError } from "../common/prisma-errors";
+import { parseClassSlug } from "../common/slug";
 
 const CLASS_INCLUDE = {
   division: true,
@@ -148,6 +149,30 @@ export class ClassesService {
     return cls;
   }
 
+  // Backs the clean-URL class segment (e.g. "secondary-1"). schoolId here
+  // is already a real, resolved id by the time this runs — the caller
+  // resolves the school segment first — so findOneAccessibleOrThrow has
+  // already run for it. This only adds a second lookup strategy on top of
+  // the existing by-id one: a class row that isn't found by id falls back
+  // to (division.type, level), which is what the slug actually encodes.
+  // Either way the result is still scoped to this exact schoolId, so a
+  // slug can never resolve to another school's class.
+  async resolveIdentifierOrThrow(actor: AuthenticatedUser, schoolId: string, identifier: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+
+    const byId = await this.prisma.class.findFirst({ where: { id: identifier, division: { schoolId } } });
+    if (byId) return byId;
+
+    const parsed = parseClassSlug(identifier);
+    if (!parsed) throw new NotFoundException("Class not found in this school");
+
+    const bySlug = await this.prisma.class.findFirst({
+      where: { level: parsed.level, division: { schoolId, type: parsed.divisionType } },
+    });
+    if (!bySlug) throw new NotFoundException("Class not found in this school");
+    return bySlug;
+  }
+
   async listSections(actor: AuthenticatedUser, schoolId: string, classId: string, academicYearId?: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     await this.getClassInSchoolOrThrow(schoolId, classId);
@@ -237,6 +262,25 @@ export class ClassesService {
       }
       throw error;
     }
+  }
+
+  // Backs the clean-URL section segment. classId is already resolved by
+  // the time this runs (the class segment resolves first), so this only
+  // adds a name-based fallback on top of the existing by-id lookup, scoped
+  // to that exact class — a slug can never resolve to a section belonging
+  // to a different class or school.
+  async resolveSectionIdentifierOrThrow(actor: AuthenticatedUser, schoolId: string, classId: string, identifier: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    await this.getClassInSchoolOrThrow(schoolId, classId);
+
+    const byId = await this.prisma.section.findFirst({ where: { id: identifier, classId } });
+    if (byId) return byId;
+
+    const byName = await this.prisma.section.findFirst({
+      where: { classId, name: { equals: identifier, mode: "insensitive" } },
+    });
+    if (!byName) throw new NotFoundException("Section not found in this class");
+    return byName;
   }
 
   async listSubjects(actor: AuthenticatedUser, schoolId: string, classId: string) {

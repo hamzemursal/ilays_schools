@@ -21,6 +21,21 @@ export class AcademicYearsService {
     return this.prisma.academicYear.findMany({ where: { schoolId }, orderBy: { startDate: "desc" } });
   }
 
+  // Backs the clean-URL "?year=" query param. AcademicYear.name (e.g.
+  // "2027") is already unique per school (@@unique([schoolId, name])), so
+  // it needs no slugification at all — just an id-then-name fallback,
+  // scoped to this exact schoolId either way.
+  async resolveIdentifierOrThrow(actor: AuthenticatedUser, schoolId: string, identifier: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+
+    const byId = await this.prisma.academicYear.findFirst({ where: { id: identifier, schoolId } });
+    if (byId) return byId;
+
+    const byName = await this.prisma.academicYear.findFirst({ where: { name: identifier, schoolId } });
+    if (!byName) throw new NotFoundException("Academic year not found in this school");
+    return byName;
+  }
+
   async create(actor: AuthenticatedUser, schoolId: string, dto: CreateAcademicYearDto) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
 

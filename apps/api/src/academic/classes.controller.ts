@@ -55,6 +55,21 @@ export class ClassesController {
     return this.classes.remove(user, schoolId, classId);
   }
 
+  // Backs the clean-URL class segment (e.g. "/academic/classes/secondary-1")
+  // — resolves an identifier (a real id, kept working for backward
+  // compatibility, or a "{division}-{level}" slug) to the real class row.
+  // Same "academic.view" gate as every other read route on this
+  // controller, so this introduces no new access boundary.
+  @RequirePermissions("academic.view")
+  @Get("by-identifier/:identifier")
+  resolveIdentifier(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("identifier") identifier: string,
+  ) {
+    return this.classes.resolveIdentifierOrThrow(user, schoolId, identifier);
+  }
+
   @RequirePermissions("academic.view")
   @Get(":classId/sections")
   listSections(
@@ -98,6 +113,20 @@ export class ClassesController {
     @Param("sectionId") sectionId: string,
   ) {
     return this.classes.removeSection(user, schoolId, classId, sectionId);
+  }
+
+  // Backs the clean-URL section segment. classId here is already a real,
+  // resolved id (the class segment resolves first) — this only resolves
+  // the section slug within it.
+  @RequirePermissions("academic.view")
+  @Get(":classId/sections/by-identifier/:identifier")
+  resolveSectionIdentifier(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("classId") classId: string,
+    @Param("identifier") identifier: string,
+  ) {
+    return this.classes.resolveSectionIdentifierOrThrow(user, schoolId, classId, identifier);
   }
 
   @RequirePermissions("academic.view")

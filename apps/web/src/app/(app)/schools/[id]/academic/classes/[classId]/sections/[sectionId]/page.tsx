@@ -25,6 +25,7 @@ import { Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { DECORATIVE_TONE_CLASSES } from "@/components/ui/decorativeTones";
+import { classSlug as toClassSlug, slugify } from "@/lib/slug";
 import {
   BookOpen,
   CalendarCheck,
@@ -38,23 +39,96 @@ import {
 const TABS = ["Overview", "Students", "Subjects", "Teachers", "Attendance", "Exams & Results"] as const;
 type Tab = (typeof TABS)[number];
 
+// Same resolver-wrapper pattern as the Class detail page above it in the
+// drill-down (school -> class -> section) — the URL segments are
+// human-readable slugs, resolved to real ids up front via the same
+// resolveIdentifierOrThrow methods (and the same authorization), before the
+// real page below ever runs, working with real ids exactly as it always has.
 export default function SectionWorkspacePage({
   params,
 }: {
   params: Promise<{ id: string; classId: string; sectionId: string }>;
 }) {
-  const { id: schoolId, classId, sectionId } = use(params);
+  const { id: schoolSlug, classId: classSlugParam, sectionId: sectionSlugParam } = use(params);
   const { accessToken } = useAuth();
   const searchParams = useSearchParams();
-  // Carried over from the class page's own year selector, same reasoning as
-  // that page carrying it from the class list — each step in the drill-down
-  // opens on the same year you were already looking at, one level up.
   const yearFromUrl = searchParams.get("year");
+
+  const [resolved, setResolved] = useState<{
+    schoolId: string;
+    schoolName: string;
+    classId: string;
+    sectionId: string;
+    yearId: string | null;
+  } | null>(null);
+  const [resolveError, setResolveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    let cancelled = false;
+    // Same reasoning as the Class detail page's resolver: reset on every
+    // fresh navigation, not just on unmount, so switching straight from one
+    // section's clean URL to another never briefly shows the previous one.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setResolved(null);
+    setResolveError(null);
+    (async () => {
+      try {
+        const school = await api.resolveSchool(accessToken, schoolSlug);
+        const cls = await api.resolveClass(accessToken, school.id, classSlugParam);
+        const section = await api.resolveSection(accessToken, school.id, cls.id, sectionSlugParam);
+        const year = yearFromUrl ? await api.resolveAcademicYear(accessToken, school.id, yearFromUrl) : null;
+        if (!cancelled) {
+          setResolved({
+            schoolId: school.id,
+            schoolName: school.name,
+            classId: cls.id,
+            sectionId: section.id,
+            yearId: year?.id ?? null,
+          });
+        }
+      } catch (err) {
+        if (!cancelled) setResolveError(err instanceof ApiError ? err.message : "Section not found");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, schoolSlug, classSlugParam, sectionSlugParam, yearFromUrl]);
+
+  if (resolveError) return <Alert tone="danger">{resolveError}</Alert>;
+  if (!resolved) return <SkeletonCards count={3} />;
+
+  return (
+    <SectionWorkspacePageInner
+      schoolId={resolved.schoolId}
+      schoolName={resolved.schoolName}
+      classId={resolved.classId}
+      sectionId={resolved.sectionId}
+      initialYearId={resolved.yearId}
+    />
+  );
+}
+
+function SectionWorkspacePageInner({
+  schoolId,
+  schoolName,
+  classId,
+  sectionId,
+  initialYearId,
+}: {
+  schoolId: string;
+  schoolName: string;
+  classId: string;
+  sectionId: string;
+  initialYearId: string | null;
+}) {
+  const { accessToken } = useAuth();
 
   const [cls, setCls] = useState<ClassWithSections | null>(null);
   const [section, setSection] = useState<Section | null>(null);
   const [years, setYears] = useState<AcademicYear[]>([]);
-  const [yearId, setYearId] = useState(yearFromUrl ?? "");
+  const [yearId, setYearId] = useState(initialYearId ?? "");
   const [students, setStudents] = useState<SectionStudent[] | null>(null);
   const [classSubjects, setClassSubjects] = useState<ClassSubjectRecord[] | null>(null);
   const [teacherAssignments, setTeacherAssignments] = useState<SectionTeacherAssignment[] | null>(null);
@@ -137,7 +211,10 @@ export default function SectionWorkspacePage({
         breadcrumbs={[
           { label: "Dashboard", href: "/dashboard" },
           { label: "Academic", href: `/schools/${schoolId}/academic?tab=Classes%20%26%20sections` },
-          { label: cls.name, href: `/schools/${schoolId}/academic/classes/${classId}` },
+          {
+            label: cls.name,
+            href: `/schools/${slugify(schoolName)}/academic/classes/${toClassSlug(cls.division.type, cls.level)}`,
+          },
           { label: `Section ${section.name}` },
         ]}
         actions={

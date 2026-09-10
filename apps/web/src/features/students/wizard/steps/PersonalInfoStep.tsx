@@ -64,29 +64,30 @@ export function PersonalInfoStep({
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <FormField label="First name" required>
-          <Input required value={state.firstName} onChange={(e) => onChange({ firstName: e.target.value })} />
+        <FormField label="First name" htmlFor="firstName" required>
+          <Input id="firstName" required value={state.firstName} onChange={(e) => onChange({ firstName: e.target.value })} />
         </FormField>
-        <FormField label="Last name" required>
-          <Input required value={state.lastName} onChange={(e) => onChange({ lastName: e.target.value })} />
+        <FormField label="Last name" htmlFor="lastName" required>
+          <Input id="lastName" required value={state.lastName} onChange={(e) => onChange({ lastName: e.target.value })} />
         </FormField>
-        <FormField label="Date of birth" required>
+        <FormField label="Date of birth" htmlFor="dateOfBirth" required>
           <Input
+            id="dateOfBirth"
             required
             type="date"
             value={state.dateOfBirth}
             onChange={(e) => onChange({ dateOfBirth: e.target.value })}
           />
         </FormField>
-        <FormField label="Sex" required>
-          <Select value={state.sex} onChange={(e) => onChange({ sex: e.target.value as Sex })}>
+        <FormField label="Sex" htmlFor="sex" required>
+          <Select id="sex" value={state.sex} onChange={(e) => onChange({ sex: e.target.value as Sex })}>
             <option value="MALE">Male</option>
             <option value="FEMALE">Female</option>
           </Select>
         </FormField>
         <FormField
           label="Prior / external student ID"
-          hint="Optional — from a previous school or system. If provided, it's used to catch duplicate records."
+          hint="Optional — from a previous school or system. Name and date of birth are always checked for possible duplicates; this adds an extra signal if provided."
           className="sm:col-span-2"
         >
           <Input

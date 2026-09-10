@@ -11,7 +11,8 @@
     "db:generate": "pnpm --filter @school-erp/database exec prisma generate",
     "db:migrate": "pnpm --filter @school-erp/database exec prisma migrate dev",
     "db:studio": "pnpm --filter @school-erp/database exec prisma studio",
-    "db:seed": "pnpm --filter @school-erp/database exec prisma db seed"
+    "db:seed": "pnpm --filter @school-erp/database exec prisma db seed",
+    "test:e2e": "pnpm --filter @school-erp/e2e e2e"
   },
   "devDependencies": {
     "turbo": "^2.3.3",

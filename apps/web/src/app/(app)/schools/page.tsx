@@ -188,8 +188,14 @@ export default function SchoolsPage() {
           <Card>
             <h2 className="text-sm font-semibold text-foreground">Create school</h2>
             <form onSubmit={onCreate} className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <FormField label="Name" required>
-                <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Sayid Secondary School" />
+              <FormField label="Name" htmlFor="new-school-name" required>
+                <Input
+                  id="new-school-name"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Sayid Secondary School"
+                />
               </FormField>
               <FormField label="Type" required>
                 <Select value={type} onChange={(e) => setType(e.target.value as SchoolType)}>

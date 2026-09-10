@@ -182,8 +182,8 @@ export function StudentWizard({
           {duplicates.length} similar student{duplicates.length > 1 ? "s" : ""} already exist
         </h2>
         <p className="mt-2 text-sm text-foreground-soft">
-          Same prior/external student ID as someone already in the system. Review before continuing — this is
-          never merged automatically.
+          Matches the same name and date of birth, or the same prior/external student ID, as someone already in the
+          system. Review before continuing — this is never merged automatically.
         </p>
         <ul className="mt-4 space-y-2">
           {duplicates.map((d) => (
@@ -192,7 +192,7 @@ export function StudentWizard({
                 {d.firstName} {d.lastName}
               </p>
               <p className="text-sm text-foreground-soft">
-                ID {d.legacyStudentNumber} · Born {new Date(d.dateOfBirth).toLocaleDateString()}
+                {d.legacyStudentNumber ? `ID ${d.legacyStudentNumber} · ` : ""}Born {new Date(d.dateOfBirth).toLocaleDateString()}
               </p>
             </li>
           ))}

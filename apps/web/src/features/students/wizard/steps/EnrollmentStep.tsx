@@ -39,8 +39,9 @@ export function EnrollmentStep({
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <FormField label="Academic year" required>
+        <FormField label="Academic year" htmlFor="academicYearId" required>
           <Select
+            id="academicYearId"
             required
             value={state.academicYearId}
             onChange={(e) => onChange({ academicYearId: e.target.value })}
@@ -54,8 +55,9 @@ export function EnrollmentStep({
             ))}
           </Select>
         </FormField>
-        <FormField label="Class" required>
+        <FormField label="Class" htmlFor="classId" required>
           <Select
+            id="classId"
             required
             value={state.classId}
             onChange={(e) => {

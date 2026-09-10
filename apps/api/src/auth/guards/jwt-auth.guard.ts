@@ -9,8 +9,14 @@ import { JwtService } from "@nestjs/jwt";
 import { Reflector } from "@nestjs/core";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
 import { ALLOW_PASSWORD_CHANGE_REQUIRED_KEY } from "../decorators/allow-password-change-required.decorator";
+import { ALLOW_TOTP_SETUP_REQUIRED_KEY } from "../decorators/allow-totp-setup-required.decorator";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { AuthenticatedUser } from "../types/authenticated-user";
+
+// Part K's "Optional TOTP 2FA, required for Super/Org Admins" — these two
+// roles are the only ones the mustSetup2FA gate below ever fires for. Every
+// other role can still opt in via /auth/totp/setup, just never forced.
+export const ROLES_REQUIRING_2FA = ["SUPER_ADMIN", "ORGANIZATION_ADMIN"];
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -52,6 +58,8 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException("Account is not active");
     }
 
+    const roles = user.roles.map((ur) => ur.role.name);
+
     // Mirrors AppShell's frontend gate, which only blocks rendering — a
     // direct API call bypassed it entirely until this check existed. Only
     // the two routes the password-change flow itself needs stay reachable.
@@ -65,7 +73,19 @@ export class JwtAuthGuard implements CanActivate {
       }
     }
 
-    const roles = user.roles.map((ur) => ur.role.name);
+    // Same shape as the mustChangePassword gate above, checked after it —
+    // a Super/Org Admin who also happens to need a password change deals
+    // with that first. Mirrors AppShell's matching frontend gate.
+    if (roles.some((r) => ROLES_REQUIRING_2FA.includes(r)) && !user.totpEnabledAt) {
+      const exempt = this.reflector.getAllAndOverride<boolean>(ALLOW_TOTP_SETUP_REQUIRED_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+      if (!exempt) {
+        throw new ForbiddenException("Two-factor authentication must be set up before continuing");
+      }
+    }
+
     const permissions = new Set<string>();
     for (const ur of user.roles) {
       for (const rp of ur.role.permissions) {

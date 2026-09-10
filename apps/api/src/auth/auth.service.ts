@@ -9,6 +9,7 @@ import { resolveAuthenticatedUser } from "./resolve-authenticated-user";
 
 const ACCESS_TOKEN_TTL = "15m";
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const MFA_TOKEN_TTL = "5m";
 
 export interface TokenPair {
   accessToken: string;
@@ -19,6 +20,16 @@ export interface TokenPair {
   // controller uses it to name this session's refresh cookie distinctly
   // from every other concurrently logged-in session in the same browser.
   sessionId: string;
+}
+
+// Returned from login() instead of a TokenPair when the account has TOTP
+// enabled — password alone was correct, but that's deliberately not enough
+// to grant a real session. mfaToken is signed with JWT_MFA_SECRET (never
+// JWT_ACCESS_SECRET), so JwtAuthGuard can never accept it as a real access
+// token even by accident; only TotpService.verifyLogin knows to check it.
+export interface MfaChallenge {
+  mfaRequired: true;
+  mfaToken: string;
 }
 
 function hashToken(raw: string): string {
@@ -33,7 +44,7 @@ export class AuthService {
     private readonly audit: AuditService,
   ) {}
 
-  async login(identifier: string, password: string): Promise<TokenPair> {
+  async login(identifier: string, password: string): Promise<TokenPair | MfaChallenge> {
     const user = await this.resolveLoginUser(identifier);
     if (!user || !user.passwordHash) {
       // No real account to snapshot as an actor — the identifier itself
@@ -92,6 +103,19 @@ export class AuthService {
       throw new UnauthorizedException("Invalid email or password");
     }
 
+    // Password alone was correct, but that's deliberately not enough to
+    // grant a real session on a 2FA-enabled account — hand back a
+    // short-lived MFA challenge instead. Nothing is logged as LOGIN yet;
+    // completeMfaLogin() below is where that actually happens once the
+    // second factor checks out.
+    if (user.totpEnabledAt) {
+      const mfaToken = await this.jwt.signAsync(
+        { sub: user.id, type: "mfa_pending" },
+        { secret: process.env.JWT_MFA_SECRET, expiresIn: MFA_TOKEN_TTL },
+      );
+      return { mfaRequired: true, mfaToken };
+    }
+
     await this.audit.record({
       actor,
       organizationId: user.organizationId,
@@ -104,6 +128,26 @@ export class AuthService {
     });
 
     return this.issueTokenPair(user.id);
+  }
+
+  // The other half of the branch above — called by TotpService.verifyLogin
+  // once a TOTP code or recovery code has actually been verified. This is
+  // where a 2FA-enabled account's LOGIN audit event and real tokens
+  // originate, never from login() itself.
+  async completeMfaLogin(userId: string): Promise<TokenPair> {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const actor = await resolveAuthenticatedUser(this.prisma, userId);
+    await this.audit.record({
+      actor,
+      organizationId: user.organizationId,
+      schoolId: actor && actor.schoolIds.length > 0 ? actor.schoolIds[0] : null,
+      action: AuditAction.LOGIN,
+      module: AuditModuleName.AUTHENTICATION,
+      resourceType: "User",
+      resourceId: user.id,
+      resourceName: user.email,
+    });
+    return this.issueTokenPair(userId);
   }
 
   // Every non-student account is a real email — that lookup is tried first

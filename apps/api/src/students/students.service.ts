@@ -410,20 +410,18 @@ export class StudentsService {
     // Never auto-merge: if a close match exists and the caller hasn't
     // explicitly confirmed, hand back the candidates instead of creating.
     //
-    // Product decision: match on legacyStudentNumber (a real prior/external
-    // ID) only, never on name — many students legitimately share a last
-    // name, and name+DOB was producing too many false-positive warnings in
-    // practice. This means a brand-new student with no prior ID at all
-    // (legacyStudentNumber omitted) gets no duplicate check at all — there
-    // is nothing to compare — which is accepted as the tradeoff.
-    if (!dto.confirmDespiteDuplicates && dto.legacyStudentNumber) {
-      const candidates = await this.prisma.student.findMany({
-        where: {
-          organizationId: actor.organizationId!,
-          legacyStudentNumber: { equals: dto.legacyStudentNumber, mode: "insensitive" },
-        },
-        take: 5,
-      });
+    // History: this used to also match on lastName+DOB alone, but that was
+    // reverted (commit eb52156) for too many false positives — many
+    // students in the same school legitimately share a last name. This is
+    // a deliberately tighter version, not a repeat of that mistake: it
+    // requires the FULL name (first + last) together with DOB, which two
+    // unrelated students share far less often than a surname alone. It
+    // runs unconditionally (previously the check ran only when
+    // legacyStudentNumber was supplied, so a student with no prior ID got
+    // no check at all); legacyStudentNumber is still checked too, when
+    // present, as an independent OR condition.
+    if (!dto.confirmDespiteDuplicates) {
+      const candidates = await this.findDuplicateCandidates(actor.organizationId!, dto, dateOfBirth);
       if (candidates.length > 0) {
         throw new ConflictException({
           message: "Possible duplicate student(s) found — review before creating",
@@ -503,6 +501,33 @@ export class StudentsService {
       }
       throw error;
     }
+  }
+
+  // Extracted so ImportsService can run the exact same check as a read-only
+  // dry run while staging a CSV row — no ConflictException, just the
+  // candidate list (empty means "no duplicate"). create() above is still
+  // the only place that decides what to DO with a non-empty result.
+  async findDuplicateCandidates(
+    organizationId: string,
+    dto: Pick<CreateStudentDto, "firstName" | "lastName" | "legacyStudentNumber">,
+    dateOfBirth: Date,
+  ) {
+    return this.prisma.student.findMany({
+      where: {
+        organizationId,
+        OR: [
+          {
+            dateOfBirth,
+            firstName: { equals: dto.firstName, mode: "insensitive" },
+            lastName: { equals: dto.lastName, mode: "insensitive" },
+          },
+          ...(dto.legacyStudentNumber
+            ? [{ legacyStudentNumber: { equals: dto.legacyStudentNumber, mode: "insensitive" as const } }]
+            : []),
+        ],
+      },
+      take: 5,
+    });
   }
 
   // Format: STU-{admitting academic year}-{sequence within that year}, e.g.

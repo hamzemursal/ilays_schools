@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Bell, Camera, GraduationCap, KeyRound, Loader2, LogOut, Menu, Search, Trash2, UserCircle, X } from "lucide-react";
+import { Bell, Camera, GraduationCap, KeyRound, Loader2, LogOut, Menu, Search, Settings, Trash2, UserCircle, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { Avatar } from "@/components/ui/Avatar";
 import { useToast } from "@/components/ui/Toast";
@@ -220,6 +220,7 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
               setUserMenuOpen((v) => !v);
               setNotifOpen(false);
             }}
+            aria-label="Account menu"
             className="flex items-center gap-2 rounded-lg p-1.5 hover:bg-surface-hover"
           >
             <Avatar name={user.email} size="sm" />
@@ -232,6 +233,15 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
                   <p className="truncate text-sm font-medium text-foreground">{user.email}</p>
                   <p className="mt-0.5 text-xs text-foreground-muted">{user.roles.join(", ") || "No role"}</p>
                 </div>
+                <div className="my-1 h-px bg-border" />
+                <Link
+                  href="/account"
+                  onClick={() => setUserMenuOpen(false)}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-foreground-soft hover:bg-surface-hover hover:text-foreground"
+                >
+                  <Settings className="size-4" />
+                  My Account
+                </Link>
                 <div className="my-1 h-px bg-border" />
                 {user.roles.includes("STUDENT") && (
                   <>

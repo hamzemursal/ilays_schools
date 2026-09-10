@@ -4,22 +4,31 @@ import { Reflector } from "@nestjs/core";
 import { JwtAuthGuard } from "./jwt-auth.guard";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
 import { ALLOW_PASSWORD_CHANGE_REQUIRED_KEY } from "../decorators/allow-password-change-required.decorator";
+import { ALLOW_TOTP_SETUP_REQUIRED_KEY } from "../decorators/allow-totp-setup-required.decorator";
 import { PrismaService } from "../../prisma/prisma.service";
 
 // Minimal double for the parts of a Nest User row the guard actually reads —
 // roles/permissions/schools nested exactly as the guard's own `include`
 // shapes them, so this stays a faithful stand-in without needing a real DB.
-function makeUser(overrides: Partial<{ status: string; mustChangePassword: boolean }> = {}) {
+function makeUser(
+  overrides: Partial<{
+    status: string;
+    mustChangePassword: boolean;
+    roleName: string;
+    totpEnabledAt: Date | null;
+  }> = {},
+) {
   return {
     id: "user-1",
     email: "user@example.com",
     organizationId: "org-1",
     status: overrides.status ?? "ACTIVE",
     mustChangePassword: overrides.mustChangePassword ?? false,
+    totpEnabledAt: overrides.totpEnabledAt ?? null,
     roles: [
       {
         role: {
-          name: "STUDENT",
+          name: overrides.roleName ?? "STUDENT",
           permissions: [{ permission: { key: "attendance.view" } }],
         },
       },
@@ -145,5 +154,67 @@ describe("JwtAuthGuard", () => {
       permissions: ["attendance.view"],
       schoolIds: ["school-1"],
     });
+  });
+
+  // --- The mustSetup2FA enforcement ---------------------------------------
+
+  it("blocks a SUPER_ADMIN with no 2FA enabled from a normal protected route", async () => {
+    const { context } = makeContext({ authorization: "Bearer good-token" });
+    reflector.getAllAndOverride.mockImplementation(reflectorReading({ [ALLOW_TOTP_SETUP_REQUIRED_KEY]: undefined }));
+    jwt.verifyAsync.mockResolvedValue({ sub: "user-1" });
+    prisma.user.findUnique.mockResolvedValue(makeUser({ roleName: "SUPER_ADMIN", totpEnabledAt: null }));
+
+    await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
+    await expect(guard.canActivate(context)).rejects.toThrow("Two-factor authentication must be set up before continuing");
+  });
+
+  it("blocks an ORGANIZATION_ADMIN with no 2FA enabled the same way", async () => {
+    const { context } = makeContext({ authorization: "Bearer good-token" });
+    reflector.getAllAndOverride.mockImplementation(reflectorReading({ [ALLOW_TOTP_SETUP_REQUIRED_KEY]: undefined }));
+    jwt.verifyAsync.mockResolvedValue({ sub: "user-1" });
+    prisma.user.findUnique.mockResolvedValue(makeUser({ roleName: "ORGANIZATION_ADMIN", totpEnabledAt: null }));
+
+    await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
+  });
+
+  it("still allows a SUPER_ADMIN with no 2FA to reach a route marked @AllowTotpSetupRequired()", async () => {
+    const { context, request } = makeContext({ authorization: "Bearer good-token" });
+    reflector.getAllAndOverride.mockImplementation(reflectorReading({ [ALLOW_TOTP_SETUP_REQUIRED_KEY]: true }));
+    jwt.verifyAsync.mockResolvedValue({ sub: "user-1" });
+    prisma.user.findUnique.mockResolvedValue(makeUser({ roleName: "SUPER_ADMIN", totpEnabledAt: null }));
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(request.user).toMatchObject({ id: "user-1", roles: ["SUPER_ADMIN"] });
+  });
+
+  it("does not block a SUPER_ADMIN who already has 2FA enabled", async () => {
+    const { context } = makeContext({ authorization: "Bearer good-token" });
+    reflector.getAllAndOverride.mockReturnValue(undefined);
+    jwt.verifyAsync.mockResolvedValue({ sub: "user-1" });
+    prisma.user.findUnique.mockResolvedValue(makeUser({ roleName: "SUPER_ADMIN", totpEnabledAt: new Date() }));
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+  });
+
+  it("never applies the 2FA gate to a role that isn't SUPER_ADMIN/ORGANIZATION_ADMIN", async () => {
+    const { context } = makeContext({ authorization: "Bearer good-token" });
+    reflector.getAllAndOverride.mockReturnValue(undefined);
+    jwt.verifyAsync.mockResolvedValue({ sub: "user-1" });
+    prisma.user.findUnique.mockResolvedValue(makeUser({ roleName: "SCHOOL_ADMIN", totpEnabledAt: null }));
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+  });
+
+  it("checks mustChangePassword before mustSetup2FA — a SUPER_ADMIN needing both gets the password error first", async () => {
+    const { context } = makeContext({ authorization: "Bearer good-token" });
+    reflector.getAllAndOverride.mockImplementation(
+      reflectorReading({ [ALLOW_PASSWORD_CHANGE_REQUIRED_KEY]: undefined }),
+    );
+    jwt.verifyAsync.mockResolvedValue({ sub: "user-1" });
+    prisma.user.findUnique.mockResolvedValue(
+      makeUser({ roleName: "SUPER_ADMIN", totpEnabledAt: null, mustChangePassword: true }),
+    );
+
+    await expect(guard.canActivate(context)).rejects.toThrow("Password must be changed before continuing");
   });
 });

@@ -1,13 +1,18 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { api, ApiError, setUnauthorizedHandler, type Profile } from "./api";
+import { api, ApiError, setUnauthorizedHandler, type MfaChallenge, type Profile } from "./api";
 
 interface AuthState {
   user: Profile | null;
   accessToken: string | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<Profile>;
+  // Returns an MfaChallenge instead of a Profile when the account has 2FA
+  // enabled — password alone was correct, but no session exists yet. The
+  // caller (LoginForm) is responsible for collecting a code and calling
+  // completeMfaLogin; auth state here stays untouched until that succeeds.
+  login: (email: string, password: string) => Promise<Profile | MfaChallenge>;
+  completeMfaLogin: (mfaToken: string, params: { code?: string; recoveryCode?: string }) => Promise<Profile>;
   logout: () => Promise<void>;
   acceptInvite: (token: string, password: string) => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -157,7 +162,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
-      const { accessToken: token, sessionId } = await api.login(email, password);
+      const result = await api.login(email, password);
+      if ("mfaRequired" in result) return result;
+      sessionIdRef.current = result.sessionId;
+      persistSessionId(result.sessionId);
+      setAccessToken(result.accessToken);
+      return loadProfile(result.accessToken);
+    },
+    [loadProfile],
+  );
+
+  const completeMfaLogin = useCallback(
+    async (mfaToken: string, params: { code?: string; recoveryCode?: string }) => {
+      const { accessToken: token, sessionId } = await api.verifyLoginTotp(mfaToken, params);
       sessionIdRef.current = sessionId;
       persistSessionId(sessionId);
       setAccessToken(token);
@@ -198,7 +215,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [accessToken, loadProfile]);
 
   return (
-    <AuthContext.Provider value={{ user, accessToken, loading, login, logout, acceptInvite, refreshProfile }}>
+    <AuthContext.Provider
+      value={{ user, accessToken, loading, login, completeMfaLogin, logout, acceptInvite, refreshProfile }}
+    >
       {children}
     </AuthContext.Provider>
   );

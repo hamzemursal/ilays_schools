@@ -35,30 +35,109 @@ export function LoginForm({
   wrongRoleMessage?: string;
 }) {
   const router = useRouter();
-  const { login, logout } = useAuth();
+  const { login, completeMfaLogin, logout } = useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Set only once password verification says the account has 2FA enabled —
+  // its presence is what switches the form to the code-entry phase below.
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
+
+  function afterLogin(profile: { roles: string[] }) {
+    if (allowedRoles && !allowedRoles.some((role) => profile.roles.includes(role))) {
+      logout();
+      setError(wrongRoleMessage ?? "This account doesn't have access to this portal.");
+      return;
+    }
+    router.push(redirectTo);
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      const profile = await login(identifier, password);
-      if (allowedRoles && !allowedRoles.some((role) => profile.roles.includes(role))) {
-        await logout();
-        setError(wrongRoleMessage ?? "This account doesn't have access to this portal.");
+      const result = await login(identifier, password);
+      if ("mfaRequired" in result) {
+        setMfaToken(result.mfaToken);
         return;
       }
-      router.push(redirectTo);
+      afterLogin(result);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function onSubmitCode(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      const profile = await completeMfaLogin(mfaToken!, useRecoveryCode ? { recoveryCode: code } : { code });
+      afterLogin(profile);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (mfaToken) {
+    return (
+      <form onSubmit={onSubmitCode} className="rounded-xl border border-border bg-background p-6 shadow-sm">
+        <div className="space-y-4">
+          <FormField
+            label={useRecoveryCode ? "Recovery code" : "Authentication code"}
+            htmlFor="mfa-code"
+            required
+            hint={
+              useRecoveryCode
+                ? "One of the one-time codes you saved when you enabled two-factor authentication."
+                : "The 6-digit code from your authenticator app."
+            }
+          >
+            <Input
+              id="mfa-code"
+              type="text"
+              inputMode={useRecoveryCode ? "text" : "numeric"}
+              autoFocus
+              required
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder={useRecoveryCode ? "XXXXX-XXXXX" : "123456"}
+            />
+          </FormField>
+        </div>
+
+        {error && (
+          <Alert tone="danger" className="mt-4">
+            {error}
+          </Alert>
+        )}
+
+        <Button type="submit" loading={submitting} className="mt-6 w-full">
+          {submitting ? "Verifying…" : "Verify"}
+        </Button>
+        <button
+          type="button"
+          onClick={() => {
+            setUseRecoveryCode((v) => !v);
+            setCode("");
+            setError(null);
+          }}
+          className="mt-3 w-full text-center text-sm text-accent hover:underline"
+        >
+          {useRecoveryCode ? "Use your authenticator app instead" : "Use a recovery code instead"}
+        </button>
+      </form>
+    );
   }
 
   return (

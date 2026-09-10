@@ -7,6 +7,8 @@ import { ChangePasswordDto } from "./dto/change-password.dto";
 import { RefreshSessionDto } from "./dto/refresh-session.dto";
 import { Public } from "./decorators/public.decorator";
 import { AllowPasswordChangeRequired } from "./decorators/allow-password-change-required.decorator";
+import { AllowTotpSetupRequired } from "./decorators/allow-totp-setup-required.decorator";
+import { ROLES_REQUIRING_2FA } from "./guards/jwt-auth.guard";
 import { CurrentUser } from "./decorators/current-user.decorator";
 import { PrismaService } from "../prisma/prisma.service";
 import { DocumentsService } from "../documents/documents.service";
@@ -58,9 +60,12 @@ export class AuthController {
   @Public()
   @Post("login")
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
-    const tokens = await this.auth.login(dto.email, dto.password);
-    this.setRefreshCookie(res, tokens);
-    return { accessToken: tokens.accessToken, sessionId: tokens.sessionId };
+    const result = await this.auth.login(dto.email, dto.password);
+    if ("mfaRequired" in result) {
+      return result;
+    }
+    this.setRefreshCookie(res, result);
+    return { accessToken: result.accessToken, sessionId: result.sessionId };
   }
 
   @Public()
@@ -110,6 +115,7 @@ export class AuthController {
   }
 
   @AllowPasswordChangeRequired()
+  @AllowTotpSetupRequired()
   @Get("me")
   async me(@CurrentUser() user: AuthenticatedUser) {
     const [schools, teacher, guardian, student, self, logoUrls] = await Promise.all([
@@ -120,7 +126,10 @@ export class AuthController {
       this.prisma.teacher.findFirst({ where: { userId: user.id }, select: { id: true } }),
       this.prisma.guardian.findFirst({ where: { userId: user.id }, select: { id: true } }),
       this.prisma.student.findFirst({ where: { userId: user.id }, select: { id: true } }),
-      this.prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { mustChangePassword: true } }),
+      this.prisma.user.findUniqueOrThrow({
+        where: { id: user.id },
+        select: { mustChangePassword: true, totpEnabledAt: true },
+      }),
       this.documents.getSchoolLogoUrls(user.schoolIds),
     ]);
     return {
@@ -130,6 +139,9 @@ export class AuthController {
       guardianId: guardian?.id ?? null,
       studentId: student?.id ?? null,
       mustChangePassword: self.mustChangePassword,
+      // Same "required for Super/Org Admins" audience as JwtAuthGuard's own
+      // enforcement — this is what AppShell's matching frontend gate reads.
+      mustSetup2FA: user.roles.some((r) => ROLES_REQUIRING_2FA.includes(r)) && !self.totpEnabledAt,
     };
   }
 

@@ -7,13 +7,14 @@ import { useAuth } from "@/lib/auth-context";
 import { SelectedChildProvider } from "@/features/parent-portal/SelectedChildContext";
 import { ChildSwitcher } from "@/features/parent-portal/ChildSwitcher";
 import { ChangePasswordForm } from "@/features/auth/ChangePasswordForm";
-import { GraduationCap } from "lucide-react";
+import { TwoFactorSection } from "@/features/account/TwoFactorSection";
+import { GraduationCap, ShieldCheck } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { user, loading } = useAuth();
+  const { user, accessToken, loading, refreshProfile } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
@@ -46,6 +47,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
           <ChangePasswordForm forced />
+        </div>
+      </div>
+    );
+  }
+
+  // Required for Super/Org Admins (see Part K of the blueprint) — same
+  // "block the whole shell, backend enforces it too" shape as
+  // mustChangePassword above. accessToken is always set once `user` is,
+  // since loadProfile only ever runs right after a token is issued.
+  if (user.mustSetup2FA && accessToken) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-surface px-4 py-8">
+        <div className="w-full max-w-sm rounded-xl border border-border bg-background p-6 shadow-sm">
+          <div className="mb-5 flex items-center gap-2.5">
+            <div className="flex size-9 items-center justify-center rounded-lg bg-accent text-white">
+              <ShieldCheck className="size-4.5" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">Set up two-factor authentication</p>
+              <p className="text-xs text-foreground-muted">Required for this account before you continue</p>
+            </div>
+          </div>
+          <TwoFactorSection accessToken={accessToken} forced onEnabled={refreshProfile} />
         </div>
       </div>
     );

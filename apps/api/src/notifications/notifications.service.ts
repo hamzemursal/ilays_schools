@@ -23,6 +23,14 @@ export class NotificationsService {
     await this.prisma.notification.create({ data: { userId, ...notif } });
   }
 
+  // Guardian Portal reads its own notifications by guardianId, not userId
+  // (see GuardianPortalService.myNotifications) — a guardian's portal login
+  // is optional, so this is the FK the Notification actually needs, same
+  // convention as the direct guardianId writes in AnnouncementsService.
+  async notifyGuardian(guardianId: string, notif: NotificationInput) {
+    await this.prisma.notification.create({ data: { guardianId, ...notif } });
+  }
+
   // Every user assigned to this school (via UserSchool) whose role grants
   // the given permission — e.g. every School Admin who can actually act on
   // a submission, never every user in the org. A Super Admin with no

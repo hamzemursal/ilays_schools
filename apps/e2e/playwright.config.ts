@@ -33,7 +33,11 @@ export default defineConfig({
       timeout: 60_000,
     },
     {
-      command: "pnpm --filter web dev",
+      // next dev compiles routes on demand — on a constrained CI runner that
+      // was slow/flaky enough to blow past the per-test timeout on every
+      // route, first-visit or not. next start serves the already-built,
+      // fully-compiled app, same as production.
+      command: process.env.CI ? "pnpm --filter web start" : "pnpm --filter web dev",
       url: baseURL,
       cwd: "../../",
       reuseExistingServer: true,

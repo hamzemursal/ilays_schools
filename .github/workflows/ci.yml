@@ -81,6 +81,7 @@ jobs:
       - run: pnpm db:generate
       - run: pnpm --filter @school-erp/database exec prisma migrate deploy
       - run: pnpm db:seed
+      - run: pnpm --filter web build
       - run: pnpm --filter @school-erp/e2e exec playwright install --with-deps chromium
       - run: pnpm test:e2e
       - uses: actions/upload-artifact@v4

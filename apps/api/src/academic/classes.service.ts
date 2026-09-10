@@ -374,7 +374,7 @@ export class ClassesService {
   // with an existing row or with another student in this same batch.
   async bulkTransfer(actor: AuthenticatedUser, schoolId: string, classId: string, dto: BulkTransferClassDto) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    await this.getClassInSchoolOrThrow(schoolId, classId);
+    const sourceClass = await this.getClassInSchoolOrThrow(schoolId, classId);
 
     if (dto.fromSectionId && dto.enrollmentIds) {
       throw new BadRequestException("Specify either a source section or specific students, not both");
@@ -409,7 +409,18 @@ export class ClassesService {
     });
     if (!academicYear) throw new BadRequestException("That academic year does not belong to this school");
 
-    await this.getClassInSchoolOrThrow(schoolId, dto.toClassId);
+    const toClass = await this.getClassInSchoolOrThrow(schoolId, dto.toClassId);
+    // Primary <-> Secondary is a real academic transition, not a same-year
+    // reorganization — Student Lifecycle (Primary Completion, Form 1
+    // Transition) exists specifically to handle it, with its own records
+    // and safeguards. Class Transfer staying within one division is what
+    // makes "roll numbers will be reassigned" the only real consequence;
+    // crossing divisions has much bigger ones this flow was never built for.
+    if (toClass.divisionId !== sourceClass.divisionId) {
+      throw new BadRequestException(
+        "Class Transfer can only move students within the same division (Primary or Secondary). For a Primary-to-Secondary transition, use Student Lifecycle instead.",
+      );
+    }
     const toSection = await this.prisma.section.findFirst({
       where: { id: dto.toSectionId, classId: dto.toClassId },
     });
@@ -497,6 +508,33 @@ export class ClassesService {
       { timeout: 20_000 },
     );
 
-    return { success: true, movedCount: enrollments.length };
+    // A transfer only moves StudentEnrollment.sectionId — it never touches
+    // TeacherAssignment, so the destination section can silently end up with
+    // students but no teacher for one of its subjects (and the emptied
+    // source section keeps a teacher assigned to nobody). Surfacing that
+    // here, rather than fixing it silently, is deliberate: reassigning a
+    // teacher is a real staffing decision this flow shouldn't make on an
+    // admin's behalf.
+    const classSubjects = await this.prisma.classSubject.findMany({
+      where: { classId: dto.toClassId },
+      include: { subject: true },
+    });
+    let unassignedSubjects: { subjectId: string; subjectName: string }[] = [];
+    if (classSubjects.length > 0) {
+      const assignments = await this.prisma.teacherAssignment.findMany({
+        where: {
+          sectionId: dto.toSectionId,
+          academicYearId: dto.academicYearId,
+          subjectId: { in: classSubjects.map((cs) => cs.subjectId) },
+        },
+        select: { subjectId: true },
+      });
+      const assignedSubjectIds = new Set(assignments.map((a) => a.subjectId));
+      unassignedSubjects = classSubjects
+        .filter((cs) => !assignedSubjectIds.has(cs.subjectId))
+        .map((cs) => ({ subjectId: cs.subjectId, subjectName: cs.subject.name }));
+    }
+
+    return { success: true, movedCount: enrollments.length, unassignedSubjects };
   }
 }

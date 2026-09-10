@@ -353,7 +353,13 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
         toClassId: effectiveToClassId,
         toSectionId: transferToSectionId,
       });
-      show(`${result.movedCount} student(s) transferred.`);
+      if (result.unassignedSubjects.length > 0) {
+        show(
+          `${result.movedCount} student(s) transferred. Note: the destination section still has no teacher assigned for ${result.unassignedSubjects.map((s) => s.subjectName).join(", ")}.`,
+        );
+      } else {
+        show(`${result.movedCount} student(s) transferred.`);
+      }
       setTransferImpact(null);
       setSelectedStudentsPreview([]);
       setShowTransferForm(false);
@@ -728,6 +734,23 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                     &ldquo;All sections&rdquo;.
                   </Alert>
                 )}
+                {transferDestinationClass && !isSameClassTransfer && transferDestinationClass.division.type !== cls?.division.type && (
+                  <Alert tone="danger" className="mt-4">
+                    {cls?.name} is {cls?.division.type} and {transferDestinationClass.name} is{" "}
+                    {transferDestinationClass.division.type} — Class Transfer can&apos;t cross divisions. Use Student
+                    Lifecycle for a Primary-to-Secondary transition.
+                  </Alert>
+                )}
+                {transferDestinationClass &&
+                  !isSameClassTransfer &&
+                  transferDestinationClass.division.type === cls?.division.type &&
+                  transferDestinationClass.level !== cls?.level && (
+                    <Alert tone="warning" className="mt-4">
+                      {cls?.name} is Level {cls?.level} and {transferDestinationClass.name} is Level{" "}
+                      {transferDestinationClass.level} — double-check this is a deliberate grade change, not a
+                      mistake.
+                    </Alert>
+                  )}
                 {transferError && (
                   <Alert tone="danger" className="mt-4">
                     {transferError}
@@ -742,7 +765,8 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                       !effectiveToClassId ||
                       !transferToSectionId ||
                       (transferMode === "section" && isSameClassTransfer && !transferFromSectionId) ||
-                      (transferMode === "students" && selectedEnrollmentIds.size === 0)
+                      (transferMode === "students" && selectedEnrollmentIds.size === 0) ||
+                      (!!transferDestinationClass && transferDestinationClass.division.type !== cls?.division.type)
                     }
                     onClick={onPreviewTransfer}
                   >

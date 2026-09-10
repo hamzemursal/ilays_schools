@@ -1557,11 +1557,10 @@ export const api = {
       toSectionId: string;
     },
   ) =>
-    request<{ success: boolean; movedCount: number }>(`/schools/${schoolId}/classes/${classId}/bulk-transfer`, {
-      method: "POST",
-      body,
-      accessToken,
-    }),
+    request<{ success: boolean; movedCount: number; unassignedSubjects: { subjectId: string; subjectName: string }[] }>(
+      `/schools/${schoolId}/classes/${classId}/bulk-transfer`,
+      { method: "POST", body, accessToken },
+    ),
   listClassSubjects: (accessToken: string, schoolId: string, classId: string) =>
     request<ClassSubjectRecord[]>(`/schools/${schoolId}/classes/${classId}/subjects`, { accessToken }),
   assignSubjectToClass: (accessToken: string, schoolId: string, classId: string, subjectId: string) =>

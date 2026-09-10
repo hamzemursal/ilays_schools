@@ -78,7 +78,26 @@ export class GuardiansService {
     });
   }
 
-  async listForStudent(studentId: string) {
+  // A guardian isn't itself tied to any one school (StudentGuardian carries
+  // no schoolId — unlike Invoice/Attendance, which belong to one specific
+  // enrollment), so it can't be scoped the same way those are. Instead: a
+  // school-scoped actor only sees this student's guardians while the
+  // student has a CURRENTLY active enrollment at one of that actor's own
+  // schools. Without this, a school the student transferred away from years
+  // ago — which assertAccessibleStudent still lets view the profile at all,
+  // for legitimate transfer-history reasons — would otherwise go on seeing
+  // the family's current contact details forever, including ones only ever
+  // given to the student's new school. An org-wide actor (empty schoolIds)
+  // is unaffected, same as everywhere else this pattern appears.
+  async listForStudent(actor: AuthenticatedUser, studentId: string) {
+    if (actor.schoolIds.length > 0) {
+      const hasCurrentEnrollment = await this.prisma.studentEnrollment.findFirst({
+        where: { studentId, status: "ACTIVE", schoolId: { in: actor.schoolIds } },
+        select: { id: true },
+      });
+      if (!hasCurrentEnrollment) return [];
+    }
+
     const links = await this.prisma.studentGuardian.findMany({
       where: { studentId, status: "ACTIVE" },
       include: { guardian: true },

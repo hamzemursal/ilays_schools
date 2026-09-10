@@ -103,7 +103,7 @@ export class TeachersService {
       enrollments.map(async (e) => {
         const [attendanceCounts, guardianList, photoUrl] = await Promise.all([
           this.prisma.attendance.groupBy({ by: ["status"], where: { enrollmentId: e.id }, _count: true }),
-          this.guardians.listForStudent(e.studentId),
+          this.guardians.listForStudent(actor, e.studentId),
           this.documents.tryGetPhotoUrl("STUDENT", e.studentId),
         ]);
 

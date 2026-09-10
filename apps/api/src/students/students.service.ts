@@ -349,7 +349,7 @@ export class StudentsService {
       orderBy: { startDate: "desc" },
     });
 
-    const guardianList = await this.guardians.listForStudent(studentId);
+    const guardianList = await this.guardians.listForStudent(actor, studentId);
 
     // Surfaced on the profile so a transferred-away enrollment's "why" isn't
     // lost once TransfersService.approve() overwrites its status to

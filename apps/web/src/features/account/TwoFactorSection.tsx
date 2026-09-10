@@ -300,8 +300,9 @@ function SetupConfirmForm({
       </div>
 
       <form onSubmit={onSubmit} className="mt-5">
-        <FormField label="Enter the 6-digit code from your app" required>
+        <FormField label="Enter the 6-digit code from your app" htmlFor="totp-setup-code" required>
           <Input
+            id="totp-setup-code"
             type="text"
             inputMode="numeric"
             autoFocus

@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { generate } from "otplib";
 
 export async function loginAt(page: Page, loginPath: string, email: string, password: string) {
   await page.goto(loginPath);
@@ -8,6 +9,27 @@ export async function loginAt(page: Page, loginPath: string, email: string, pass
   // match is ambiguous between the input and that button.
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
+
+  // SUPER_ADMIN/ORGANIZATION_ADMIN accounts are hard-gated into mandatory
+  // 2FA setup on first login (AppShell's mustSetup2FA check, forced mode —
+  // see TwoFactorSection) before they can reach anything else. Complete it
+  // transparently here so every caller can assume a normal post-login
+  // landing regardless of role; a no-op for every other account, which
+  // never sees this screen.
+  const setupGate = await page
+    .getByText("Set up two-factor authentication")
+    .waitFor({ state: "visible", timeout: 3000 })
+    .then(() => true)
+    .catch(() => false);
+  if (setupGate) {
+    const secret = await page.locator("code").innerText();
+    const code = await generate({ secret });
+    await page.getByPlaceholder("123456").fill(code);
+    await page.getByRole("button", { name: "Confirm" }).click();
+    await expect(page.getByText("Save your recovery codes")).toBeVisible();
+    await page.getByRole("checkbox").check();
+    await page.getByRole("button", { name: "Done" }).click();
+  }
 }
 
 export async function signOut(page: Page) {

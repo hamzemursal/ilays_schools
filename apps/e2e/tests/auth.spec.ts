@@ -22,7 +22,9 @@ test("Teacher logs in and reaches the dashboard", async ({ page }) => {
 test("Parent logs in and reaches the parent dashboard", async ({ page }) => {
   await loginAt(page, "/parent/login", PARENT.email, PARENT.password);
   await expect(page).toHaveURL(/\/parent/);
-  await expect(page.getByText("Hodan Ali")).toBeVisible();
+  // Not just getByText: a child switcher <select> also has an
+  // "Hodan Ali — Class 1 · A" <option>, which contains this as a substring.
+  await expect(page.getByText("Hodan Ali", { exact: true })).toBeVisible();
 });
 
 test("wrong password is rejected with a clear error, not a crash", async ({ page }) => {
@@ -33,5 +35,8 @@ test("wrong password is rejected with a clear error, not a crash", async ({ page
 
 test("a Teacher account is rejected at the Super Admin login (allowedRoles guard)", async ({ page }) => {
   await loginAt(page, "/super-admin/login", TEACHER.email, TEACHER.password);
-  await expect(page.getByText(/doesn.t have access to this portal/i)).toBeVisible();
+  // The super-admin login page passes its own wrongRoleMessage (see
+  // apps/web/src/app/(auth)/super-admin/login/page.tsx) rather than
+  // LoginForm's generic default.
+  await expect(page.getByText(/isn.t a super admin account/i)).toBeVisible();
 });

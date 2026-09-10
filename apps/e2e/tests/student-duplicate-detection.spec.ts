@@ -31,7 +31,7 @@ test("adding a student with the same name + DOB as an existing one is flagged be
   await page.getByRole("button", { name: "Create student" }).click();
 
   await expect(page.getByText(/possible duplicate/i)).toBeVisible();
-  await expect(page.getByText("Hodan Ali")).toBeVisible();
+  await expect(page.getByText("Hodan Ali", { exact: true })).toBeVisible();
   // Never silently created — the override is a separate, explicit action.
   await expect(page.getByRole("button", { name: /different person.*create anyway/i })).toBeVisible();
 });

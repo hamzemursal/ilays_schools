@@ -48,7 +48,11 @@ export function FormField({
     <div className={className}>
       <label htmlFor={htmlFor} className="block text-sm font-medium text-foreground">
         {label}
-        {required && <span className="ml-0.5 text-danger">*</span>}
+        {required && (
+          <span className="ml-0.5 text-danger" aria-hidden="true">
+            *
+          </span>
+        )}
       </label>
       <div className="mt-1.5">{children}</div>
       {error ? (

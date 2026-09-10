@@ -13,7 +13,8 @@ test("Super Admin creates a school with zero auto-seeded students/teachers", asy
 
   await page.goto("/schools");
   await page.getByRole("button", { name: "New school" }).click();
-  await page.getByLabel("Name", { exact: true }).fill(schoolName);
+  // Not exact: the required-field asterisk can fold into the computed name.
+  await page.getByLabel("Name").fill(schoolName);
   await page.getByRole("button", { name: "Create school" }).click();
 
   await expect(page.getByText(schoolName)).toBeVisible();

@@ -17,15 +17,17 @@ test("adding a student with the same name + DOB as an existing one is flagged be
   // so match on visible text rather than assuming "link" or "button".
   await page.getByText("Add student", { exact: true }).click();
 
-  await page.getByLabel("First name", { exact: true }).fill("Hodan");
-  await page.getByLabel("Last name", { exact: true }).fill("Ali");
+  // Not exact: required fields' aria-hidden asterisk still folds into the
+  // computed accessible name on some browser/Playwright combinations.
+  await page.getByLabel("First name").fill("Hodan");
+  await page.getByLabel("Last name").fill("Ali");
   await page.locator('input[type="date"]').fill("2018-05-01");
-  await page.getByLabel("Sex", { exact: true }).selectOption("FEMALE");
+  await page.getByLabel("Sex").selectOption("FEMALE");
   await page.getByRole("button", { name: "Next" }).click(); // Parent/Guardian
   await page.getByRole("button", { name: "Next" }).click(); // Enrollment
 
-  await page.getByLabel("Academic year", { exact: true }).selectOption({ label: "2027 (current)" });
-  await page.getByLabel("Class", { exact: true }).selectOption({ label: "Class 1" });
+  await page.getByLabel("Academic year").selectOption({ label: "2027 (current)" });
+  await page.getByLabel("Class").selectOption({ label: "Class 1" });
   await page.getByRole("button", { name: "Next" }).click(); // Subjects
   await page.getByRole("button", { name: "Next" }).click(); // Review
   await page.getByRole("button", { name: "Create student" }).click();

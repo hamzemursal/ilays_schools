@@ -27,6 +27,7 @@ import { SkeletonCards } from "@/components/ui/Skeleton";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { StudentsTable } from "@/features/students/tables/StudentsTable";
+import { DECORATIVE_TONE_PARTS } from "@/components/ui/decorativeTones";
 import { ArrowLeftRight, GraduationCap, Pencil, Plus, Printer, Search, Trash2, Check, X } from "lucide-react";
 
 type RosterAttendanceFilter = "ALL" | "EXCELLENT" | "GOOD" | "NEEDS_ATTENTION";
@@ -37,8 +38,8 @@ type RosterAttendanceFilter = "ALL" | "EXCELLENT" | "GOOD" | "NEEDS_ATTENTION";
 const SECTION_ACCENTS = [
   { soft: "bg-accent-soft", avatar: "bg-white text-accent" },
   { soft: "bg-success-soft", avatar: "bg-white text-success" },
-  { soft: "bg-purple-50", avatar: "bg-white text-purple-600" },
-  { soft: "bg-orange-50", avatar: "bg-white text-orange-600" },
+  { soft: DECORATIVE_TONE_PARTS.violet.soft, avatar: `bg-white ${DECORATIVE_TONE_PARTS.violet.text}` },
+  { soft: DECORATIVE_TONE_PARTS.amber.soft, avatar: `bg-white ${DECORATIVE_TONE_PARTS.amber.text}` },
 ] as const;
 
 export default function ClassDetailPage({ params }: { params: Promise<{ id: string; classId: string }> }) {

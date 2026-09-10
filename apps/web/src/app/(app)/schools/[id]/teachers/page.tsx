@@ -109,6 +109,7 @@ export default function TeachersListPage({ params }: { params: Promise<{ id: str
                 schoolId={schoolId}
                 accessToken={accessToken}
                 teachers={teachers}
+                loading={!teachers}
                 selection={
                   canUpdate
                     ? {

@@ -24,6 +24,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
+import { DECORATIVE_TONE_CLASSES } from "@/components/ui/decorativeTones";
 import {
   BookOpen,
   CalendarCheck,
@@ -207,8 +208,8 @@ export default function SectionWorkspacePage({
 const STAT_TONES = {
   accent: "bg-accent-soft text-accent",
   success: "bg-success-soft text-success",
-  purple: "bg-purple-50 text-purple-600",
-  orange: "bg-orange-50 text-orange-600",
+  violet: DECORATIVE_TONE_CLASSES.violet,
+  amber: DECORATIVE_TONE_CLASSES.amber,
 } as const;
 
 function StatCard({
@@ -251,9 +252,9 @@ function OverviewTab({
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <StatCard icon={Users} label="Students" value={studentsCount ?? "…"} tone="accent" />
-      <StatCard icon={BookOpen} label="Subjects taught" value={subjectsCount} tone="purple" />
+      <StatCard icon={BookOpen} label="Subjects taught" value={subjectsCount} tone="violet" />
       <StatCard icon={GraduationCap} label="Teachers" value={teachersCount} tone="success" />
-      {section.capacity !== null && <StatCard icon={ClipboardCheck} label="Capacity" value={section.capacity} tone="orange" />}
+      {section.capacity !== null && <StatCard icon={ClipboardCheck} label="Capacity" value={section.capacity} tone="amber" />}
     </div>
   );
 }

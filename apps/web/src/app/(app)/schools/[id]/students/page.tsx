@@ -238,6 +238,7 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
                 schoolId={schoolId}
                 accessToken={accessToken}
                 students={students ? filteredStudents : null}
+                loading={!students}
                 attendanceRates={attendanceRates}
                 canTransfer={canBulkTransfer}
                 selection={

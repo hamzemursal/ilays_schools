@@ -3,12 +3,13 @@
 import { Percent, UserCheck, Users, UsersRound } from "lucide-react";
 import type { StudentListItem } from "@/lib/api";
 import { Card } from "@/components/ui/Card";
+import { DECORATIVE_TONE_CLASSES } from "@/components/ui/decorativeTones";
 
 const TONE_CLASSES = {
   accent: "bg-accent-soft text-accent",
   success: "bg-success-soft text-success",
-  purple: "bg-purple-50 text-purple-600",
-  orange: "bg-orange-50 text-orange-600",
+  violet: DECORATIVE_TONE_CLASSES.violet,
+  amber: DECORATIVE_TONE_CLASSES.amber,
 } as const;
 
 function SummaryCard({
@@ -60,8 +61,8 @@ export function StudentListSummaryCards({
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
       <SummaryCard icon={Users} label="Total Students" value={total} tone="accent" />
       <SummaryCard icon={UserCheck} label="Active" value={active} tone="success" />
-      <SummaryCard icon={UsersRound} label="Male" value={male} tone="purple" />
-      <SummaryCard icon={UsersRound} label="Female" value={female} tone="orange" />
+      <SummaryCard icon={UsersRound} label="Male" value={male} tone="violet" />
+      <SummaryCard icon={UsersRound} label="Female" value={female} tone="amber" />
       {attendanceRates && (
         <SummaryCard
           icon={Percent}

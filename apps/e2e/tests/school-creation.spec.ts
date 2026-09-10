@@ -20,9 +20,11 @@ test("Super Admin creates a school with zero auto-seeded students/teachers", asy
   await page.locator("#new-school-name").fill(schoolName);
   await page.getByRole("button", { name: "Create school" }).click();
 
-  await expect(page.getByText(schoolName)).toBeVisible();
+  // Not just getByText: a "<name> created." toast also contains this as a
+  // substring while it's still visible.
+  await expect(page.getByText(schoolName, { exact: true })).toBeVisible();
 
-  await page.getByText(schoolName).click();
+  await page.getByText(schoolName, { exact: true }).click();
   await expect(page).toHaveURL(/\/schools\/[a-f0-9-]+\/dashboard/);
 
   // Each StatCard is a "div.rounded-xl" containing its label ("Students",

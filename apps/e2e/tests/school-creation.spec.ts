@@ -30,6 +30,11 @@ test("Super Admin creates a school with zero auto-seeded students/teachers", asy
   // Scoped to this school's own card since every card has one.
   const schoolCard = page.locator("div.rounded-xl").filter({ hasText: schoolName });
   await schoolCard.getByText("View School", { exact: true }).click();
+
+  // "View School" lands on the school's own detail page, not its
+  // dashboard — that's one more click away, on an "Open school dashboard"
+  // card (see apps/web/src/app/(app)/schools/[id]/page.tsx).
+  await page.getByText("Open school dashboard", { exact: true }).click();
   await expect(page).toHaveURL(/\/schools\/[a-f0-9-]+\/dashboard/);
 
   // Each StatCard is a "div.rounded-xl" containing its label ("Students",

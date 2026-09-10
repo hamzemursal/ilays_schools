@@ -13,7 +13,11 @@ test("Super Admin creates a school with zero auto-seeded students/teachers", asy
 
   await page.goto("/schools");
   await page.getByRole("button", { name: "New school" }).click();
-  await page.getByLabel("Name", { exact: true }).fill(schoolName);
+  // By id, not label: exact-match getByLabel on a required field has
+  // proven unreliable in CI (see the Password field saga in loginAt/git
+  // history) even with the asterisk marked aria-hidden — same fix that
+  // resolved it there.
+  await page.locator("#new-school-name").fill(schoolName);
   await page.getByRole("button", { name: "Create school" }).click();
 
   await expect(page.getByText(schoolName)).toBeVisible();

@@ -22,15 +22,19 @@ test("adding a student with the same name + DOB as an existing one is flagged be
   // so match on visible text rather than assuming "link" or "button".
   await page.getByText("Add student", { exact: true }).click();
 
-  await page.getByLabel("First name", { exact: true }).fill("Hodan");
-  await page.getByLabel("Last name", { exact: true }).fill("Ali");
+  // By id, not label: exact-match getByLabel on a required field has
+  // proven unreliable in CI (see the Password field saga in loginAt/git
+  // history) even with the asterisk marked aria-hidden — same fix that
+  // resolved it there.
+  await page.locator("#firstName").fill("Hodan");
+  await page.locator("#lastName").fill("Ali");
   await page.locator('input[type="date"]').fill("2018-05-01");
-  await page.getByLabel("Sex", { exact: true }).selectOption("FEMALE");
+  await page.locator("#sex").selectOption("FEMALE");
   await page.getByRole("button", { name: "Next" }).click(); // Parent/Guardian
   await page.getByRole("button", { name: "Next" }).click(); // Enrollment
 
-  await page.getByLabel("Academic year", { exact: true }).selectOption({ label: "2027 (current)" });
-  await page.getByLabel("Class", { exact: true }).selectOption({ label: "Class 1" });
+  await page.locator("#academicYearId").selectOption({ label: "2027 (current)" });
+  await page.locator("#classId").selectOption({ label: "Class 1" });
   await page.getByRole("button", { name: "Next" }).click(); // Subjects
   await page.getByRole("button", { name: "Next" }).click(); // Review
   await page.getByRole("button", { name: "Create student" }).click();

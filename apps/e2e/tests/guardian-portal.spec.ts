@@ -14,8 +14,10 @@ test("Parent views real academic/attendance/fee data for their child and submits
   await expect(page).toHaveURL(/\/parent$/);
 
   // --- Dashboard: real child card, school-isolation-adjacent (guardian
-  // scoping) — exactly the one child Amina is linked to. ---
-  await expect(page.getByText(`Welcome, ${PARENT.email}`)).toBeVisible();
+  // scoping) — exactly the one child Amina is linked to. The plain-text
+  // match also hits Next's own hidden route-announcer element (mirrors
+  // page content for accessibility), so this is scoped to the real <h1>.
+  await expect(page.getByRole("heading", { name: `Welcome, ${PARENT.email}` })).toBeVisible();
   const dashboardChildCard = page.locator("div.rounded-xl").filter({ hasText: "Hodan Ali" });
   await expect(dashboardChildCard).toBeVisible();
   await expect(dashboardChildCard.getByText("Class 1 · A")).toBeVisible();
@@ -49,7 +51,10 @@ test("Parent views real academic/attendance/fee data for their child and submits
   // --- Attendance: real ABSENT mark from attendance-marking.spec.ts. ---
   await page.getByRole("navigation").getByRole("link", { name: "Attendance" }).click();
   await expect(page).toHaveURL(/\/parent\/attendance/);
-  await expect(page.getByText("2027 (Current)")).toBeVisible();
+  // toBeAttached, not toBeVisible — an <option>'s own visibility inside a
+  // closed native <select> isn't a meaningful signal; this just confirms
+  // the real current year is genuinely offered as a choice.
+  await expect(page.getByRole("option", { name: "2027 (Current)" })).toBeAttached();
   await expect(page.getByText("Daily attendance")).toBeVisible();
   // Exactly one day recorded so far, marked ABSENT — not the empty state.
   await expect(page.getByText("1 day(s) recorded this year.")).toBeVisible();

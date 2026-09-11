@@ -21,14 +21,24 @@ test("Teacher views their real classes/exams, edits their own profile, and is de
   // School") and the "Authorized schools" field below — .first() avoids a
   // strict-mode violation on the duplicate substring match.
   await expect(page.getByText("Saamalay Primary School").first()).toBeVisible();
-  await expect(page.getByRole("link", { name: "My classes" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Students" })).not.toBeVisible();
-  await expect(page.getByRole("link", { name: "Finance" })).not.toBeVisible();
+  // "My classes" renders twice — the persistent sidebar link and this same
+  // dashboard's own Quick Links card — same collision already documented in
+  // attendance-marking.spec.ts; scope to the sidebar for this check.
+  await expect(page.getByRole("navigation").getByRole("link", { name: "My classes" })).toBeVisible();
+  // The Quick Links cards (in <main>, not the sidebar) are the ones
+  // actually gated by user.permissions in DashboardPage itself — scoping
+  // here is what makes this a real RBAC check, not an accident of routing.
+  const quickLinks = page.getByRole("main");
+  await expect(quickLinks.getByRole("link", { name: "Students" })).not.toBeVisible();
+  await expect(quickLinks.getByRole("link", { name: "Finance" })).not.toBeVisible();
 
   // --- My classes: real profile + real assignment. ---
   await page.getByRole("navigation").getByRole("link", { name: "My classes" }).click();
   await expect(page).toHaveURL(/\/my-classes$/);
-  await expect(page.getByText("Amran Hassan")).toBeVisible();
+  // The teacher's own name is itself rendered as a second <h1> on this page
+  // (alongside the PageHeader's own "My classes" <h1>) — same
+  // announcer-duplication risk as the dashboard's title above, so .first().
+  await expect(page.getByText("Amran Hassan").first()).toBeVisible();
   await expect(page.getByText("#EMP-0001")).toBeVisible();
   await expect(page.getByText("Class 1 · A", { exact: true })).toBeVisible();
   await expect(page.getByText("Mathematics", { exact: true })).toBeVisible();

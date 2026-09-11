@@ -38,7 +38,9 @@ test("Admin creates a fee structure, generates an invoice, and records a payment
   await feeCard.getByRole("button", { name: "Generate invoices" }).click();
   await expect(feeCard.getByText(/\d+ invoice\(s\) created/)).toBeVisible();
 
-  await page.getByRole("button", { name: "Invoices" }).click();
+  // Not exact:true elsewhere by accident — non-exact "Invoices" also
+  // matches "Generate invoices" as a substring.
+  await page.getByRole("button", { name: "Invoices", exact: true }).click();
 
   // Same scoping approach — the invoice card also carries the fee
   // structure's name.

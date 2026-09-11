@@ -96,6 +96,66 @@ describe("PaymentSubmissionsService", () => {
     });
   });
 
+  describe("listForGuardian", () => {
+    it("resolves the caller's own guardian record, not a client-supplied guardianId", async () => {
+      guardians.getSelfGuardianOrThrow.mockResolvedValue({ id: "guardian-1" });
+      prisma.studentGuardian.findMany.mockResolvedValue([]);
+      prisma.paymentSubmission.findMany.mockResolvedValue([]);
+
+      await service.listForGuardian(GUARDIAN_ACTOR);
+
+      expect(guardians.getSelfGuardianOrThrow).toHaveBeenCalledWith(GUARDIAN_ACTOR);
+    });
+
+    it("scopes to only ACTIVE guardian-student links, across every child", async () => {
+      guardians.getSelfGuardianOrThrow.mockResolvedValue({ id: "guardian-1" });
+      prisma.studentGuardian.findMany.mockResolvedValue([{ studentId: "student-1" }, { studentId: "student-2" }]);
+      prisma.paymentSubmission.findMany.mockResolvedValue([]);
+
+      await service.listForGuardian(GUARDIAN_ACTOR);
+
+      expect(prisma.studentGuardian.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { guardianId: "guardian-1", status: "ACTIVE" } }),
+      );
+      expect(prisma.paymentSubmission.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { studentId: { in: ["student-1", "student-2"] } } }),
+      );
+    });
+
+    it("returns an empty list, not an error, for a guardian with no active children", async () => {
+      guardians.getSelfGuardianOrThrow.mockResolvedValue({ id: "guardian-1" });
+      prisma.studentGuardian.findMany.mockResolvedValue([]);
+      prisma.paymentSubmission.findMany.mockResolvedValue([]);
+
+      const result = await service.listForGuardian(GUARDIAN_ACTOR);
+
+      expect(result).toEqual([]);
+      expect(prisma.paymentSubmission.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { studentId: { in: [] } } }));
+    });
+  });
+
+  describe("listForSchool", () => {
+    it("checks school access before listing", async () => {
+      prisma.paymentSubmission.findMany.mockResolvedValue([]);
+      await service.listForSchool(FINANCE_ACTOR, "school-1");
+      expect(schools.findOneAccessibleOrThrow).toHaveBeenCalledWith(FINANCE_ACTOR, "school-1");
+    });
+
+    it("filters by status only when one is given", async () => {
+      prisma.paymentSubmission.findMany.mockResolvedValue([]);
+
+      await service.listForSchool(FINANCE_ACTOR, "school-1");
+      expect(prisma.paymentSubmission.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { schoolId: "school-1" } }),
+      );
+
+      await service.listForSchool(FINANCE_ACTOR, "school-1", "PENDING");
+      expect(prisma.paymentSubmission.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { schoolId: "school-1", status: "PENDING" } }),
+      );
+    });
+  });
+
   describe("submitFromFinance", () => {
     it("rejects a student with no active enrollment in this specific school", async () => {
       prisma.studentEnrollment.findFirst.mockResolvedValue(null);
@@ -136,6 +196,79 @@ describe("PaymentSubmissionsService", () => {
   });
 
   describe("verify", () => {
+    it("rejects a dto naming both invoiceId and chargeId", async () => {
+      prisma.paymentSubmission.findFirst.mockResolvedValue({ id: "sub-1", status: "PENDING", invoiceId: null, chargeId: null, amount: "25.00" });
+
+      await expect(
+        service.verify(FINANCE_ACTOR, "school-1", "sub-1", { invoiceId: "inv-1", chargeId: "chg-1" }),
+      ).rejects.toThrow("Provide at most one of invoiceId or chargeId");
+      expect(prisma.payment.create).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the submission's own already-matched invoiceId/chargeId when the dto provides neither", async () => {
+      prisma.paymentSubmission.findFirst.mockResolvedValue({ id: "sub-1", status: "PENDING", invoiceId: "inv-1", chargeId: null, amount: "40.00" });
+      prisma.invoice.findFirst.mockResolvedValue({ id: "inv-1", amount: "100.00", payments: [] });
+      prisma.payment.create.mockResolvedValue({ id: "pay-1" });
+      prisma.paymentSubmission.update.mockResolvedValue({ id: "sub-1", status: "VERIFIED" });
+
+      await service.verify(FINANCE_ACTOR, "school-1", "sub-1", {});
+
+      expect(prisma.invoice.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "inv-1" } }));
+    });
+
+    it("throws when the matched invoice doesn't exist", async () => {
+      prisma.paymentSubmission.findFirst.mockResolvedValue({ id: "sub-1", status: "PENDING", invoiceId: null, chargeId: null, amount: "25.00" });
+      prisma.invoice.findFirst.mockResolvedValue(null);
+
+      await expect(service.verify(FINANCE_ACTOR, "school-1", "sub-1", { invoiceId: "inv-1" })).rejects.toThrow(
+        "That invoice does not exist",
+      );
+    });
+
+    it("throws when the matched charge doesn't exist", async () => {
+      prisma.paymentSubmission.findFirst.mockResolvedValue({ id: "sub-1", status: "PENDING", invoiceId: null, chargeId: null, amount: "25.00" });
+      prisma.charge.findFirst.mockResolvedValue(null);
+
+      await expect(service.verify(FINANCE_ACTOR, "school-1", "sub-1", { chargeId: "chg-1" })).rejects.toThrow(
+        "That charge does not exist",
+      );
+    });
+
+    it("rejects a submission amount exceeding the matched invoice's remaining balance", async () => {
+      prisma.paymentSubmission.findFirst.mockResolvedValue({ id: "sub-1", status: "PENDING", invoiceId: null, chargeId: null, amount: "80.00" });
+      prisma.invoice.findFirst.mockResolvedValue({ id: "inv-1", amount: "100.00", payments: [{ status: "POSTED", amount: "50.00" }] });
+
+      await expect(service.verify(FINANCE_ACTOR, "school-1", "sub-1", { invoiceId: "inv-1" })).rejects.toThrow(
+        "Submission amount 80 exceeds the remaining balance of 50.00",
+      );
+      expect(prisma.payment.create).not.toHaveBeenCalled();
+    });
+
+    it("marks the invoice PARTIALLY_PAID when the submission doesn't cover the full remaining amount", async () => {
+      prisma.paymentSubmission.findFirst.mockResolvedValue({ id: "sub-1", status: "PENDING", invoiceId: null, chargeId: null, amount: "30.00" });
+      prisma.invoice.findFirst.mockResolvedValue({ id: "inv-1", amount: "100.00", payments: [] });
+      prisma.payment.create.mockResolvedValue({ id: "pay-1" });
+      prisma.paymentSubmission.update.mockResolvedValue({ id: "sub-1", status: "VERIFIED" });
+
+      await service.verify(FINANCE_ACTOR, "school-1", "sub-1", { invoiceId: "inv-1" });
+
+      expect(prisma.invoice.update).toHaveBeenCalledWith({ where: { id: "inv-1" }, data: { status: "PARTIALLY_PAID" } });
+    });
+
+    it("marks the invoice PAID once the submission reaches the full remaining amount, and links payment to the invoice not a charge", async () => {
+      prisma.paymentSubmission.findFirst.mockResolvedValue({ id: "sub-1", status: "PENDING", invoiceId: null, chargeId: null, amount: "100.00", providerTransactionReference: "ZD1" });
+      prisma.invoice.findFirst.mockResolvedValue({ id: "inv-1", amount: "100.00", payments: [] });
+      prisma.payment.create.mockResolvedValue({ id: "pay-1" });
+      prisma.paymentSubmission.update.mockResolvedValue({ id: "sub-1", status: "VERIFIED" });
+
+      await service.verify(FINANCE_ACTOR, "school-1", "sub-1", { invoiceId: "inv-1" });
+
+      expect(prisma.invoice.update).toHaveBeenCalledWith({ where: { id: "inv-1" }, data: { status: "PAID" } });
+      expect(prisma.payment.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ invoiceId: "inv-1", chargeId: undefined }) }),
+      );
+    });
+
     it("refuses to verify a submission not matched to an invoice or charge", async () => {
       prisma.paymentSubmission.findFirst.mockResolvedValue({
         id: "sub-1",

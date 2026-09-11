@@ -99,6 +99,43 @@ describe("FinanceDashboardService", () => {
       expect(result.outstanding).toBe(0);
       expect(result.netFinancialPosition).toBe(0);
     });
+
+    it("resolves an explicit academicYearId, scoping invoices/charges to just that year", async () => {
+      prisma.academicYear.findMany.mockResolvedValue([
+        { id: "year-1", isCurrent: true },
+        { id: "year-2", isCurrent: false },
+      ]);
+
+      await service.getSchoolSummary(SCHOOL_ACTOR, "school-1", "year-2");
+
+      expect(prisma.invoice.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { enrollment: { schoolId: "school-1", academicYearId: "year-2" } } }),
+      );
+      expect(prisma.charge.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { schoolId: "school-1", academicYearId: "year-2" } }),
+      );
+    });
+
+    it("falls back to the first academic year when none is marked current", async () => {
+      prisma.academicYear.findMany.mockResolvedValue([{ id: "year-1", isCurrent: false }, { id: "year-2", isCurrent: false }]);
+
+      await service.getSchoolSummary(SCHOOL_ACTOR, "school-1");
+
+      expect(prisma.invoice.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { enrollment: { schoolId: "school-1", academicYearId: "year-1" } } }),
+      );
+    });
+
+    it("queries school-wide (no academicYearId filter) when the school has no academic years at all", async () => {
+      prisma.academicYear.findMany.mockResolvedValue([]);
+
+      await service.getSchoolSummary(SCHOOL_ACTOR, "school-1");
+
+      expect(prisma.invoice.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { enrollment: { schoolId: "school-1" } } }),
+      );
+      expect(prisma.charge.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { schoolId: "school-1" } }));
+    });
   });
 
   describe("getCentralSummary", () => {
@@ -131,6 +168,18 @@ describe("FinanceDashboardService", () => {
 
       expect(result.schools).toHaveLength(2);
       expect(result.totals.totalCharged).toBe(300);
+    });
+
+    it("attaches each school's own resolved academic year, null when it has none", async () => {
+      prisma.school.findMany.mockResolvedValue([{ id: "school-1", name: "A" }, { id: "school-2", name: "B" }]);
+      prisma.academicYear.findMany
+        .mockResolvedValueOnce([{ id: "year-1", name: "2028", isCurrent: true }])
+        .mockResolvedValueOnce([]);
+
+      const result = await service.getCentralSummary(CENTRAL_ACTOR);
+
+      expect(result.schools[0].academicYear).toEqual({ id: "year-1", name: "2028" });
+      expect(result.schools[1].academicYear).toBeNull();
     });
   });
 });

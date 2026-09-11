@@ -64,18 +64,25 @@ test("Teacher views their real classes/exams, edits their own profile, and is de
 
   await page.getByText("Class 1 · A", { exact: true }).click();
   await expect(page).toHaveURL(/\/my-classes\/.+/);
-  await expect(page.getByText("Hodan Ali")).toBeVisible();
-  await expect(page.getByText("0 present", { exact: true })).toBeVisible();
-  await expect(page.getByText("1 absent", { exact: true })).toBeVisible();
+  // "Hodan Ali" (and her attendance counts) render twice on this page — once
+  // in the Students roster, again in the "Attendance summary" table further
+  // down, which also lists students. .first() targets whichever renders
+  // first without gambling on which section that is.
+  await expect(page.getByText("Hodan Ali").first()).toBeVisible();
+  await expect(page.getByText("0 present", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("1 absent", { exact: true }).first()).toBeVisible();
 
   await page.getByRole("button", { name: "Guardian info" }).click();
   await expect(page.getByText("Amina Ali")).toBeVisible();
   await expect(page.getByText("Mother", { exact: true })).toBeVisible();
   await expect(page.getByText("Primary contact")).toBeVisible();
 
-  // --- My Exams: real published result from exam-results-entry.spec.ts. ---
+  // --- My Exams: real published result from exam-results-entry.spec.ts.
+  // "Mathematics" also appears as a Subject-filter <option>, alongside the
+  // real table row — .first() avoids gambling on which the DOM returns
+  // first. ---
   await page.goto("/my-exams");
-  await expect(page.getByText("Mathematics", { exact: true })).toBeVisible();
+  await expect(page.getByText("Mathematics", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Published", { exact: true })).toBeVisible();
 
   // --- RBAC: a Teacher has no teachers.view permission — navigating

@@ -74,7 +74,8 @@ test("Parent views real academic/attendance/fee data for their child and submits
   await page.getByRole("button", { name: "Submit Payment" }).click();
   await page.getByRole("spinbutton").fill("25");
   await page.getByPlaceholder("Transaction ID").fill("E2E-ZAAD-REF");
-  await page.getByRole("button", { name: "Submit" }).click();
+  // Non-exact "Submit" also matches the "Submit Payment" tab button itself.
+  await page.getByRole("button", { name: "Submit", exact: true }).click();
   await expect(page.getByText("Payment notice submitted. It will be verified by the school.")).toBeVisible();
   // Each submission renders as a plain flex row (not a Card), so scope by
   // that exact structural class rather than the broader rounded-xl cards

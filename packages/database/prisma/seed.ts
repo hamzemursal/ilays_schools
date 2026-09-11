@@ -482,7 +482,7 @@ async function seedDevAuthFixtures() {
     schoolId: school.id,
     label: "Teacher (Saamalay Primary School)",
   });
-  await prisma.teacher.upsert({
+  const teacher = await prisma.teacher.upsert({
     where: { userId: teacherUser.id },
     update: {},
     create: {
@@ -492,6 +492,34 @@ async function seedDevAuthFixtures() {
       firstName: "Amran",
       lastName: "Hassan",
     },
+  });
+
+  // The one subject Amran teaches Class 1 · Section A for 2027 — needed so
+  // the e2e suite has a real TeacherAssignment to exercise attendance/results
+  // flows against. Not auto-created by any real app flow (same rationale as
+  // the academic structure above); just enough for the fixture graph to hang
+  // together.
+  const subject = await prisma.subject.upsert({
+    where: { schoolId_name: { schoolId: school.id, name: "Mathematics" } },
+    update: {},
+    create: { schoolId: school.id, name: "Mathematics" },
+  });
+  await prisma.classSubject.upsert({
+    where: { classId_subjectId: { classId: klass.id, subjectId: subject.id } },
+    update: {},
+    create: { classId: klass.id, subjectId: subject.id },
+  });
+  await prisma.teacherAssignment.upsert({
+    where: {
+      teacherId_sectionId_subjectId_academicYearId: {
+        teacherId: teacher.id,
+        sectionId: section.id,
+        subjectId: subject.id,
+        academicYearId: academicYear.id,
+      },
+    },
+    update: {},
+    create: { teacherId: teacher.id, schoolId: school.id, academicYearId: academicYear.id, sectionId: section.id, subjectId: subject.id },
   });
 
   const parentUser = await createActiveTestUser({

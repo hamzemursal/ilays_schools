@@ -78,11 +78,12 @@ test("Teacher views their real classes/exams, edits their own profile, and is de
   await expect(page.getByText("Primary contact")).toBeVisible();
 
   // --- My Exams: real published result from exam-results-entry.spec.ts.
-  // "Mathematics" also appears as a Subject-filter <option>, alongside the
-  // real table row — .first() avoids gambling on which the DOM returns
-  // first. ---
+  // "Mathematics" also appears as a Subject-filter <option> — .first()
+  // isn't safe here since that option (inside a closed <select>) sits
+  // first in DOM order and reports as hidden; scope to the table cell
+  // (role "cell", not "option") to target the real, visible row. ---
   await page.goto("/my-exams");
-  await expect(page.getByText("Mathematics", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Mathematics", exact: true })).toBeVisible();
   await expect(page.getByText("Published", { exact: true })).toBeVisible();
 
   // --- RBAC: a Teacher has no teachers.view permission — navigating

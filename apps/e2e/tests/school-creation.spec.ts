@@ -39,9 +39,15 @@ test("Super Admin creates a school with zero auto-seeded students/teachers", asy
 
   // Each StatCard is a "div.rounded-xl" containing its label ("Students",
   // "Teachers", …) and value as sibling <p> tags — see components/ui/StatCard.tsx.
-  const studentsCard = page.locator("div.rounded-xl").filter({ hasText: "Students" });
-  const teachersCard = page.locator("div.rounded-xl").filter({ hasText: "Teachers" });
-  const classesCard = page.locator("div.rounded-xl").filter({ hasText: "Classes" });
+  // Scoped via a <p> label specifically, not just hasText: a separate
+  // "Teachers" CardHeader ("By employment status.") further down the page
+  // renders its title as an <h3>, not a <p>, but still contains "Teachers"
+  // as text — hasText alone can't tell the two apart.
+  const statCard = (label: string) =>
+    page.locator("div.rounded-xl").filter({ has: page.locator("p", { hasText: label }) });
+  const studentsCard = statCard("Students");
+  const teachersCard = statCard("Teachers");
+  const classesCard = statCard("Classes");
   await expect(studentsCard.getByText("0", { exact: true })).toBeVisible();
   await expect(teachersCard.getByText("0", { exact: true })).toBeVisible();
   await expect(classesCard.getByText("0", { exact: true })).toBeVisible();

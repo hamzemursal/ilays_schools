@@ -37,14 +37,14 @@ test("Super Admin creates a school with zero auto-seeded students/teachers", asy
   await page.getByText("Open school dashboard", { exact: true }).click();
   await expect(page).toHaveURL(/\/schools\/[a-f0-9-]+\/dashboard/);
 
-  // Each StatCard is a "div.rounded-xl" containing its label ("Students",
-  // "Teachers", …) and value as sibling <p> tags — see components/ui/StatCard.tsx.
-  // Scoped via a <p> label specifically, not just hasText: a separate
-  // "Teachers" CardHeader ("By employment status.") further down the page
-  // renders its title as an <h3>, not a <p>, but still contains "Teachers"
-  // as text — hasText alone can't tell the two apart.
-  const statCard = (label: string) =>
-    page.locator("div.rounded-xl").filter({ has: page.locator("p", { hasText: label }) });
+  // Each StatCard is a "div.rounded-xl.p-4" (see components/ui/StatCard.tsx)
+  // containing its label and value. The "Academic" card further down this
+  // same page has its own "Classes" field with an identically-styled <p>
+  // label ("text-xs font-medium uppercase tracking-wide text-foreground-muted",
+  // same as StatCard's), so hasText or a bare <p> filter alone can't tell
+  // the two apart — but that card uses Card's own padding (p-5 or none),
+  // never StatCard's specific p-4, so scope to that class first.
+  const statCard = (label: string) => page.locator("div.rounded-xl.p-4").filter({ hasText: label });
   const studentsCard = statCard("Students");
   const teachersCard = statCard("Teachers");
   const classesCard = statCard("Classes");

@@ -91,7 +91,95 @@ export class StudentLedgerService {
       adjustments,
     };
   }
+
+  // Bulk version of the same math as getLedger's summary, for however many
+  // enrollments are on an Advanced Student List page — a handful of
+  // grouped queries here, never one getLedger() call per row. No school
+  // access re-check: callers (e.g. StudentDirectoryService) already
+  // validated the caller can see this school before narrowing to these
+  // enrollment IDs.
+  async getSummaryForEnrollments(enrollmentIds: string[]): Promise<
+    Map<string, { totalCharged: number; totalPaid: number; balance: number; feeStatus: FeeStatus; lastPaymentDate: Date | null }>
+  > {
+    const totalAdjustments = new Map<string, number>();
+    const result = new Map<
+      string,
+      { totalCharged: number; totalPaid: number; balance: number; feeStatus: FeeStatus; lastPaymentDate: Date | null }
+    >();
+    for (const id of enrollmentIds) {
+      result.set(id, { totalCharged: 0, totalPaid: 0, balance: 0, feeStatus: "NO_CHARGE", lastPaymentDate: null });
+      totalAdjustments.set(id, 0);
+    }
+    if (enrollmentIds.length === 0) return result;
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    const [invoices, charges, adjustments] = await Promise.all([
+      this.prisma.invoice.findMany({
+        where: { enrollmentId: { in: enrollmentIds } },
+        select: { enrollmentId: true, amount: true, dueDate: true, payments: { where: { status: "POSTED" }, select: { amount: true, paidAt: true } } },
+      }),
+      this.prisma.charge.findMany({
+        where: { enrollmentId: { in: enrollmentIds } },
+        select: { enrollmentId: true, amount: true, dueDate: true, status: true, payments: { where: { status: "POSTED" }, select: { amount: true, paidAt: true } } },
+      }),
+      this.prisma.feeAdjustment.findMany({
+        where: { enrollmentId: { in: enrollmentIds }, status: "APPROVED" },
+        select: { enrollmentId: true, amount: true },
+      }),
+    ]);
+
+    const overdue = new Set<string>();
+    const paidSum = (payments: { amount: unknown }[]) => payments.reduce((sum, p) => sum + Number(p.amount), 0);
+    const lastPaidAt = (payments: { paidAt: Date }[]) =>
+      payments.reduce<Date | null>((latest, p) => (!latest || p.paidAt > latest ? p.paidAt : latest), null);
+
+    for (const inv of invoices) {
+      const entry = result.get(inv.enrollmentId)!;
+      const paid = paidSum(inv.payments);
+      entry.totalCharged += Number(inv.amount);
+      entry.totalPaid += paid;
+      const latest = lastPaidAt(inv.payments);
+      if (latest && (!entry.lastPaymentDate || latest > entry.lastPaymentDate)) entry.lastPaymentDate = latest;
+      if (paid < Number(inv.amount) && inv.dueDate && inv.dueDate.toISOString().slice(0, 10) < today) {
+        overdue.add(inv.enrollmentId);
+      }
+    }
+    for (const chg of charges) {
+      if (chg.status === "CANCELLED") continue;
+      const entry = result.get(chg.enrollmentId)!;
+      const paid = paidSum(chg.payments);
+      entry.totalCharged += Number(chg.amount);
+      entry.totalPaid += paid;
+      const latest = lastPaidAt(chg.payments);
+      if (latest && (!entry.lastPaymentDate || latest > entry.lastPaymentDate)) entry.lastPaymentDate = latest;
+      if (paid < Number(chg.amount) && chg.dueDate && chg.dueDate.toISOString().slice(0, 10) < today) {
+        overdue.add(chg.enrollmentId);
+      }
+    }
+    for (const adj of adjustments) {
+      totalAdjustments.set(adj.enrollmentId, (totalAdjustments.get(adj.enrollmentId) ?? 0) + Number(adj.amount));
+    }
+
+    for (const [enrollmentId, entry] of result) {
+      entry.totalCharged = round2(entry.totalCharged);
+      entry.totalPaid = round2(entry.totalPaid);
+      // Mirrors getLedger's own formula exactly: an approved adjustment
+      // reduces the balance without being counted as a "payment" — Amount
+      // Paid in the list must reflect real money received, nothing else.
+      entry.balance = round2(entry.totalCharged - entry.totalPaid - (totalAdjustments.get(enrollmentId) ?? 0));
+      if (entry.totalCharged === 0) entry.feeStatus = "NO_CHARGE";
+      else if (entry.balance <= 0) entry.feeStatus = "PAID";
+      else if (overdue.has(enrollmentId)) entry.feeStatus = "OVERDUE";
+      else if (entry.totalPaid > 0) entry.feeStatus = "PARTIALLY_PAID";
+      else entry.feeStatus = "PENDING";
+    }
+
+    return result;
+  }
 }
+
+export type FeeStatus = "PAID" | "PARTIALLY_PAID" | "PENDING" | "OVERDUE" | "NO_CHARGE";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;

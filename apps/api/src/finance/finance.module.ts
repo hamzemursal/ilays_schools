@@ -59,6 +59,10 @@ import { ExpensesService } from "./expenses.service";
     ExpenseCategoriesService,
     ExpensesService,
   ],
-  exports: [InvoicesService],
+  // StudentLedgerService exported for StudentDirectoryModule's bulk fee
+  // summary column — same reasoning as AttendanceModule's export: avoids a
+  // FinanceModule <-> StudentsModule cycle (StudentLedgerService already
+  // depends on StudentsService).
+  exports: [InvoicesService, StudentLedgerService],
 })
 export class FinanceModule {}

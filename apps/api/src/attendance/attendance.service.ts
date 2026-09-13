@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { AttendanceSession } from "@school-erp/database";
+import { AttendanceSession, type AttendanceStatus } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import { StudentsService } from "../students/students.service";
@@ -417,5 +417,34 @@ export class AttendanceService {
       include: { enrollment: { include: { school: true, class: true, section: true, academicYear: true } } },
       orderBy: { date: "desc" },
     });
+  }
+
+  // Bulk "today's attendance, both sessions" for the Advanced Student List —
+  // one query for however many enrollments are on the page, never one query
+  // per row. No per-section TeacherAssignment check here (unlike the
+  // section-scoped methods above): this is an admin-level cross-section
+  // view, gated by the attendance.view permission at the controller/caller
+  // level, the same way summaryForSection's admin-only sibling
+  // getStatusForDate already works. An enrollment with no row for a session
+  // gets `null` — the caller must render that as "Not Recorded", never
+  // "Absent".
+  async getTodayStatusForEnrollments(
+    enrollmentIds: string[],
+    date: string,
+  ): Promise<Map<string, Record<AttendanceSession, AttendanceStatus | null>>> {
+    const result = new Map<string, Record<AttendanceSession, AttendanceStatus | null>>();
+    for (const id of enrollmentIds) {
+      result.set(id, { MORNING: null, AFTERNOON: null });
+    }
+    if (enrollmentIds.length === 0) return result;
+
+    const rows = await this.prisma.attendance.findMany({
+      where: { enrollmentId: { in: enrollmentIds }, date: new Date(date) },
+      select: { enrollmentId: true, session: true, status: true },
+    });
+    for (const row of rows) {
+      result.get(row.enrollmentId)![row.session] = row.status;
+    }
+    return result;
   }
 }

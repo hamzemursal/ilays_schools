@@ -10,5 +10,11 @@ import { AttendanceService } from "./attendance.service";
   imports: [SchoolsModule, StudentsModule, AuditModule, DocumentsModule],
   controllers: [AttendanceController],
   providers: [AttendanceService],
+  // Exported for StudentDirectoryModule's bulk "attendance today" column —
+  // that module imports this one directly rather than StudentsModule
+  // importing it back, which would create a StudentsModule <->
+  // AttendanceModule cycle (AttendanceService already depends on
+  // StudentsService).
+  exports: [AttendanceService],
 })
 export class AttendanceModule {}

@@ -221,6 +221,45 @@ describe("AttendanceService — session status (the top-of-page banner)", () => 
   });
 });
 
+describe("AttendanceService.getTodayStatusForEnrollments — Advanced Student List's bulk Attendance Today column", () => {
+  let prisma: { attendance: { findMany: jest.Mock } };
+  let service: AttendanceService;
+
+  beforeEach(() => {
+    prisma = { attendance: { findMany: jest.fn().mockResolvedValue([]) } };
+    service = new AttendanceService(
+      prisma as unknown as PrismaService,
+      {} as unknown as SchoolsService,
+      {} as unknown as StudentsService,
+      { record: jest.fn() } as unknown as AuditService,
+      {} as unknown as DocumentsService,
+    );
+  });
+
+  it("returns an empty map without querying for an empty id list", async () => {
+    const result = await service.getTodayStatusForEnrollments([], today());
+    expect(result.size).toBe(0);
+    expect(prisma.attendance.findMany).not.toHaveBeenCalled();
+  });
+
+  it("gives every requested enrollment both sessions as null (Not Recorded) with no data", async () => {
+    const result = await service.getTodayStatusForEnrollments(["enr-1", "enr-2"], today());
+    expect(result.get("enr-1")).toEqual({ MORNING: null, AFTERNOON: null });
+    expect(result.get("enr-2")).toEqual({ MORNING: null, AFTERNOON: null });
+  });
+
+  it("fills in the real status for whichever session/enrollment has a record, in one query for all ids", async () => {
+    prisma.attendance.findMany.mockResolvedValue([
+      { enrollmentId: "enr-1", session: "MORNING", status: "PRESENT" },
+      { enrollmentId: "enr-2", session: "AFTERNOON", status: "ABSENT" },
+    ]);
+    const result = await service.getTodayStatusForEnrollments(["enr-1", "enr-2"], today());
+    expect(result.get("enr-1")).toEqual({ MORNING: "PRESENT", AFTERNOON: null });
+    expect(result.get("enr-2")).toEqual({ MORNING: null, AFTERNOON: "ABSENT" });
+    expect(prisma.attendance.findMany).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("AttendanceService — teacher authorization (school/section isolation)", () => {
   let prisma: { teacher: { findFirst: jest.Mock }; teacherAssignment: { findFirst: jest.Mock }; section: { findFirst: jest.Mock } };
   let schools: { findOneAccessibleOrThrow: jest.Mock };

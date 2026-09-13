@@ -13,6 +13,7 @@ import { SchoolsModule } from "./schools/schools.module";
 import { AcademicModule } from "./academic/academic.module";
 import { GuardiansModule } from "./guardians/guardians.module";
 import { StudentsModule } from "./students/students.module";
+import { StudentDirectoryModule } from "./students/student-directory.module";
 import { TeachersModule } from "./teachers/teachers.module";
 import { HrModule } from "./hr/hr.module";
 import { PromotionsModule } from "./promotions/promotions.module";
@@ -53,6 +54,7 @@ import { NotificationsModule } from "./notifications/notifications.module";
     AttendanceModule,
     ExamsModule,
     FinanceModule,
+    StudentDirectoryModule,
     PayrollModule,
     StorageModule,
     DocumentsModule,

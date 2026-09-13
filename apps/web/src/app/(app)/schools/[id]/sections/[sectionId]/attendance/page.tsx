@@ -4,7 +4,7 @@ import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type AttendanceRow, type AttendanceStatus } from "@/lib/api";
+import { api, type AttendanceRow, type AttendanceSession, type AttendanceSessionStatus, type AttendanceStatus } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -13,9 +13,9 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonTable } from "@/components/ui/Skeleton";
-import { FormField, Input } from "@/components/ui/FormControls";
+import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { useToast } from "@/components/ui/Toast";
-import { CheckCircle2, CheckCheck, ClipboardCheck, FileClock, Save } from "lucide-react";
+import { CheckCircle2, CheckCheck, Circle, ClipboardCheck, FileClock, Save } from "lucide-react";
 import { UnsavedAttendanceDialog } from "@/features/attendance/UnsavedAttendanceDialog";
 
 // Attendance can't be taken for a day that hasn't happened yet — this caps
@@ -29,6 +29,16 @@ const STATUSES: { value: AttendanceStatus; label: string; on: string }[] = [
   { value: "LATE", label: "Late", on: "bg-warning text-white" },
   { value: "EXCUSED", label: "Excused", on: "bg-accent text-white" },
 ];
+
+// Labels only, never a clock time — this school-erp instance has no
+// per-school schedule/timetable model, so a school running roughly 7am-12pm
+// and one running roughly 1pm-5pm both just pick whichever of these two
+// they're marking. See AttendanceSession in schema.prisma for the reasoning.
+const SESSIONS: { value: AttendanceSession; label: string }[] = [
+  { value: "MORNING", label: "Morning Session" },
+  { value: "AFTERNOON", label: "Afternoon Session" },
+];
+const SESSION_LABEL: Record<AttendanceSession, string> = { MORNING: "Morning Session", AFTERNOON: "Afternoon Session" };
 
 export default function AttendancePage({ params }: { params: Promise<{ id: string; sectionId: string }> }) {
   const { id: schoolId, sectionId } = use(params);
@@ -48,6 +58,9 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
   const backLabel = searchParams.get("backLabel") ?? "My classes";
 
   const [date, setDate] = useState(searchParams.get("date") ?? new Date().toISOString().slice(0, 10));
+  const initialSession = searchParams.get("session");
+  const [session, setSession] = useState<AttendanceSession>(initialSession === "AFTERNOON" ? "AFTERNOON" : "MORNING");
+  const [sessionStatus, setSessionStatus] = useState<AttendanceSessionStatus | null>(null);
   const [rows, setRows] = useState<AttendanceRow[] | null>(null);
   const [pending, setPending] = useState<Record<string, AttendanceStatus>>({});
   // The last loaded-or-saved snapshot — comparing `pending` against this
@@ -68,7 +81,7 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
   useEffect(() => {
     if (!accessToken) return;
     api
-      .getAttendance(accessToken, schoolId, sectionId, date)
+      .getAttendance(accessToken, schoolId, sectionId, date, session)
       .then((data) => {
         setRows(data);
         // No record yet for a student today defaults to Present, so a
@@ -81,7 +94,22 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
         setLastAction(null);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load attendance"));
-  }, [accessToken, schoolId, sectionId, date]);
+  }, [accessToken, schoolId, sectionId, date, session]);
+
+  // Independent of whichever session is currently selected above — this is
+  // what powers the "Morning Session ✓ Recorded / Afternoon Session ○ Not
+  // Recorded" banner, so it always reflects both sessions regardless of
+  // which one the teacher happens to be looking at right now. Reloaded
+  // after every successful save so the banner flips the moment a session
+  // is actually finalized.
+  const [statusRefreshKey, setStatusRefreshKey] = useState(0);
+  useEffect(() => {
+    if (!accessToken) return;
+    api
+      .getAttendanceSessionStatus(accessToken, schoolId, sectionId, date)
+      .then(setSessionStatus)
+      .catch(() => setSessionStatus(null));
+  }, [accessToken, schoolId, sectionId, date, statusRefreshKey]);
 
   // The native "leave site?" prompt — the only guard that can catch closing
   // the tab, refreshing, or typing a new URL. Its wording is entirely
@@ -153,7 +181,7 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
     setError(null);
     try {
       const entries = Object.entries(pending).map(([enrollmentId, status]) => ({ enrollmentId, status }));
-      const updated = await api.saveAttendanceDraft(accessToken, schoolId, sectionId, date, entries);
+      const updated = await api.saveAttendanceDraft(accessToken, schoolId, sectionId, date, session, entries);
       setRows(updated);
       setBaseline(pending);
       setHasDraft(true);
@@ -178,11 +206,12 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
     setError(null);
     try {
       const entries = Object.entries(pending).map(([enrollmentId, status]) => ({ enrollmentId, status }));
-      const updated = await api.markAttendance(accessToken, schoolId, sectionId, date, entries);
+      const updated = await api.markAttendance(accessToken, schoolId, sectionId, date, session, entries);
       setRows(updated);
       setBaseline(pending);
       setHasDraft(false);
       setLastAction("finalized");
+      setStatusRefreshKey((k) => k + 1);
       show("Attendance saved.");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to save attendance");
@@ -205,19 +234,67 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
 
       <div className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
         <Card>
+          <h2 className="text-sm font-semibold text-foreground">
+            Attendance Status — {new Date(date).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
+          </h2>
+          <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            {SESSIONS.map((s) => {
+              const recorded = sessionStatus?.[s.value] ?? false;
+              return (
+                <div
+                  key={s.value}
+                  className={`flex items-center justify-between gap-3 rounded-lg border px-3.5 py-2.5 ${
+                    recorded ? "border-success/30 bg-success-soft" : "border-border bg-surface-soft"
+                  }`}
+                >
+                  <span className="text-sm font-medium text-foreground">{s.label}</span>
+                  {recorded ? (
+                    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-success">
+                      <CheckCircle2 className="size-4" /> Recorded
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 text-sm text-foreground-muted">
+                      <Circle className="size-4" /> Not Recorded
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+
+        <Card>
           <div className="flex flex-wrap items-end justify-between gap-4">
-            <FormField label="Date" htmlFor="date" className="max-w-xs">
-              <Input
-                id="date"
-                type="date"
-                value={date}
-                max={TODAY}
-                onChange={(e) => {
-                  const newDate = e.target.value;
-                  attemptAction(() => setDate(newDate));
-                }}
-              />
-            </FormField>
+            <div className="flex flex-wrap items-end gap-4">
+              <FormField label="Date" htmlFor="date" className="max-w-xs">
+                <Input
+                  id="date"
+                  type="date"
+                  value={date}
+                  max={TODAY}
+                  onChange={(e) => {
+                    const newDate = e.target.value;
+                    attemptAction(() => setDate(newDate));
+                  }}
+                />
+              </FormField>
+              <FormField label="Attendance Session" htmlFor="session" className="max-w-xs">
+                <Select
+                  id="session"
+                  value={session}
+                  onChange={(e) => {
+                    const newSession = e.target.value as AttendanceSession;
+                    attemptAction(() => setSession(newSession));
+                  }}
+                >
+                  {SESSIONS.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+            </div>
             {(className || subjectName) && (
               <div className="flex flex-wrap gap-1.5">
                 {className && <Badge tone="accent">{className}{sectionName ? ` · ${sectionName}` : ""}</Badge>}
@@ -313,7 +390,7 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
             </Button>
             {!isDirty && lastAction === "finalized" && (
               <span className="text-sm text-success">
-                Saved — {rows.length} student(s) recorded for {new Date(date).toLocaleDateString()}.
+                Saved — {rows.length} student(s) recorded for {new Date(date).toLocaleDateString()} ({SESSION_LABEL[session]}).
               </span>
             )}
             {!isDirty && lastAction === "draft" && (

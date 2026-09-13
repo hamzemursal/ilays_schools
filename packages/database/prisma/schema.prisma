@@ -682,9 +682,23 @@ model StaffAttendance {
 }
 
 // ---------------------------------------------------------------------------
-// Attendance — one record per enrollment per day. Authorization (a teacher
-// may only mark a section they hold a TeacherAssignment for) is enforced in
-// AttendanceService, not here; the schema just needs the enrollment link.
+// Attendance — one record per enrollment per day PER SESSION. Authorization
+// (a teacher may only mark a section they hold a TeacherAssignment for) is
+// enforced in AttendanceService, not here; the schema just needs the
+// enrollment link.
+//
+// Session is a label, never a clock time: this schema has no per-school
+// timetable/schedule model (checked before adding this), and nothing in the
+// app validates against a real clock — a school running 7am-12pm and one
+// running 1pm-5pm both just pick "Morning Session" or "Afternoon Session"
+// for whichever period they're marking. Adding literal start/end times would
+// mean inventing a scheduling system nothing here currently needs.
+//
+// Every pre-existing Attendance/AttendanceDraft row defaults to MORNING via
+// the migration's column default — this is what preserves every row's
+// original meaning ("the one attendance record for that day") as the first,
+// primary session, without rewriting or guessing per-row, and without ever
+// needing to treat "no session value" as a distinct third state.
 // ---------------------------------------------------------------------------
 
 enum AttendanceStatus {
@@ -694,12 +708,18 @@ enum AttendanceStatus {
   EXCUSED
 }
 
+enum AttendanceSession {
+  MORNING
+  AFTERNOON
+}
+
 model Attendance {
   id           String            @id @default(uuid())
   enrollmentId String
   enrollment   StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
 
-  date           DateTime         @db.Date
+  date           DateTime          @db.Date
+  session        AttendanceSession @default(MORNING)
   status         AttendanceStatus
   markedByUserId String
   note           String?
@@ -707,7 +727,7 @@ model Attendance {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([enrollmentId, date])
+  @@unique([enrollmentId, date, session])
   @@map("attendance_records")
 }
 
@@ -724,7 +744,8 @@ model AttendanceDraft {
   enrollmentId String
   enrollment   StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
 
-  date          DateTime         @db.Date
+  date          DateTime          @db.Date
+  session       AttendanceSession @default(MORNING)
   status        AttendanceStatus
   note          String?
   savedByUserId String
@@ -732,7 +753,7 @@ model AttendanceDraft {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([enrollmentId, date])
+  @@unique([enrollmentId, date, session])
   @@map("attendance_drafts")
 }
 

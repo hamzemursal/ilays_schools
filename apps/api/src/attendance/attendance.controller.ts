@@ -1,9 +1,18 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { AttendanceSession } from "@school-erp/database";
 import { AttendanceService } from "./attendance.service";
 import { MarkAttendanceDto } from "./dto/mark-attendance.dto";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { RequirePermissions } from "../auth/decorators/require-permissions.decorator";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
+
+function parseSession(value: string | undefined): AttendanceSession | undefined {
+  if (value === undefined) return undefined;
+  if (value !== AttendanceSession.MORNING && value !== AttendanceSession.AFTERNOON) {
+    throw new BadRequestException("session must be MORNING or AFTERNOON");
+  }
+  return value;
+}
 
 @Controller()
 export class AttendanceController {
@@ -16,9 +25,25 @@ export class AttendanceController {
     @Param("schoolId") schoolId: string,
     @Param("sectionId") sectionId: string,
     @Query("date") date?: string,
+    @Query("session") session?: string,
   ) {
     if (!date) throw new BadRequestException("date query param is required");
-    return this.attendance.getForSectionAndDate(user, schoolId, sectionId, date);
+    return this.attendance.getForSectionAndDate(user, schoolId, sectionId, date, parseSession(session));
+  }
+
+  // Powers the "Morning Session ✓ Recorded / Afternoon Session ○ Not
+  // Recorded" banner — independent of the get() endpoint above, which is
+  // scoped to one session at a time.
+  @RequirePermissions("attendance.view")
+  @Get("schools/:schoolId/sections/:sectionId/attendance/session-status")
+  sessionStatus(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("sectionId") sectionId: string,
+    @Query("date") date?: string,
+  ) {
+    if (!date) throw new BadRequestException("date query param is required");
+    return this.attendance.getSessionStatusForSectionAndDate(user, schoolId, sectionId, date);
   }
 
   @RequirePermissions("attendance.mark")

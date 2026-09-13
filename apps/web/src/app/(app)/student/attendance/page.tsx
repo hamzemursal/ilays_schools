@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type MyChildAcademicYear, type MyChildAttendance } from "@/lib/api";
+import { groupAttendanceByDate } from "@/lib/attendance";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -38,6 +39,25 @@ const STATUS_ICON: Record<string, LucideIcon> = {
   LATE: Clock,
   EXCUSED: ShieldCheck,
 };
+
+// A session with no record renders as a plain "Not Recorded" dash, never as
+// if it were marked Absent — that distinction is the whole reason Morning
+// and Afternoon are separate columns instead of one combined daily value.
+// Keeps the "marked by" detail (previously its own column) as a caption
+// under each session's own badge, since each session can have its own marker.
+function SessionCell({ session }: { session?: { status: string; markedByName?: string | null } }) {
+  if (!session) return <span className="text-sm text-foreground-muted">Not Recorded</span>;
+  const StatusIcon = STATUS_ICON[session.status];
+  return (
+    <div>
+      <Badge tone={STATUS_TONE[session.status]}>
+        <StatusIcon className="size-3" />
+        {session.status}
+      </Badge>
+      {session.markedByName && <p className="mt-1 text-xs text-foreground-muted">by {session.markedByName}</p>}
+    </div>
+  );
+}
 
 export default function StudentAttendancePage() {
   const { accessToken } = useAuth();
@@ -134,10 +154,13 @@ function YearAttendance({ accessToken, academicYearId }: { accessToken: string; 
 
   const rate = summary.percentage !== null ? rateLabel(summary.percentage) : null;
 
+  const days = groupAttendanceByDate(records);
+
   return (
     <>
       <Alert tone="info">
-        This is your overall daily attendance — one record per school day. It is not currently separated by subject.
+        This shows both of the school day&apos;s attendance sessions — Morning and Afternoon — separately. It is not
+        broken down by subject.
       </Alert>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -197,7 +220,7 @@ function YearAttendance({ accessToken, academicYearId }: { accessToken: string; 
       </Card>
 
       <Card padding="none">
-        <CardHeader title="Daily attendance" description={`${records.length} day(s) recorded this year.`} />
+        <CardHeader title="Daily attendance" description={`${days.length} day(s) recorded this year.`} />
         <div className="overflow-x-auto">
           <table className="w-full min-w-[680px] text-left text-sm">
             <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
@@ -205,17 +228,15 @@ function YearAttendance({ accessToken, academicYearId }: { accessToken: string; 
                 <th className="px-5 py-2.5">Date</th>
                 <th className="px-5 py-2.5">Day</th>
                 <th className="px-5 py-2.5">Class / Section</th>
-                <th className="px-5 py-2.5">Status</th>
-                <th className="px-5 py-2.5">Marked by</th>
-                <th className="px-5 py-2.5">Note</th>
+                <th className="px-5 py-2.5">Morning Session</th>
+                <th className="px-5 py-2.5">Afternoon Session</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {records.map((r) => {
-                const d = new Date(r.date);
-                const StatusIcon = STATUS_ICON[r.status];
+              {days.map((day) => {
+                const d = new Date(day.date);
                 return (
-                  <tr key={r.id} className="transition-colors hover:bg-surface-hover">
+                  <tr key={day.date} className="transition-colors hover:bg-surface-hover">
                     <td className="px-5 py-3 whitespace-nowrap text-foreground">
                       <span className="flex items-center gap-2">
                         <CalendarDays className="size-3.5 shrink-0 text-foreground-muted" />
@@ -226,16 +247,14 @@ function YearAttendance({ accessToken, academicYearId }: { accessToken: string; 
                       {d.toLocaleDateString(undefined, { weekday: "long" })}
                     </td>
                     <td className="px-5 py-3 whitespace-nowrap text-foreground-soft">
-                      {r.className} · {r.sectionName}
+                      {day.className} · {day.sectionName}
                     </td>
                     <td className="px-5 py-3">
-                      <Badge tone={STATUS_TONE[r.status]}>
-                        <StatusIcon className="size-3" />
-                        {r.status}
-                      </Badge>
+                      <SessionCell session={day.sessions.MORNING} />
                     </td>
-                    <td className="px-5 py-3 whitespace-nowrap text-foreground-soft">{r.markedByName ?? "—"}</td>
-                    <td className="px-5 py-3 text-foreground-muted">{r.note ?? "—"}</td>
+                    <td className="px-5 py-3">
+                      <SessionCell session={day.sessions.AFTERNOON} />
+                    </td>
                   </tr>
                 );
               })}

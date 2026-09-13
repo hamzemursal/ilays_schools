@@ -519,6 +519,7 @@ export interface MyChildSubject {
 export interface MyChildAttendanceRecord {
   id: string;
   date: string;
+  session: "MORNING" | "AFTERNOON";
   status: "PRESENT" | "ABSENT" | "LATE" | "EXCUSED";
   note: string | null;
   className: string;
@@ -699,6 +700,11 @@ export interface UpdateStudentInput {
 }
 
 export type AttendanceStatus = "PRESENT" | "ABSENT" | "LATE" | "EXCUSED";
+// A label, not a clock time — this app has no per-school schedule/timetable
+// model, so "Morning"/"Afternoon" work the same for a school running
+// 7am-12pm and one running 1pm-5pm; each just picks whichever session they're
+// marking. See schema.prisma's AttendanceSession comment for the full reasoning.
+export type AttendanceSession = "MORNING" | "AFTERNOON";
 
 export interface MyAssignment {
   id: string;
@@ -725,6 +731,13 @@ export interface AttendanceRow {
 export interface AttendanceStatusForDate {
   markedSectionIds: string[];
   draftSectionIds: string[];
+}
+
+// Whether EACH session has a real, finalized (submitted) attendance record
+// for the given section/date — false means "Not Recorded", never "Absent".
+export interface AttendanceSessionStatus {
+  MORNING: boolean;
+  AFTERNOON: boolean;
 }
 
 export type ExamType = "QUIZ" | "MIDTERM" | "FINAL" | "ASSIGNMENT" | "OTHER";
@@ -2353,18 +2366,22 @@ export const api = {
     }),
   listMyDocuments: (accessToken: string) => request<TeacherDocument[]>("/teachers/me/documents", { accessToken }),
 
-  getAttendance: (accessToken: string, schoolId: string, sectionId: string, date: string) =>
-    request<AttendanceRow[]>(`/schools/${schoolId}/sections/${sectionId}/attendance?date=${date}`, { accessToken }),
+  getAttendance: (accessToken: string, schoolId: string, sectionId: string, date: string, session: AttendanceSession) =>
+    request<AttendanceRow[]>(
+      `/schools/${schoolId}/sections/${sectionId}/attendance${qs({ date, session })}`,
+      { accessToken },
+    ),
   markAttendance: (
     accessToken: string,
     schoolId: string,
     sectionId: string,
     date: string,
+    session: AttendanceSession,
     entries: { enrollmentId: string; status: AttendanceStatus }[],
   ) =>
     request<AttendanceRow[]>(`/schools/${schoolId}/sections/${sectionId}/attendance`, {
       method: "POST",
-      body: { date, entries },
+      body: { date, session, entries },
       accessToken,
     }),
   saveAttendanceDraft: (
@@ -2372,13 +2389,19 @@ export const api = {
     schoolId: string,
     sectionId: string,
     date: string,
+    session: AttendanceSession,
     entries: { enrollmentId: string; status: AttendanceStatus }[],
   ) =>
     request<AttendanceRow[]>(`/schools/${schoolId}/sections/${sectionId}/attendance/draft`, {
       method: "POST",
-      body: { date, entries },
+      body: { date, session, entries },
       accessToken,
     }),
+  getAttendanceSessionStatus: (accessToken: string, schoolId: string, sectionId: string, date: string) =>
+    request<AttendanceSessionStatus>(
+      `/schools/${schoolId}/sections/${sectionId}/attendance/session-status${qs({ date })}`,
+      { accessToken },
+    ),
   getAttendanceHistory: (accessToken: string, schoolId: string, sectionId: string, from?: string, to?: string) =>
     request<AttendanceHistoryRow[]>(
       `/schools/${schoolId}/sections/${sectionId}/attendance/history${qs({ from, to })}`,

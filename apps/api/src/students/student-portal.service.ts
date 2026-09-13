@@ -132,17 +132,19 @@ export class StudentPortalService {
     });
   }
 
-  // This is the student's whole-day attendance — one PRESENT/ABSENT/LATE/
-  // EXCUSED mark per enrollment per day. There is no subject dimension in
+  // This is the student's attendance, one PRESENT/ABSENT/LATE/EXCUSED mark
+  // per enrollment per day PER SESSION. There is no subject dimension in
   // this schema (see Attendance in schema.prisma) and no timetable model,
   // so there is no real subject-level attendance to report here, ever.
+  // `session` is returned on every record so Morning and Afternoon can be
+  // shown separately for the same date instead of one combined value.
   async myAttendance(actor: AuthenticatedUser, academicYearId?: string) {
     const { student } = await this.getSelfOrThrow(actor);
 
     const records = await this.prisma.attendance.findMany({
       where: { enrollment: { studentId: student.id, ...(academicYearId ? { academicYearId } : {}) } },
       include: { enrollment: { include: { academicYear: true, class: true, section: true } } },
-      orderBy: { date: "desc" },
+      orderBy: [{ date: "desc" }, { session: "asc" }],
     });
 
     const total = records.length;
@@ -159,6 +161,7 @@ export class StudentPortalService {
       records: records.map((r) => ({
         id: r.id,
         date: r.date,
+        session: r.session,
         status: r.status,
         note: r.note,
         className: r.enrollment.class.name,

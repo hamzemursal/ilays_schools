@@ -41,6 +41,7 @@ const apiMock = vi.hoisted(() => ({
   getAttendance: vi.fn(),
   markAttendance: vi.fn(),
   saveAttendanceDraft: vi.fn(),
+  getAttendanceSessionStatus: vi.fn(),
 }));
 vi.mock("@/lib/api", () => ({ api: apiMock }));
 
@@ -104,6 +105,7 @@ beforeEach(() => {
   searchParamsHolder.current = new URLSearchParams();
   useAuthMock.mockReturnValue({ user: ADMIN_USER, accessToken: "token-1" });
   apiMock.getAttendance.mockResolvedValue([]);
+  apiMock.getAttendanceSessionStatus.mockResolvedValue({ MORNING: false, AFTERNOON: false });
 });
 
 describe("AttendancePage — loading/error/empty states", () => {
@@ -189,6 +191,7 @@ describe("AttendancePage — marking and saving", () => {
         "school-1",
         "section-1",
         expect.any(String),
+        "MORNING",
         [{ enrollmentId: "enr-1", status: "ABSENT" }],
       ),
     );
@@ -238,6 +241,7 @@ describe("AttendancePage — marking and saving", () => {
         "school-1",
         "section-1",
         expect.any(String),
+        "MORNING",
         expect.arrayContaining([
           { enrollmentId: "enr-1", status: "PRESENT" },
           { enrollmentId: "enr-2", status: "PRESENT" },
@@ -349,5 +353,113 @@ describe("AttendancePage — unsaved-changes protection", () => {
     const dirtyEvent = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(dirtyEvent);
     expect(dirtyEvent.defaultPrevented).toBe(true);
+  });
+});
+
+describe("AttendancePage — session selection", () => {
+  it("defaults to Morning Session and loads attendance for it", async () => {
+    renderPage();
+    await waitFor(() => expect(apiMock.getAttendance).toHaveBeenCalledWith("token-1", "school-1", "section-1", expect.any(String), "MORNING"));
+    expect(screen.getByRole("combobox", { name: "Attendance Session" })).toHaveValue("MORNING");
+  });
+
+  it("starts on Afternoon Session when the URL carries ?session=AFTERNOON", async () => {
+    searchParamsHolder.current = new URLSearchParams({ session: "AFTERNOON" });
+    renderPage();
+    await waitFor(() => expect(apiMock.getAttendance).toHaveBeenCalledWith("token-1", "school-1", "section-1", expect.any(String), "AFTERNOON"));
+  });
+
+  it("switching to Afternoon Session reloads attendance for that session", async () => {
+    const user = userEvent.setup();
+    apiMock.getAttendance.mockResolvedValue([row({ status: "PRESENT" })]);
+    renderPage();
+    await screen.findByText("Yusuf", { exact: false });
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Attendance Session" }), "AFTERNOON");
+
+    await waitFor(() =>
+      expect(apiMock.getAttendance).toHaveBeenCalledWith("token-1", "school-1", "section-1", expect.any(String), "AFTERNOON"),
+    );
+  });
+
+  it("includes the selected session in the save request", async () => {
+    const user = userEvent.setup();
+    apiMock.getAttendance.mockResolvedValue([row({ status: "PRESENT" })]);
+    apiMock.markAttendance.mockResolvedValue([row({ status: "PRESENT" })]);
+    renderPage();
+    await screen.findByText("Yusuf", { exact: false });
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Attendance Session" }), "AFTERNOON");
+    await user.click(screen.getByRole("button", { name: "Save attendance" }));
+
+    await waitFor(() =>
+      expect(apiMock.markAttendance).toHaveBeenCalledWith(
+        "token-1",
+        "school-1",
+        "section-1",
+        expect.any(String),
+        "AFTERNOON",
+        expect.any(Array),
+      ),
+    );
+  });
+
+  it("switching sessions while dirty goes through the same unsaved-changes dialog as changing date", async () => {
+    const user = userEvent.setup();
+    apiMock.getAttendance.mockResolvedValue([row({ status: "PRESENT" })]);
+    renderPage();
+    await screen.findByText("Yusuf", { exact: false });
+
+    await user.click(screen.getByRole("button", { name: "Absent" })); // makes it dirty
+    await user.selectOptions(screen.getByRole("combobox", { name: "Attendance Session" }), "AFTERNOON");
+
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+  });
+});
+
+describe("AttendancePage — Attendance Status banner (both sessions)", () => {
+  it("shows Morning Recorded and Afternoon Not Recorded", async () => {
+    apiMock.getAttendanceSessionStatus.mockResolvedValue({ MORNING: true, AFTERNOON: false });
+    renderPage();
+
+    // "Morning Session"/"Afternoon Session" also appear as <option> text in
+    // the session <select> below this banner — scope to the status Card
+    // (found via its own heading) to avoid that ambiguity.
+    const statusCard = (await screen.findByText("Attendance Status", { exact: false })).closest("div")!;
+    const morningRow = within(statusCard).getByText("Morning Session").closest("div")!;
+    const afternoonRow = within(statusCard).getByText("Afternoon Session").closest("div")!;
+    expect(within(morningRow).getByText("Recorded")).toBeInTheDocument();
+    expect(within(afternoonRow).getByText("Not Recorded")).toBeInTheDocument();
+  });
+
+  it("shows both sessions as Recorded once both are marked", async () => {
+    apiMock.getAttendanceSessionStatus.mockResolvedValue({ MORNING: true, AFTERNOON: true });
+    renderPage();
+
+    expect(await screen.findAllByText("Recorded")).toHaveLength(2);
+    expect(screen.queryByText("Not Recorded")).not.toBeInTheDocument();
+  });
+
+  it("never renders 'Absent' for an unrecorded session — Not Recorded is a distinct state", async () => {
+    apiMock.getAttendanceSessionStatus.mockResolvedValue({ MORNING: false, AFTERNOON: false });
+    renderPage();
+
+    expect(await screen.findAllByText("Not Recorded")).toHaveLength(2);
+    expect(screen.queryByText("Absent")).not.toBeInTheDocument();
+  });
+
+  it("refreshes the banner after a successful save", async () => {
+    const user = userEvent.setup();
+    apiMock.getAttendance.mockResolvedValue([row({ status: "PRESENT" })]);
+    apiMock.markAttendance.mockResolvedValue([row({ status: "PRESENT" })]);
+    apiMock.getAttendanceSessionStatus.mockResolvedValueOnce({ MORNING: false, AFTERNOON: false });
+    renderPage();
+    await screen.findByText("Yusuf", { exact: false });
+    expect(await screen.findAllByText("Not Recorded")).toHaveLength(2);
+
+    apiMock.getAttendanceSessionStatus.mockResolvedValue({ MORNING: true, AFTERNOON: false });
+    await user.click(screen.getByRole("button", { name: "Save attendance" }));
+
+    await waitFor(() => expect(apiMock.getAttendanceSessionStatus).toHaveBeenCalledTimes(2));
   });
 });

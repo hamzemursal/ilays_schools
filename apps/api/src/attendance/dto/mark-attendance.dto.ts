@@ -1,6 +1,6 @@
 import { Type } from "class-transformer";
 import { IsArray, IsDateString, IsEnum, IsOptional, IsString, IsUUID, ValidateNested } from "class-validator";
-import { AttendanceStatus } from "@school-erp/database";
+import { AttendanceSession, AttendanceStatus } from "@school-erp/database";
 
 class AttendanceEntryDto {
   @IsUUID()
@@ -17,6 +17,9 @@ class AttendanceEntryDto {
 export class MarkAttendanceDto {
   @IsDateString()
   date!: string;
+
+  @IsEnum(AttendanceSession)
+  session!: AttendanceSession;
 
   @IsArray()
   @ValidateNested({ each: true })

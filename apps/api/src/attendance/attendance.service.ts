@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { AttendanceSession } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import { StudentsService } from "../students/students.service";
@@ -7,6 +8,12 @@ import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import { DocumentsService } from "../documents/documents.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { MarkAttendanceDto } from "./dto/mark-attendance.dto";
+
+// Every pre-existing Attendance/AttendanceDraft row was backfilled to
+// MORNING by the migration's column default (see schema.prisma on
+// Attendance) — this is also the session a caller gets when it doesn't
+// specify one, so nothing that predates sessions ever needs to guess.
+const DEFAULT_SESSION = AttendanceSession.MORNING;
 
 @Injectable()
 export class AttendanceService {
@@ -76,7 +83,13 @@ export class AttendanceService {
     return section;
   }
 
-  async getForSectionAndDate(actor: AuthenticatedUser, schoolId: string, sectionId: string, date: string) {
+  async getForSectionAndDate(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    sectionId: string,
+    date: string,
+    session: AttendanceSession = DEFAULT_SESSION,
+  ) {
     await this.assertCanAccessSection(actor, schoolId, sectionId);
     await this.getSectionInSchoolOrThrow(schoolId, sectionId);
 
@@ -84,8 +97,8 @@ export class AttendanceService {
       where: { sectionId, status: "ACTIVE" },
       include: {
         student: true,
-        attendances: { where: { date: new Date(date) } },
-        attendanceDrafts: { where: { date: new Date(date) } },
+        attendances: { where: { date: new Date(date), session } },
+        attendanceDrafts: { where: { date: new Date(date), session } },
       },
       orderBy: { rollNumber: "asc" },
     });
@@ -118,6 +131,30 @@ export class AttendanceService {
     );
   }
 
+  // Powers the "Attendance Status" banner at the top of a section's
+  // attendance page — whether EACH of today's two sessions has been
+  // finalized yet, independent of whichever session the teacher currently
+  // has selected in the dropdown below. "Recorded" means at least one real
+  // (submitted, not draft) Attendance row exists for that session on this
+  // date — never inferred from absence, so an un-recorded session is never
+  // shown or treated as if every student were marked Absent.
+  async getSessionStatusForSectionAndDate(actor: AuthenticatedUser, schoolId: string, sectionId: string, date: string) {
+    await this.assertCanAccessSection(actor, schoolId, sectionId);
+    await this.getSectionInSchoolOrThrow(schoolId, sectionId);
+
+    const recorded = await this.prisma.attendance.findMany({
+      where: { date: new Date(date), enrollment: { sectionId } },
+      select: { session: true },
+      distinct: ["session"],
+    });
+    const recordedSessions = new Set(recorded.map((r) => r.session));
+
+    return {
+      [AttendanceSession.MORNING]: recordedSessions.has(AttendanceSession.MORNING),
+      [AttendanceSession.AFTERNOON]: recordedSessions.has(AttendanceSession.AFTERNOON),
+    };
+  }
+
   // "Save as Draft" — used when a teacher wants to leave partway through
   // marking without losing what they've entered so far, but isn't ready to
   // finalize it as the section's real attendance for the day. Deliberately
@@ -141,15 +178,17 @@ export class AttendanceService {
     }
 
     const date = new Date(dto.date);
+    const session = dto.session;
 
     await this.prisma.$transaction(
       dto.entries.map((e) =>
         this.prisma.attendanceDraft.upsert({
-          where: { enrollmentId_date: { enrollmentId: e.enrollmentId, date } },
+          where: { enrollmentId_date_session: { enrollmentId: e.enrollmentId, date, session } },
           update: { status: e.status, note: e.note, savedByUserId: actor.id },
           create: {
             enrollmentId: e.enrollmentId,
             date,
+            session,
             status: e.status,
             note: e.note,
             savedByUserId: actor.id,
@@ -166,10 +205,10 @@ export class AttendanceService {
       module: AuditModuleName.ATTENDANCE,
       resourceType: "Section",
       resourceId: sectionId,
-      after: { date: dto.date, studentCount: dto.entries.length },
+      after: { date: dto.date, session, studentCount: dto.entries.length },
     });
 
-    return this.getForSectionAndDate(actor, schoolId, sectionId, dto.date);
+    return this.getForSectionAndDate(actor, schoolId, sectionId, dto.date, session);
   }
 
   async mark(actor: AuthenticatedUser, schoolId: string, sectionId: string, dto: MarkAttendanceDto) {
@@ -189,15 +228,17 @@ export class AttendanceService {
     }
 
     const date = new Date(dto.date);
+    const session = dto.session;
 
     await this.prisma.$transaction([
       ...dto.entries.map((e) =>
         this.prisma.attendance.upsert({
-          where: { enrollmentId_date: { enrollmentId: e.enrollmentId, date } },
+          where: { enrollmentId_date_session: { enrollmentId: e.enrollmentId, date, session } },
           update: { status: e.status, note: e.note, markedByUserId: actor.id },
           create: {
             enrollmentId: e.enrollmentId,
             date,
+            session,
             status: e.status,
             note: e.note,
             markedByUserId: actor.id,
@@ -206,8 +247,10 @@ export class AttendanceService {
       ),
       // Finalizing supersedes whatever draft got it here — leaving the draft
       // behind would make the section look like it still had unfinished
-      // attendance for a day that's now actually submitted.
-      this.prisma.attendanceDraft.deleteMany({ where: { enrollmentId: { in: enrollmentIds }, date } }),
+      // attendance for a day+session that's now actually submitted. Scoped
+      // to this session only — the other session's draft (if any) is a
+      // separate, still-unfinished thing and must survive this.
+      this.prisma.attendanceDraft.deleteMany({ where: { enrollmentId: { in: enrollmentIds }, date, session } }),
     ]);
 
     // Not inside the transaction above — that one uses $transaction's array
@@ -223,10 +266,10 @@ export class AttendanceService {
       module: AuditModuleName.ATTENDANCE,
       resourceType: "Section",
       resourceId: sectionId,
-      after: { date: dto.date, studentCount: dto.entries.length },
+      after: { date: dto.date, session, studentCount: dto.entries.length },
     });
 
-    return this.getForSectionAndDate(actor, schoolId, sectionId, dto.date);
+    return this.getForSectionAndDate(actor, schoolId, sectionId, dto.date, session);
   }
 
   async historyForSection(actor: AuthenticatedUser, schoolId: string, sectionId: string, from?: string, to?: string) {

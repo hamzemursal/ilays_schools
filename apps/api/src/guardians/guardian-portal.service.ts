@@ -155,18 +155,21 @@ export class GuardianPortalService {
     });
   }
 
-  // This is the student's whole-day attendance — one PRESENT/ABSENT/LATE/
-  // EXCUSED mark per enrollment per day (see Attendance in schema.prisma),
-  // never per subject. There's no timetable/period model in this system, so
-  // there is no real per-subject attendance to report; the portal UI must
-  // present this as a daily total, not silently imply it's subject-specific.
+  // This is the student's attendance, one PRESENT/ABSENT/LATE/EXCUSED mark
+  // per enrollment per day PER SESSION (see Attendance in schema.prisma) —
+  // never per subject, since there's no timetable/period model in this
+  // system. `session` is returned on every record precisely so the portal
+  // UI can show Morning and Afternoon separately for the same date rather
+  // than collapsing them into one misleading daily value; the summary
+  // counts below are per-session (each recorded session is one countable
+  // unit), consistent with that.
   async myChildAttendance(actor: AuthenticatedUser, studentId: string, academicYearId?: string) {
     await this.guardians.assertGuardianCanAccessStudent(actor, studentId);
 
     const records = await this.prisma.attendance.findMany({
       where: { enrollment: { studentId, ...(academicYearId ? { academicYearId } : {}) } },
       include: { enrollment: { include: { academicYear: true, class: true, section: true } } },
-      orderBy: { date: "desc" },
+      orderBy: [{ date: "desc" }, { session: "asc" }],
     });
 
     const total = records.length;
@@ -181,6 +184,7 @@ export class GuardianPortalService {
       records: records.map((r) => ({
         id: r.id,
         date: r.date,
+        session: r.session,
         status: r.status,
         note: r.note,
         className: r.enrollment.class.name,

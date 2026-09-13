@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type MyChildAcademicYear, type MyChildAttendance, type MyChildSubject } from "@/lib/api";
+import { groupAttendanceByDate } from "@/lib/attendance";
 import { useSelectedChild } from "@/features/parent-portal/SelectedChildContext";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -30,6 +31,15 @@ const STATUS_TONE: Record<string, "success" | "danger" | "warning" | "neutral"> 
   LATE: "warning",
   EXCUSED: "neutral",
 };
+
+// One cell of the Morning/Afternoon columns below — a session with no
+// record renders as a plain "Not Recorded" dash, never as if it were marked
+// Absent. That distinction is the whole reason these two are separate
+// columns instead of one combined daily value.
+function SessionCell({ session }: { session?: { status: string } }) {
+  if (!session) return <span className="text-sm text-foreground-muted">Not Recorded</span>;
+  return <Badge tone={STATUS_TONE[session.status]}>{session.status}</Badge>;
+}
 
 export default function ParentAttendancePage() {
   const { accessToken } = useAuth();
@@ -162,10 +172,13 @@ function YearAttendance({
     );
   }
 
+  const days = groupAttendanceByDate(records);
+
   return (
     <>
       <Alert tone="info">
-        This is the student&apos;s overall daily attendance — one record per school day, not broken down by subject.
+        This shows both of the school day&apos;s attendance sessions — Morning and Afternoon — separately. It is not
+        broken down by subject.
       </Alert>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -204,23 +217,23 @@ function YearAttendance({
       </Card>
 
       <Card padding="none">
-        <CardHeader title="Daily attendance" description={`${records.length} day(s) recorded this year.`} />
+        <CardHeader title="Daily attendance" description={`${days.length} day(s) recorded this year.`} />
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-left text-sm">
+          <table className="w-full min-w-[640px] text-left text-sm">
             <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
               <tr>
                 <th className="px-5 py-2.5">Date</th>
                 <th className="px-5 py-2.5">Day</th>
                 <th className="px-5 py-2.5">Class / Section</th>
-                <th className="px-5 py-2.5">Status</th>
-                <th className="px-5 py-2.5">Note</th>
+                <th className="px-5 py-2.5">Morning Session</th>
+                <th className="px-5 py-2.5">Afternoon Session</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {records.map((r) => {
-                const d = new Date(r.date);
+              {days.map((day) => {
+                const d = new Date(day.date);
                 return (
-                  <tr key={r.id}>
+                  <tr key={day.date}>
                     <td className="px-5 py-3 whitespace-nowrap text-foreground">
                       {d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
                     </td>
@@ -228,12 +241,14 @@ function YearAttendance({
                       {d.toLocaleDateString(undefined, { weekday: "long" })}
                     </td>
                     <td className="px-5 py-3 whitespace-nowrap text-foreground-soft">
-                      {r.className} · {r.sectionName}
+                      {day.className} · {day.sectionName}
                     </td>
                     <td className="px-5 py-3">
-                      <Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge>
+                      <SessionCell session={day.sessions.MORNING} />
                     </td>
-                    <td className="px-5 py-3 text-foreground-muted">{r.note ?? "—"}</td>
+                    <td className="px-5 py-3">
+                      <SessionCell session={day.sessions.AFTERNOON} />
+                    </td>
                   </tr>
                 );
               })}

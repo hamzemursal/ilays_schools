@@ -26,7 +26,7 @@ import { StudentListSummaryCards } from "@/features/students/list/StudentListSum
 import { ChooseColumnsPanel } from "@/features/students/list/ChooseColumnsPanel";
 import { ExportMenu } from "@/features/students/list/ExportMenu";
 import { loadColumnPrefs, saveColumnPrefs } from "@/features/students/list/columns";
-import { Archive, ArrowLeftRight, Columns3, Upload, UserPlus } from "lucide-react";
+import { Archive, ArrowLeftRight, Upload, UserPlus } from "lucide-react";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
@@ -46,7 +46,6 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
   const [bulkArchiving, setBulkArchiving] = useState(false);
-  const [columnsOpen, setColumnsOpen] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -213,7 +212,6 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
   function onChooseColumnsApply(columns: string[]) {
     setVisibleColumns(columns);
     saveColumnPrefs(columns);
-    setColumnsOpen(false);
   }
 
   async function doExport(kind: "current" | "all" | "selected") {
@@ -316,9 +314,7 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
               <StudentListSummaryCards summary={summary} loading={!summary && !error} />
 
               <div className="flex justify-end print:hidden">
-                <Button variant="outline" size="sm" icon={<Columns3 className="size-4" />} onClick={() => setColumnsOpen(true)}>
-                  Choose Columns
-                </Button>
+                <ChooseColumnsPanel visibleColumns={visibleColumns} onApply={onChooseColumnsApply} />
               </div>
 
               {canSelect && (
@@ -418,8 +414,6 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
           )
         )}
       </div>
-
-      <ChooseColumnsPanel open={columnsOpen} visibleColumns={visibleColumns} onApply={onChooseColumnsApply} onClose={() => setColumnsOpen(false)} />
 
       <ConfirmDialog
         open={showBulkConfirm}

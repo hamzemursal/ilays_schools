@@ -1,6 +1,7 @@
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { ExportsService } from "./exports.service";
 import { StudentsService } from "../students/students.service";
+import { StudentDirectoryService } from "../students/student-directory.service";
 import { TeachersService } from "../teachers/teachers.service";
 import { InvoicesService } from "../finance/invoices.service";
 
@@ -15,14 +16,16 @@ const ACTOR: AuthenticatedUser = {
 
 function createService() {
   const students = { listForSchool: jest.fn() };
+  const directory = { searchAll: jest.fn() };
   const teachers = { listForSchool: jest.fn() };
   const invoices = { listForSchool: jest.fn() };
   const service = new ExportsService(
     students as unknown as StudentsService,
+    directory as unknown as StudentDirectoryService,
     teachers as unknown as TeachersService,
     invoices as unknown as InvoicesService,
   );
-  return { service, students, teachers, invoices };
+  return { service, students, directory, teachers, invoices };
 }
 
 describe("ExportsService.exportStudents", () => {
@@ -111,5 +114,104 @@ describe("ExportsService.exportInvoices", () => {
     const csv = await service.exportInvoices(ACTOR, "school-1");
 
     expect(csv).toContain('"Tuition, Term 1"');
+  });
+});
+
+describe("ExportsService.exportStudentDirectory — Advanced Student List export", () => {
+  function row(overrides: Record<string, unknown> = {}) {
+    return {
+      enrollmentId: "enr-1",
+      firstName: "Hodan",
+      lastName: "Ali",
+      studentNumber: "STU-2027-00001",
+      rollNumber: 3,
+      className: "Class 1",
+      sectionName: "A",
+      sex: "FEMALE",
+      status: "ACTIVE",
+      dateOfBirth: new Date("2015-05-01"),
+      admissionDate: new Date("2027-01-10"),
+      attendanceToday: { MORNING: "PRESENT", AFTERNOON: null },
+      finance: { totalCharged: 100, totalPaid: 40, balance: 60, feeStatus: "PARTIALLY_PAID", lastPaymentDate: new Date("2027-02-01") },
+      guardian: { name: "Amina Ali", relationship: "MOTHER", phone: "0611111111", email: "amina@example.com", address: "Hargeisa" },
+      ...overrides,
+    };
+  }
+
+  it("passes every filter straight through to StudentDirectoryService.searchAll", async () => {
+    const { service, directory } = createService();
+    directory.searchAll.mockResolvedValue([]);
+    const filters = { academicYearId: "year-1", classId: "class-1", feeStatus: "OVERDUE" as const };
+
+    await service.exportStudentDirectory(ACTOR, "school-1", filters, undefined, undefined);
+
+    expect(directory.searchAll).toHaveBeenCalledWith(ACTOR, "school-1", filters);
+  });
+
+  it("uses the default column set when none is specified", async () => {
+    const { service, directory } = createService();
+    directory.searchAll.mockResolvedValue([row()]);
+
+    const csv = await service.exportStudentDirectory(ACTOR, "school-1", { academicYearId: "year-1" }, undefined, undefined);
+
+    expect(csv.split("\r\n")[0]).toBe(
+      "Student Name,Student ID,Roll Number,Class,Section,Attendance Today,Fee Status,Parent Name,Parent Contact",
+    );
+  });
+
+  it("exports exactly the requested columns, in the requested order, and ignores unknown ids", async () => {
+    const { service, directory } = createService();
+    directory.searchAll.mockResolvedValue([row()]);
+
+    const csv = await service.exportStudentDirectory(
+      ACTOR,
+      "school-1",
+      { academicYearId: "year-1" },
+      ["totalFees", "amountDue", "notAnActualColumn"],
+      undefined,
+    );
+
+    expect(csv.split("\r\n")[0]).toBe("Total Fees,Amount Due");
+    expect(csv.split("\r\n")[1]).toBe("100.00,60.00");
+  });
+
+  it("renders 'AM: ... PM: ...' for attendance, and a real Not Recorded — never Absent — for an unmarked session", async () => {
+    const { service, directory } = createService();
+    directory.searchAll.mockResolvedValue([row({ attendanceToday: { MORNING: "PRESENT", AFTERNOON: null } })]);
+
+    const csv = await service.exportStudentDirectory(ACTOR, "school-1", { academicYearId: "year-1" }, ["attendanceToday"], undefined);
+
+    expect(csv).toContain("AM: PRESENT, PM: Not Recorded");
+    expect(csv).not.toContain("Absent");
+  });
+
+  it("filters to only the given enrollment ids for 'Export Selected Students'", async () => {
+    const { service, directory } = createService();
+    directory.searchAll.mockResolvedValue([row({ enrollmentId: "enr-1" }), row({ enrollmentId: "enr-2", firstName: "Yusuf" })]);
+
+    const csv = await service.exportStudentDirectory(
+      ACTOR,
+      "school-1",
+      { academicYearId: "year-1" },
+      ["name"],
+      ["enr-2"],
+    );
+
+    expect(csv).toBe("Student Name\r\nYusuf Ali\r\n");
+  });
+
+  it("leaves fee/attendance cells blank rather than fabricated when the backend omitted them (no permission)", async () => {
+    const { service, directory } = createService();
+    directory.searchAll.mockResolvedValue([row({ attendanceToday: null, finance: null })]);
+
+    const csv = await service.exportStudentDirectory(
+      ACTOR,
+      "school-1",
+      { academicYearId: "year-1" },
+      ["attendanceToday", "feeStatus", "totalFees"],
+      undefined,
+    );
+
+    expect(csv.split("\r\n")[1]).toBe(",,");
   });
 });

@@ -1,103 +1,54 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import type { StudentListItem } from "@/lib/api";
+import type { StudentDirectorySummary } from "@/lib/api";
 import { StudentListSummaryCards } from "./StudentListSummaryCards";
 
-function student(overrides: Partial<StudentListItem> = {}): StudentListItem {
-  return {
-    enrollmentId: "enr-1",
-    studentId: "stu-1",
-    firstName: "Hodan",
-    lastName: "Ali",
-    studentNumber: "STU-2027-00001",
-    rollNumber: 1,
-    className: "Class 1",
-    sectionName: "A",
-    classId: "class-1",
-    sectionId: "section-1",
-    academicYearId: "year-1",
-    sex: "FEMALE",
-    status: "ACTIVE",
-    guardianName: null,
-    guardianPhone: null,
-    ...overrides,
-  };
+function summary(overrides: Partial<StudentDirectorySummary> = {}): StudentDirectorySummary {
+  return { total: 10, active: 8, presentToday: 6, outstandingBalances: 3, ...overrides };
 }
 
-describe("StudentListSummaryCards — counts", () => {
-  it("shows zero for every card with an empty student list", () => {
-    render(<StudentListSummaryCards students={[]} attendanceRates={null} />);
-    expect(screen.getByText("Total Students").previousSibling).toHaveTextContent("0");
-    expect(screen.getByText("Active").previousSibling).toHaveTextContent("0");
-    expect(screen.getByText("Male").previousSibling).toHaveTextContent("0");
-    expect(screen.getByText("Female").previousSibling).toHaveTextContent("0");
+describe("StudentListSummaryCards — loading", () => {
+  it("shows a skeleton when loading", () => {
+    const { container } = render(<StudentListSummaryCards summary={null} loading />);
+    expect(container.querySelector(".animate-pulse")).not.toBeNull();
   });
 
-  it("counts total, active, male, and female independently of one another", () => {
-    render(
-      <StudentListSummaryCards
-        students={[
-          student({ enrollmentId: "e1", sex: "FEMALE", status: "ACTIVE" }),
-          student({ enrollmentId: "e2", sex: "MALE", status: "ACTIVE" }),
-          student({ enrollmentId: "e3", sex: "MALE", status: "WITHDRAWN" }),
-          student({ enrollmentId: "e4", sex: "FEMALE", status: "GRADUATED" }),
-        ]}
-        attendanceRates={null}
-      />,
-    );
-    expect(screen.getByText("Total Students").previousSibling).toHaveTextContent("4");
-    expect(screen.getByText("Active").previousSibling).toHaveTextContent("2");
-    expect(screen.getByText("Male").previousSibling).toHaveTextContent("2");
-    expect(screen.getByText("Female").previousSibling).toHaveTextContent("2");
+  it("shows a skeleton when summary is null even without an explicit loading flag", () => {
+    const { container } = render(<StudentListSummaryCards summary={null} />);
+    expect(container.querySelector(".animate-pulse")).not.toBeNull();
   });
 });
 
-describe("StudentListSummaryCards — average attendance", () => {
-  it("omits the Average Attendance card entirely when attendanceRates is null", () => {
-    render(<StudentListSummaryCards students={[student()]} attendanceRates={null} />);
-    expect(screen.queryByText("Average Attendance")).not.toBeInTheDocument();
+describe("StudentListSummaryCards — counts", () => {
+  it("always shows Total Students and Active Students", () => {
+    render(<StudentListSummaryCards summary={summary()} />);
+    expect(screen.getByText("Total Students").previousSibling).toHaveTextContent("10");
+    expect(screen.getByText("Active Students").previousSibling).toHaveTextContent("8");
   });
 
-  it("shows a dash when attendanceRates is provided but empty", () => {
-    render(<StudentListSummaryCards students={[student()]} attendanceRates={new Map()} />);
-    expect(screen.getByText("Average Attendance").previousSibling).toHaveTextContent("—");
+  it("shows Present Today when the backend included it", () => {
+    render(<StudentListSummaryCards summary={summary({ presentToday: 6 })} />);
+    expect(screen.getByText("Present Today").previousSibling).toHaveTextContent("6");
   });
 
-  it("averages only the students with a real (non-null) rate", () => {
-    render(
-      <StudentListSummaryCards
-        students={[
-          student({ enrollmentId: "e1" }),
-          student({ enrollmentId: "e2" }),
-          student({ enrollmentId: "e3" }),
-        ]}
-        attendanceRates={
-          new Map([
-            ["e1", 90],
-            ["e2", 80],
-            ["e3", null],
-          ])
-        }
-      />,
-    );
-    // (90 + 80) / 2 = 85 — the null-rate student is excluded, not treated as 0.
-    expect(screen.getByText("Average Attendance").previousSibling).toHaveTextContent("85%");
+  it("omits Present Today when the actor lacks attendance.view (backend sent null)", () => {
+    render(<StudentListSummaryCards summary={summary({ presentToday: null })} />);
+    expect(screen.queryByText("Present Today")).not.toBeInTheDocument();
   });
 
-  it("rounds the average to one decimal place", () => {
-    render(
-      <StudentListSummaryCards
-        students={[student({ enrollmentId: "e1" }), student({ enrollmentId: "e2" }), student({ enrollmentId: "e3" })]}
-        attendanceRates={
-          new Map([
-            ["e1", 90],
-            ["e2", 81],
-            ["e3", 70],
-          ])
-        }
-      />,
-    );
-    // (90 + 81 + 70) / 3 = 80.333... -> rounds to 80.3
-    expect(screen.getByText("Average Attendance").previousSibling).toHaveTextContent("80.3%");
+  it("shows Outstanding Payments when the backend included it", () => {
+    render(<StudentListSummaryCards summary={summary({ outstandingBalances: 3 })} />);
+    expect(screen.getByText("Outstanding Payments").previousSibling).toHaveTextContent("3");
+  });
+
+  it("omits Outstanding Payments when the actor lacks finance.ledger.view (backend sent null)", () => {
+    render(<StudentListSummaryCards summary={summary({ outstandingBalances: null })} />);
+    expect(screen.queryByText("Outstanding Payments")).not.toBeInTheDocument();
+  });
+
+  it("shows a zeroed summary correctly (not as a loading/empty state)", () => {
+    render(<StudentListSummaryCards summary={summary({ total: 0, active: 0, presentToday: 0, outstandingBalances: 0 })} />);
+    expect(screen.getByText("Total Students").previousSibling).toHaveTextContent("0");
+    expect(screen.getByText("Present Today").previousSibling).toHaveTextContent("0");
   });
 });

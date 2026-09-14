@@ -1,17 +1,91 @@
 import { Injectable } from "@nestjs/common";
 import { StudentsService } from "../students/students.service";
+import { StudentDirectoryService, type StudentDirectoryFilters } from "../students/student-directory.service";
 import { TeachersService } from "../teachers/teachers.service";
 import { InvoicesService } from "../finance/invoices.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
-import { toCsv } from "./csv.util";
+import { toCsv, type CsvColumn } from "./csv.util";
+
+type DirectoryRow = Awaited<ReturnType<StudentDirectoryService["searchAll"]>>[number];
+
+function money(n: number | undefined): string {
+  return n === undefined ? "" : n.toFixed(2);
+}
+
+// One column definition per id the frontend's Choose Columns panel can
+// offer — kept as its own registry (rather than reusing exportStudents'
+// fixed list below) since the Advanced Student List's export is
+// column-selectable and filter-aware, while the plain students export
+// isn't. "photo" and "parentProfile" are UI-only concepts (an image, a
+// link) with no meaningful CSV cell, so they're simply absent here.
+const DIRECTORY_COLUMNS: Record<string, CsvColumn<DirectoryRow>> = {
+  name: { header: "Student Name", value: (r) => `${r.firstName} ${r.lastName}` },
+  studentId: { header: "Student ID", value: (r) => r.studentNumber },
+  rollNumber: { header: "Roll Number", value: (r) => r.rollNumber },
+  gender: { header: "Gender", value: (r) => r.sex },
+  dateOfBirth: { header: "Date of Birth", value: (r) => new Date(r.dateOfBirth).toISOString().slice(0, 10) },
+  admissionDate: { header: "Admission Date", value: (r) => new Date(r.admissionDate).toISOString().slice(0, 10) },
+  status: { header: "Status", value: (r) => r.status },
+  class: { header: "Class", value: (r) => r.className },
+  section: { header: "Section", value: (r) => r.sectionName },
+  attendanceToday: {
+    header: "Attendance Today",
+    value: (r) =>
+      r.attendanceToday
+        ? `AM: ${r.attendanceToday.MORNING ?? "Not Recorded"}, PM: ${r.attendanceToday.AFTERNOON ?? "Not Recorded"}`
+        : "",
+  },
+  feeStatus: { header: "Fee Status", value: (r) => r.finance?.feeStatus ?? "" },
+  totalFees: { header: "Total Fees", value: (r) => money(r.finance?.totalCharged) },
+  amountPaid: { header: "Amount Paid", value: (r) => money(r.finance?.totalPaid) },
+  amountDue: { header: "Amount Due", value: (r) => money(r.finance?.balance) },
+  lastPayment: {
+    header: "Last Payment",
+    value: (r) => (r.finance?.lastPaymentDate ? new Date(r.finance.lastPaymentDate).toISOString().slice(0, 10) : ""),
+  },
+  parentName: { header: "Parent Name", value: (r) => r.guardian?.name ?? "" },
+  relationship: { header: "Relationship", value: (r) => r.guardian?.relationship ?? "" },
+  parentContact: { header: "Parent Contact", value: (r) => r.guardian?.phone ?? "" },
+  parentEmail: { header: "Parent Email", value: (r) => r.guardian?.email ?? "" },
+  parentAddress: { header: "Parent Address", value: (r) => r.guardian?.address ?? "" },
+};
+const DEFAULT_DIRECTORY_COLUMNS = ["name", "studentId", "rollNumber", "class", "section", "attendanceToday", "feeStatus", "parentName", "parentContact"];
 
 @Injectable()
 export class ExportsService {
   constructor(
     private readonly students: StudentsService,
+    private readonly directory: StudentDirectoryService,
     private readonly teachers: TeachersService,
     private readonly invoices: InvoicesService,
   ) {}
+
+  // The Advanced Student List's export — respects every active filter (same
+  // StudentDirectoryFilters the list itself uses) and, when given, exactly
+  // the admin's currently-visible columns. Unknown column ids are ignored
+  // rather than erroring, so a frontend/backend version skew never breaks
+  // an export outright.
+  async exportStudentDirectory(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    filters: StudentDirectoryFilters,
+    columns: string[] | undefined,
+    onlyIds: string[] | undefined,
+  ): Promise<string> {
+    let rows = await this.directory.searchAll(actor, schoolId, filters);
+    if (onlyIds && onlyIds.length > 0) {
+      const wanted = new Set(onlyIds);
+      rows = rows.filter((r) => wanted.has(r.enrollmentId));
+    }
+
+    const columnIds = (columns && columns.length > 0 ? columns : DEFAULT_DIRECTORY_COLUMNS).filter(
+      (id) => id in DIRECTORY_COLUMNS,
+    );
+    return toCsv(
+      rows,
+      columnIds.map((id) => DIRECTORY_COLUMNS[id]),
+    );
+  }
 
   async exportStudents(actor: AuthenticatedUser, schoolId: string): Promise<string> {
     const rows = await this.students.listForSchool(actor, schoolId);

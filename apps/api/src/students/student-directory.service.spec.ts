@@ -206,6 +206,54 @@ describe("StudentDirectoryService — derived filters", () => {
     expect(result.total).toBe(1);
   });
 
+  it("computes summary counts over the WHOLE filtered set, not just one page", async () => {
+    const { service, prisma, attendance, ledger } = makeService();
+    prisma.studentEnrollment.findMany
+      .mockResolvedValueOnce([{ id: "enr-1" }, { id: "enr-2" }, { id: "enr-3" }]) // candidates
+      .mockResolvedValueOnce([
+        { id: "enr-1", student: { currentStatus: "ACTIVE" } },
+        { id: "enr-2", student: { currentStatus: "ACTIVE" } },
+        { id: "enr-3", student: { currentStatus: "WITHDRAWN" } },
+      ]);
+    attendance.getTodayStatusForEnrollments.mockResolvedValue(
+      new Map([
+        ["enr-1", { MORNING: "PRESENT", AFTERNOON: null }],
+        ["enr-2", { MORNING: "ABSENT", AFTERNOON: null }],
+        ["enr-3", { MORNING: null, AFTERNOON: null }],
+      ]),
+    );
+    ledger.getSummaryForEnrollments.mockResolvedValue(
+      new Map([
+        ["enr-1", { totalCharged: 100, totalPaid: 100, balance: 0, feeStatus: "PAID", lastPaymentDate: null }],
+        ["enr-2", { totalCharged: 100, totalPaid: 0, balance: 100, feeStatus: "PENDING", lastPaymentDate: null }],
+        ["enr-3", { totalCharged: 0, totalPaid: 0, balance: 0, feeStatus: "NO_CHARGE", lastPaymentDate: null }],
+      ]),
+    );
+
+    const result = await service.summary(ADMIN_WITH_ALL, "school-1", { academicYearId: "year-1" });
+
+    expect(result).toEqual({ total: 3, active: 2, presentToday: 1, outstandingBalances: 1 });
+  });
+
+  it("returns null attendance/finance summary fields for an actor without those permissions", async () => {
+    const { service, prisma } = makeService();
+    prisma.studentEnrollment.findMany
+      .mockResolvedValueOnce([{ id: "enr-1" }])
+      .mockResolvedValueOnce([{ id: "enr-1", student: { currentStatus: "ACTIVE" } }]);
+
+    const result = await service.summary(ADMIN_STUDENTS_ONLY, "school-1", { academicYearId: "year-1" });
+    expect(result).toEqual({ total: 1, active: 1, presentToday: null, outstandingBalances: null });
+  });
+
+  it("returns a zeroed summary for an empty filtered set, without querying student status", async () => {
+    const { service, prisma } = makeService();
+    prisma.studentEnrollment.findMany.mockResolvedValueOnce([]);
+
+    const result = await service.summary(ADMIN_WITH_ALL, "school-1", { academicYearId: "year-1" });
+    expect(result).toEqual({ total: 0, active: 0, presentToday: 0, outstandingBalances: 0 });
+    expect(prisma.studentEnrollment.findMany).toHaveBeenCalledTimes(1);
+  });
+
   it("paginates the filtered id list, not the unfiltered candidate list", async () => {
     const { service, prisma } = makeService();
     const candidateIds = Array.from({ length: 30 }, (_, i) => ({ id: `enr-${i}` }));

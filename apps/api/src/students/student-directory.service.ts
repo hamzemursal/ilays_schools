@@ -203,6 +203,42 @@ export class StudentDirectoryService {
     });
   }
 
+  // Powers the Advanced Student List's summary cards — these must reflect
+  // the FULL current filtered set, not just the one page of rows the table
+  // shows, so this deliberately does its own bulk pass over every matching
+  // id rather than reusing search()'s paginated result.
+  async summary(actor: AuthenticatedUser, schoolId: string, filters: StudentDirectoryFilters) {
+    const ctx = await this.getFilteredOrderedIds(actor, schoolId, filters);
+    const total = ctx.orderedIds.length;
+
+    if (total === 0) {
+      return { total, active: 0, presentToday: ctx.canViewAttendance ? 0 : null, outstandingBalances: ctx.canViewFinance ? 0 : null };
+    }
+
+    const students = await this.prisma.studentEnrollment.findMany({
+      where: { id: { in: ctx.orderedIds } },
+      select: { id: true, student: { select: { currentStatus: true } } },
+    });
+    const active = students.filter((s) => s.student.currentStatus === "ACTIVE").length;
+
+    let presentToday: number | null = null;
+    if (ctx.canViewAttendance) {
+      const attendanceMap = ctx.attendanceMap ?? (await this.attendance.getTodayStatusForEnrollments(ctx.orderedIds, ctx.attendanceDate));
+      presentToday = ctx.orderedIds.filter((id) => {
+        const day = attendanceMap.get(id)!;
+        return day.MORNING === "PRESENT" || day.AFTERNOON === "PRESENT";
+      }).length;
+    }
+
+    let outstandingBalances: number | null = null;
+    if (ctx.canViewFinance) {
+      const financeMap = ctx.financeMap ?? (await this.ledger.getSummaryForEnrollments(ctx.orderedIds));
+      outstandingBalances = ctx.orderedIds.filter((id) => financeMap.get(id)!.balance > 0).length;
+    }
+
+    return { total, active, presentToday, outstandingBalances };
+  }
+
   async search(actor: AuthenticatedUser, schoolId: string, filters: StudentDirectoryFilters & { page?: number; pageSize?: number }) {
     const ctx = await this.getFilteredOrderedIds(actor, schoolId, filters);
     const total = ctx.orderedIds.length;

@@ -26,7 +26,7 @@ import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
-import { StudentsTable } from "@/features/students/tables/StudentsTable";
+import { ClassRosterTable } from "@/features/students/tables/ClassRosterTable";
 import { DECORATIVE_TONE_PARTS } from "@/components/ui/decorativeTones";
 import { classSlug as toClassSlug, slugify } from "@/lib/slug";
 import { ArrowLeftRight, GraduationCap, Pencil, Plus, Printer, Search, Trash2, Check, X } from "lucide-react";
@@ -229,7 +229,7 @@ function ClassDetailPageInner({
   // is exactly as safe as the section-by-section fetch it replaces — every
   // row here is still guaranteed to belong to this class, for this year —
   // while also giving the roster real attendance/status/guardian fields to
-  // power the same StudentsTable used on the school-wide Student List.
+  // power ClassRosterTable.
   useEffect(() => {
     if (!accessToken || !cls || !yearId) return;
     api.listStudents(accessToken, schoolId, { academicYearId: yearId, classId }).then(setClassStudents);
@@ -473,8 +473,8 @@ function ClassDetailPageInner({
   })();
 
   // Section/Status/Attendance narrow the roster before it reaches
-  // StudentsTable — name/ID/roll/parent search is StudentsTable's own
-  // built-in search, same as the school-wide Student List page.
+  // ClassRosterTable — name/ID/roll/parent search is that table's own
+  // built-in search.
   const filteredRoster = (classStudents ?? []).filter((s) => {
     if (rosterSectionId && s.sectionId !== rosterSectionId) return false;
     if (rosterStatus !== "ALL" && s.status !== rosterStatus) return false;
@@ -1060,7 +1060,7 @@ function ClassDetailPageInner({
                       <EmptyState title="No students match these filters" description="Try clearing a filter above." />
                     </div>
                   ) : (
-                    <StudentsTable
+                    <ClassRosterTable
                       schoolId={schoolId}
                       accessToken={accessToken ?? ""}
                       students={filteredRoster}

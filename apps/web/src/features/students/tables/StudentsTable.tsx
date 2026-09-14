@@ -1,15 +1,16 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarCheck, Columns3, Eye, Pencil, Printer } from "lucide-react";
-import type { StudentListItem, StudentStatus } from "@/lib/api";
+import Link from "next/link";
+import { CalendarCheck, ExternalLink, Printer } from "lucide-react";
+import { Eye, Pencil } from "lucide-react";
+import type { StudentDirectoryItem, StudentStatus } from "@/lib/api";
 import { DataTable, type Column, type TableSelection } from "@/components/ui/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { ActionsMenu } from "@/components/ui/ActionsMenu";
-import { ShareListButton } from "@/components/ui/ShareListButton";
-import { formatStudentListForShare } from "@/lib/share";
 import { StudentAvatar } from "../components/StudentAvatar";
+import { AttendanceTodayCell } from "../list/AttendanceTodayCell";
+import { FeeStatusBadge } from "../list/FeeStatusBadge";
 
 const STATUS_TONE: Record<StudentStatus, "success" | "accent" | "neutral" | "warning"> = {
   ACTIVE: "success",
@@ -19,26 +20,16 @@ const STATUS_TONE: Record<StudentStatus, "success" | "accent" | "neutral" | "war
   WITHDRAWN: "neutral",
   ARCHIVED: "neutral",
 };
+const RELATIONSHIP_LABEL: Record<string, string> = { FATHER: "Father", MOTHER: "Mother", GUARDIAN: "Guardian", OTHER: "Other" };
 
-// Same 90% / 75% thresholds already established and shown to students on
-// their own Attendance page (see StatTile.rateLabel) — reused here with the
-// wording this list asked for, not a second business rule.
-function attendanceTone(rate: number): "success" | "warning" | "danger" {
-  if (rate >= 90) return "success";
-  if (rate >= 75) return "warning";
-  return "danger";
+function money(n: number | undefined): string {
+  return n === undefined ? "—" : `$${n.toFixed(2)}`;
 }
-function attendanceLabel(rate: number): string {
-  if (rate >= 90) return "Excellent";
-  if (rate >= 75) return "Good";
-  return "Needs Attention";
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 }
 
-const OPTIONAL_COLUMNS = [
-  { key: "guardian", label: "Parent" },
-  { key: "guardianPhone", label: "Contact" },
-] as const;
-type OptionalColumnKey = (typeof OPTIONAL_COLUMNS)[number]["key"];
+const DASH = <span className="text-foreground-muted">—</span>;
 
 export function StudentsTable({
   schoolId,
@@ -46,117 +37,208 @@ export function StudentsTable({
   students,
   loading,
   selection,
-  attendanceRates,
   canTransfer,
+  canViewGuardianProfile,
+  visibleColumns,
+  academicYearName,
 }: {
   schoolId: string;
   accessToken: string;
-  students: StudentListItem[] | null;
+  // One page's worth of rows from the Advanced Student List's directory
+  // search — this table itself never paginates or filters; that's all
+  // server-side now (see students/page.tsx).
+  students: StudentDirectoryItem[] | null;
   loading?: boolean;
   selection?: TableSelection;
-  attendanceRates: Map<string, number | null> | null;
   canTransfer: boolean;
+  // Gates the Parent Name link / "View Parent" action — mirrors the
+  // guardians.view permission the destination profile route itself
+  // enforces, so this never offers a link the backend would refuse anyway.
+  canViewGuardianProfile: boolean;
+  visibleColumns: Set<string>;
+  academicYearName: string;
 }) {
   const router = useRouter();
-  const [showColumnMenu, setShowColumnMenu] = useState(false);
-  const [visibleOptional, setVisibleOptional] = useState<Set<OptionalColumnKey>>(new Set());
+  const has = (id: string) => visibleColumns.has(id);
 
-  function toggleColumn(key: OptionalColumnKey) {
-    setVisibleOptional((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
+  const columns: Column<StudentDirectoryItem>[] = [];
 
-  const columns: Column<StudentListItem>[] = [
-    {
+  if (has("photo")) {
+    columns.push({
       key: "photo",
       header: "Photo",
       render: (s) => <StudentAvatar accessToken={accessToken} studentId={s.studentId} name={`${s.firstName} ${s.lastName}`} />,
-    },
-    { key: "studentNumber", header: "Student ID", sortValue: (s) => s.studentNumber, render: (s) => <span className="font-mono text-xs">{s.studentNumber}</span> },
-    {
+    });
+  }
+  if (has("name")) {
+    columns.push({
       key: "name",
-      header: "Full Name",
+      header: "Student",
       sortValue: (s) => `${s.lastName} ${s.firstName}`,
       render: (s) => (
         <span className="font-medium text-foreground">
           {s.firstName} {s.lastName}
         </span>
       ),
-    },
-    { key: "roll", header: "Roll", sortValue: (s) => s.rollNumber, render: (s) => s.rollNumber },
-    { key: "class", header: "Class", sortValue: (s) => s.className, render: (s) => s.className },
-    { key: "section", header: "Section", sortValue: (s) => s.sectionName, render: (s) => s.sectionName },
-    ...(attendanceRates
-      ? [
-          {
-            key: "attendance",
-            header: "Attendance",
-            sortValue: (s: StudentListItem) => attendanceRates.get(s.enrollmentId) ?? -1,
-            render: (s: StudentListItem) => {
-              const rate = attendanceRates.get(s.enrollmentId);
-              if (rate === undefined || rate === null) return <span className="text-foreground-muted">—</span>;
-              return (
-                <div className="flex items-center gap-2">
-                  <span className="tabular-nums font-medium text-foreground">{rate}%</span>
-                  <Badge tone={attendanceTone(rate)}>{attendanceLabel(rate)}</Badge>
-                </div>
-              );
-            },
-          } satisfies Column<StudentListItem>,
-        ]
-      : []),
-    {
+    });
+  }
+  if (has("studentId")) {
+    columns.push({
+      key: "studentId",
+      header: "Student ID",
+      sortValue: (s) => s.studentNumber,
+      render: (s) => <span className="font-mono text-xs text-foreground-soft">{s.studentNumber}</span>,
+    });
+  }
+  if (has("rollNumber")) {
+    columns.push({ key: "rollNumber", header: "Roll", sortValue: (s) => s.rollNumber, render: (s) => s.rollNumber });
+  }
+  if (has("gender")) {
+    columns.push({ key: "gender", header: "Gender", render: (s) => (s.sex === "MALE" ? "Male" : "Female") });
+  }
+  if (has("dateOfBirth")) {
+    columns.push({ key: "dateOfBirth", header: "Date of Birth", render: (s) => formatDate(s.dateOfBirth) });
+  }
+  if (has("admissionDate")) {
+    columns.push({ key: "admissionDate", header: "Admission Date", render: (s) => formatDate(s.admissionDate) });
+  }
+  if (has("status")) {
+    columns.push({
       key: "status",
       header: "Status",
       sortValue: (s) => s.status,
       render: (s) => <Badge tone={STATUS_TONE[s.status]}>{s.status.charAt(0) + s.status.slice(1).toLowerCase()}</Badge>,
-    },
-    ...(visibleOptional.has("guardian")
-      ? [{ key: "guardian", header: "Parent", render: (s: StudentListItem) => s.guardianName ?? <span className="text-foreground-muted">—</span> } satisfies Column<StudentListItem>]
-      : []),
-    ...(visibleOptional.has("guardianPhone")
-      ? [{ key: "guardianPhone", header: "Contact", render: (s: StudentListItem) => s.guardianPhone ?? <span className="text-foreground-muted">—</span> } satisfies Column<StudentListItem>]
-      : []),
-    {
-      key: "actions",
-      header: "Actions",
-      className: "text-right",
+    });
+  }
+  if (has("academicYear")) {
+    columns.push({ key: "academicYear", header: "Academic Year", render: () => academicYearName });
+  }
+  if (has("class") || has("section")) {
+    columns.push({
+      key: "classSection",
+      header: has("class") && has("section") ? "Class / Section" : has("class") ? "Class" : "Section",
+      sortValue: (s) => `${s.className} ${s.sectionName}`,
+      render: (s) => (has("class") && has("section") ? `${s.className} · ${s.sectionName}` : has("class") ? s.className : s.sectionName),
+    });
+  }
+  if (has("attendanceToday")) {
+    columns.push({
+      key: "attendanceToday",
+      header: "Attendance",
+      render: (s) => (s.attendanceToday ? <AttendanceTodayCell attendance={s.attendanceToday} /> : DASH),
+    });
+  }
+  if (has("feeStatus")) {
+    columns.push({
+      key: "feeStatus",
+      header: "Fee Status",
+      render: (s) => (s.finance ? <FeeStatusBadge status={s.finance.feeStatus} /> : DASH),
+    });
+  }
+  if (has("totalFees")) {
+    columns.push({ key: "totalFees", header: "Total Fees", className: "text-right tabular-nums", headerClassName: "text-right", render: (s) => money(s.finance?.totalCharged) });
+  }
+  if (has("amountPaid")) {
+    columns.push({ key: "amountPaid", header: "Amount Paid", className: "text-right tabular-nums", headerClassName: "text-right", render: (s) => money(s.finance?.totalPaid) });
+  }
+  if (has("amountDue")) {
+    columns.push({
+      key: "amountDue",
+      header: "Amount Due",
+      className: "text-right tabular-nums",
       headerClassName: "text-right",
-      render: (s) => (
-        <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            onClick={() => router.push(`/schools/${schoolId}/students/${s.studentId}`)}
-            aria-label="View"
-            className="flex size-8 items-center justify-center rounded-lg text-foreground-soft hover:bg-surface-hover hover:text-foreground"
+      render: (s) => (s.finance ? <span className={s.finance.balance > 0 ? "text-warning" : ""}>{money(s.finance.balance)}</span> : DASH),
+    });
+  }
+  if (has("lastPayment")) {
+    columns.push({ key: "lastPayment", header: "Last Payment", render: (s) => (s.finance?.lastPaymentDate ? formatDate(s.finance.lastPaymentDate) : DASH) });
+  }
+  if (has("parentName")) {
+    columns.push({
+      key: "parentName",
+      header: "Parent / Guardian",
+      render: (s) =>
+        !s.guardian ? (
+          DASH
+        ) : canViewGuardianProfile ? (
+          <Link
+            href={`/schools/${schoolId}/parents/${s.guardian.id}`}
+            onClick={(e) => e.stopPropagation()}
+            className="font-medium text-accent hover:underline"
           >
-            <Eye className="size-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => router.push(`/schools/${schoolId}/students/${s.studentId}?edit=1`)}
-            aria-label="Edit"
-            className="flex size-8 items-center justify-center rounded-lg text-foreground-soft hover:bg-surface-hover hover:text-foreground"
+            {s.guardian.name}
+          </Link>
+        ) : (
+          <span className="text-foreground">{s.guardian.name}</span>
+        ),
+    });
+  }
+  if (has("relationship")) {
+    columns.push({ key: "relationship", header: "Relationship", render: (s) => (s.guardian ? RELATIONSHIP_LABEL[s.guardian.relationship] : DASH) });
+  }
+  if (has("parentContact")) {
+    columns.push({ key: "parentContact", header: "Parent Contact", render: (s) => s.guardian?.phone ?? DASH });
+  }
+  if (has("parentEmail")) {
+    columns.push({ key: "parentEmail", header: "Parent Email", render: (s) => s.guardian?.email ?? DASH });
+  }
+  if (has("parentAddress")) {
+    columns.push({ key: "parentAddress", header: "Parent Address", render: (s) => s.guardian?.address ?? DASH });
+  }
+  if (has("parentProfile")) {
+    columns.push({
+      key: "parentProfile",
+      header: "Parent Profile",
+      render: (s) =>
+        s.guardian && canViewGuardianProfile ? (
+          <Link
+            href={`/schools/${schoolId}/parents/${s.guardian.id}`}
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1 text-sm text-accent hover:underline"
           >
-            <Pencil className="size-4" />
-          </button>
-          <ActionsMenu
-            items={[
-              { label: "Attendance", icon: CalendarCheck, onClick: () => router.push(`/schools/${schoolId}/students/${s.studentId}/attendance`) },
-              { label: "Print Profile", icon: Printer, onClick: () => router.push(`/schools/${schoolId}/students/${s.studentId}?print=1`) },
-              ...(canTransfer
-                ? [{ label: "Transfer", onClick: () => router.push(`/schools/${schoolId}/students/bulk-transfer?studentIds=${s.studentId}`) }]
-                : []),
-            ]}
-          />
-        </div>
-      ),
-    },
-  ];
+            View <ExternalLink className="size-3" />
+          </Link>
+        ) : (
+          DASH
+        ),
+    });
+  }
+
+  columns.push({
+    key: "actions",
+    header: "Actions",
+    className: "text-right",
+    headerClassName: "text-right",
+    render: (s) => (
+      <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          onClick={() => router.push(`/schools/${schoolId}/students/${s.studentId}`)}
+          aria-label="View"
+          className="flex size-8 items-center justify-center rounded-lg text-foreground-soft hover:bg-surface-hover hover:text-foreground"
+        >
+          <Eye className="size-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push(`/schools/${schoolId}/students/${s.studentId}?edit=1`)}
+          aria-label="Edit"
+          className="flex size-8 items-center justify-center rounded-lg text-foreground-soft hover:bg-surface-hover hover:text-foreground"
+        >
+          <Pencil className="size-4" />
+        </button>
+        <ActionsMenu
+          items={[
+            { label: "Attendance", icon: CalendarCheck, onClick: () => router.push(`/schools/${schoolId}/students/${s.studentId}/attendance`) },
+            { label: "Print Profile", icon: Printer, onClick: () => router.push(`/schools/${schoolId}/students/${s.studentId}?print=1`) },
+            ...(canTransfer
+              ? [{ label: "Transfer", onClick: () => router.push(`/schools/${schoolId}/students/bulk-transfer?studentIds=${s.studentId}`) }]
+              : []),
+          ]}
+        />
+      </div>
+    ),
+  });
 
   return (
     <DataTable
@@ -165,52 +247,9 @@ export function StudentsTable({
       columns={columns}
       rowKey={(s) => s.studentId}
       onRowClick={(s) => router.push(`/schools/${schoolId}/students/${s.studentId}`)}
-      searchPlaceholder="Search by name, ID, roll no, class, section, or parent…"
-      searchFilter={(s, q) =>
-        `${s.firstName} ${s.lastName} ${s.studentNumber} ${s.rollNumber} ${s.className} ${s.sectionName} ${s.guardianName ?? ""} ${s.guardianPhone ?? ""}`
-          .toLowerCase()
-          .includes(q)
-      }
-      emptyTitle="No students enrolled yet"
-      emptyDescription="Add your first student to get started."
-      searchEmptyTitle="No students found"
-      pagination={{ pageSizeOptions: [10, 25, 50, 100], defaultPageSize: 25, itemLabel: "students" }}
+      emptyTitle="No students match these filters"
+      emptyDescription="Try adjusting or clearing some filters."
       selection={selection}
-      toolbar={
-        students && (
-          <div className="ml-auto flex items-center gap-2">
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowColumnMenu((v) => !v)}
-                className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground-soft transition-colors hover:border-accent hover:text-foreground"
-              >
-                <Columns3 className="size-4" />
-                Manage Columns
-              </button>
-              {showColumnMenu && (
-                <div className="absolute right-0 z-10 mt-1 min-w-[180px] rounded-lg border border-border bg-background p-2 shadow-lg">
-                  {OPTIONAL_COLUMNS.map((col) => (
-                    <label key={col.key} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-surface-hover">
-                      <input
-                        type="checkbox"
-                        checked={visibleOptional.has(col.key)}
-                        onChange={() => toggleColumn(col.key)}
-                        className="size-4 rounded border-border text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                      />
-                      {col.label}
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-            <span className="text-sm text-foreground-muted">
-              {students.length} student{students.length === 1 ? "" : "s"}
-            </span>
-            <ShareListButton title="Student List" text={() => formatStudentListForShare("Student List", students)} />
-          </div>
-        )
-      }
     />
   );
 }

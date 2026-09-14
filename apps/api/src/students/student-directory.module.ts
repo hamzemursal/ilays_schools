@@ -15,5 +15,7 @@ import { StudentDirectoryService } from "./student-directory.service";
   imports: [SchoolsModule, StudentsModule, AttendanceModule, FinanceModule],
   controllers: [StudentDirectoryController],
   providers: [StudentDirectoryService],
+  // Exported for ExportsModule's filtered/columned student export.
+  exports: [StudentDirectoryService],
 })
 export class StudentDirectoryModule {}

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { AcademicYear, ClassWithSections, School } from "@/lib/api";
-import { StudentListFilters, type StudentListFilterState } from "./StudentListFilters";
+import { StudentListFilters, EMPTY_SECONDARY_FILTERS, type StudentListFilterState } from "./StudentListFilters";
 
 const pushMock = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushMock }) }));
@@ -50,6 +50,7 @@ function defaultState(overrides: Partial<StudentListFilterState> = {}): StudentL
     sectionId: "",
     attendanceFilter: "ALL",
     search: "",
+    ...EMPTY_SECONDARY_FILTERS,
     ...overrides,
   };
 }
@@ -79,6 +80,7 @@ function renderFilters(overrides: Partial<React.ComponentProps<typeof StudentLis
       years={[year()]}
       classes={[klass()]}
       hasAttendanceData={false}
+      canViewFinance={true}
       state={defaultState()}
       onChange={onChange}
       {...overrides}
@@ -121,6 +123,29 @@ describe("StudentListFilters — Academic Year", () => {
     const { onChange } = renderFilters({ years: [year(), year({ id: "year-2", name: "2026", isCurrent: false })] });
     await user.selectOptions(fieldSelect("Academic Year"), "year-2");
     expect(onChange).toHaveBeenCalledWith({ yearId: "year-2" });
+  });
+});
+
+describe("StudentListFilters — Student Status", () => {
+  it("is always visible in the primary row", () => {
+    renderFilters();
+    expect(fieldSelect("Student Status")).toBeInTheDocument();
+  });
+
+  it("calls onChange with the chosen status", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderFilters();
+    await user.selectOptions(fieldSelect("Student Status"), "WITHDRAWN");
+    expect(onChange).toHaveBeenCalledWith({ studentStatus: "WITHDRAWN" });
+  });
+});
+
+describe("StudentListFilters — Gender", () => {
+  it("calls onChange with the chosen gender", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderFilters();
+    await user.selectOptions(fieldSelect("Gender"), "MALE");
+    expect(onChange).toHaveBeenCalledWith({ gender: "MALE" });
   });
 });
 
@@ -181,26 +206,11 @@ describe("StudentListFilters — Class/Section cascade", () => {
   });
 
   it("offers only the selected class's own sections", async () => {
-    const user = userEvent.setup();
     renderFilters({ state: defaultState({ classId: "class-1" }) });
     const sectionSelect = fieldSelect("Section");
     expect(sectionSelect).toBeEnabled();
     expect(within(sectionSelect).getByText("A")).toBeInTheDocument();
     expect(within(sectionSelect).getByText("B")).toBeInTheDocument();
-  });
-});
-
-describe("StudentListFilters — Attendance filter", () => {
-  it("hides the Attendance filter when hasAttendanceData is false", () => {
-    renderFilters({ hasAttendanceData: false });
-    expect(queryFieldSelect("Attendance")).not.toBeInTheDocument();
-  });
-
-  it("shows the Attendance filter when hasAttendanceData is true", async () => {
-    const user = userEvent.setup();
-    const { onChange } = renderFilters({ hasAttendanceData: true });
-    await user.selectOptions(fieldSelect("Attendance"), "NEEDS_ATTENTION");
-    expect(onChange).toHaveBeenCalledWith({ attendanceFilter: "NEEDS_ATTENTION" });
   });
 });
 
@@ -210,6 +220,71 @@ describe("StudentListFilters — Search", () => {
     const { onChange } = renderFilters();
     await user.type(screen.getByPlaceholderText("Search students, ID, roll no, or parent…"), "a");
     expect(onChange).toHaveBeenCalledWith({ search: "a" });
+  });
+});
+
+describe("StudentListFilters — More Filters panel", () => {
+  it("is collapsed by default", () => {
+    renderFilters({ hasAttendanceData: true });
+    expect(queryFieldSelect("Attendance Today")).not.toBeInTheDocument();
+  });
+
+  it("expands to reveal the secondary filters when clicked", async () => {
+    const user = userEvent.setup();
+    renderFilters({ hasAttendanceData: true });
+    await user.click(screen.getByRole("button", { name: /More Filters/ }));
+    expect(fieldSelect("Attendance Today")).toBeInTheDocument();
+    expect(fieldSelect("Has Parent/Guardian")).toBeInTheDocument();
+  });
+
+  it("hides the Attendance % field when hasAttendanceData is false, but keeps Attendance Today", async () => {
+    const user = userEvent.setup();
+    renderFilters({ hasAttendanceData: false });
+    await user.click(screen.getByRole("button", { name: /More Filters/ }));
+    expect(queryFieldSelect("Attendance % (this year)")).not.toBeInTheDocument();
+    expect(fieldSelect("Attendance Today")).toBeInTheDocument();
+  });
+
+  it("calls onChange with the chosen Attendance Today status", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderFilters();
+    await user.click(screen.getByRole("button", { name: /More Filters/ }));
+    await user.selectOptions(fieldSelect("Attendance Today"), "NOT_RECORDED");
+    expect(onChange).toHaveBeenCalledWith({ attendanceTodayStatus: "NOT_RECORDED" });
+  });
+
+  it("shows Fee Status and Outstanding Balance only when canViewFinance is true", async () => {
+    const user = userEvent.setup();
+    renderFilters({ canViewFinance: true });
+    await user.click(screen.getByRole("button", { name: /More Filters/ }));
+    expect(fieldSelect("Fee Status")).toBeInTheDocument();
+    expect(fieldSelect("Outstanding Balance")).toBeInTheDocument();
+  });
+
+  it("hides Fee Status and Outstanding Balance when canViewFinance is false", async () => {
+    const user = userEvent.setup();
+    renderFilters({ canViewFinance: false });
+    await user.click(screen.getByRole("button", { name: /More Filters/ }));
+    expect(queryFieldSelect("Fee Status")).not.toBeInTheDocument();
+    expect(queryFieldSelect("Outstanding Balance")).not.toBeInTheDocument();
+  });
+
+  it("calls onChange with the chosen Has Parent/Guardian value", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderFilters();
+    await user.click(screen.getByRole("button", { name: /More Filters/ }));
+    await user.selectOptions(fieldSelect("Has Parent/Guardian"), "false");
+    expect(onChange).toHaveBeenCalledWith({ hasParent: "false" });
+  });
+
+  it("Reset Filters is disabled with no secondary filters active, and resets only secondary filters when enabled", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderFilters({
+      state: defaultState({ classId: "class-1", gender: "MALE", feeStatus: "OVERDUE" }),
+    });
+    await user.click(screen.getByRole("button", { name: /More Filters/ }));
+    await user.click(screen.getByRole("button", { name: "Reset Filters" }));
+    expect(onChange).toHaveBeenCalledWith(EMPTY_SECONDARY_FILTERS);
   });
 });
 
@@ -274,15 +349,39 @@ describe("StudentListFilters — filter chips", () => {
     expect(onChange).toHaveBeenCalledWith({ search: "" });
   });
 
+  it("shows a chip for the fee status filter and clears it on remove", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderFilters({ state: defaultState({ feeStatus: "OVERDUE" }) });
+    expect(screen.getByText("Fee: Overdue")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: 'Remove Fee: Overdue filter' }));
+    expect(onChange).toHaveBeenCalledWith({ feeStatus: "" });
+  });
+
+  it("shows a chip for the attendance-today filter and clears it on remove", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderFilters({ state: defaultState({ attendanceTodayStatus: "ABSENT" }) });
+    expect(screen.getByText("Today: Absent")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: 'Remove Today: Absent filter' }));
+    expect(onChange).toHaveBeenCalledWith({ attendanceTodayStatus: "" });
+  });
+
   it("shows no chips or Clear All when every filter is at its default", () => {
     renderFilters({ years: [] });
     expect(screen.queryByRole("button", { name: "Clear All" })).not.toBeInTheDocument();
   });
 
-  it("resets every non-year filter at once via Clear All", async () => {
+  it("resets every filter, including secondary ones, at once via Clear All", async () => {
     const user = userEvent.setup();
     const { onChange } = renderFilters({
-      state: defaultState({ levelFilter: "SECONDARY", classId: "class-1", sectionId: "section-1", attendanceFilter: "GOOD", search: "hodan" }),
+      state: defaultState({
+        levelFilter: "SECONDARY",
+        classId: "class-1",
+        sectionId: "section-1",
+        attendanceFilter: "GOOD",
+        search: "hodan",
+        gender: "MALE",
+        feeStatus: "OVERDUE",
+      }),
       hasAttendanceData: true,
       classes: [
         klass({ id: "c1", division: { id: "div-1", type: "PRIMARY" } }),
@@ -290,6 +389,13 @@ describe("StudentListFilters — filter chips", () => {
       ],
     });
     await user.click(screen.getByRole("button", { name: "Clear All" }));
-    expect(onChange).toHaveBeenCalledWith({ levelFilter: "ALL", classId: "", sectionId: "", attendanceFilter: "ALL", search: "" });
+    expect(onChange).toHaveBeenCalledWith({
+      levelFilter: "ALL",
+      classId: "",
+      sectionId: "",
+      attendanceFilter: "ALL",
+      search: "",
+      ...EMPTY_SECONDARY_FILTERS,
+    });
   });
 });

@@ -1,14 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, X } from "lucide-react";
-import type { AcademicYear, ClassWithSections, School } from "@/lib/api";
+import { ChevronDown, ChevronUp, Search, SlidersHorizontal, X } from "lucide-react";
+import type { AcademicYear, ClassWithSections, FeeStatus, School } from "@/lib/api";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 
 export type LevelFilter = "ALL" | "SECONDARY" | "PRIMARY";
 export type AttendanceFilter = "ALL" | "EXCELLENT" | "GOOD" | "NEEDS_ATTENTION";
+export type TriState = "" | "true" | "false";
 
 export interface StudentListFilterState {
   yearId: string;
@@ -17,7 +19,45 @@ export interface StudentListFilterState {
   sectionId: string;
   attendanceFilter: AttendanceFilter;
   search: string;
+  gender: "" | "MALE" | "FEMALE";
+  studentStatus: "" | "ACTIVE" | "COMPLETED" | "GRADUATED" | "TRANSFERRED" | "WITHDRAWN" | "ARCHIVED";
+  hasParent: TriState;
+  feeStatus: "" | FeeStatus;
+  hasOutstandingBalance: TriState;
+  attendanceTodayStatus: "" | "PRESENT" | "ABSENT" | "LATE" | "EXCUSED" | "NOT_RECORDED";
 }
+
+export const EMPTY_SECONDARY_FILTERS = {
+  gender: "" as const,
+  studentStatus: "" as const,
+  hasParent: "" as const,
+  feeStatus: "" as const,
+  hasOutstandingBalance: "" as const,
+  attendanceTodayStatus: "" as const,
+};
+
+const STUDENT_STATUS_LABEL: Record<string, string> = {
+  ACTIVE: "Active",
+  COMPLETED: "Completed",
+  GRADUATED: "Graduated",
+  TRANSFERRED: "Transferred",
+  WITHDRAWN: "Withdrawn",
+  ARCHIVED: "Archived",
+};
+const FEE_STATUS_LABEL: Record<string, string> = {
+  PAID: "Paid",
+  PARTIALLY_PAID: "Partially Paid",
+  PENDING: "Pending",
+  OVERDUE: "Overdue",
+  NO_CHARGE: "No Charge",
+};
+const ATTENDANCE_TODAY_LABEL: Record<string, string> = {
+  PRESENT: "Present",
+  ABSENT: "Absent",
+  LATE: "Late",
+  EXCUSED: "Excused",
+  NOT_RECORDED: "Not Recorded",
+};
 
 export function StudentListFilters({
   schoolId,
@@ -25,6 +65,7 @@ export function StudentListFilters({
   years,
   classes,
   hasAttendanceData,
+  canViewFinance,
   state,
   onChange,
 }: {
@@ -37,10 +78,15 @@ export function StudentListFilters({
   years: AcademicYear[];
   classes: ClassWithSections[];
   hasAttendanceData: boolean;
+  // Finance filters/columns are opt-in exactly like the Fees & Payments tab
+  // elsewhere in this app — a viewer without finance.ledger.view never sees
+  // them offered here, matching what the backend would silently omit anyway.
+  canViewFinance: boolean;
   state: StudentListFilterState;
   onChange: (patch: Partial<StudentListFilterState>) => void;
 }) {
   const router = useRouter();
+  const [moreOpen, setMoreOpen] = useState(false);
 
   // Only offer a level a School actually has classes for — same reasoning
   // as the Classes & Sections page's own level filter.
@@ -89,9 +135,41 @@ export function StudentListFilters({
   if (state.search.trim()) {
     chips.push({ key: "search", label: `"${state.search.trim()}"`, onRemove: () => onChange({ search: "" }) });
   }
+  if (state.gender) {
+    chips.push({ key: "gender", label: state.gender === "MALE" ? "Male" : "Female", onRemove: () => onChange({ gender: "" }) });
+  }
+  if (state.studentStatus) {
+    chips.push({ key: "status", label: STUDENT_STATUS_LABEL[state.studentStatus], onRemove: () => onChange({ studentStatus: "" }) });
+  }
+  if (state.hasParent) {
+    chips.push({
+      key: "hasParent",
+      label: state.hasParent === "true" ? "Has Parent/Guardian" : "No Parent/Guardian on file",
+      onRemove: () => onChange({ hasParent: "" }),
+    });
+  }
+  if (state.feeStatus) {
+    chips.push({ key: "feeStatus", label: `Fee: ${FEE_STATUS_LABEL[state.feeStatus]}`, onRemove: () => onChange({ feeStatus: "" }) });
+  }
+  if (state.hasOutstandingBalance) {
+    chips.push({
+      key: "outstanding",
+      label: state.hasOutstandingBalance === "true" ? "Has outstanding balance" : "No outstanding balance",
+      onRemove: () => onChange({ hasOutstandingBalance: "" }),
+    });
+  }
+  if (state.attendanceTodayStatus) {
+    chips.push({
+      key: "attendanceToday",
+      label: `Today: ${ATTENDANCE_TODAY_LABEL[state.attendanceTodayStatus]}`,
+      onRemove: () => onChange({ attendanceTodayStatus: "" }),
+    });
+  }
 
+  const hasSecondaryFilters =
+    !!state.gender || !!state.studentStatus || !!state.hasParent || !!state.feeStatus || !!state.hasOutstandingBalance || !!state.attendanceTodayStatus;
   const hasNonYearFilters =
-    state.levelFilter !== "ALL" || state.classId || state.sectionId || state.attendanceFilter !== "ALL" || state.search.trim();
+    state.levelFilter !== "ALL" || !!state.classId || !!state.sectionId || state.attendanceFilter !== "ALL" || !!state.search.trim() || hasSecondaryFilters;
 
   return (
     <div className="space-y-3">
@@ -157,20 +235,27 @@ export function StudentListFilters({
             ))}
           </Select>
         </FormField>
-        {hasAttendanceData && (
-          <FormField label="Attendance" className="w-auto">
-            <Select
-              value={state.attendanceFilter}
-              onChange={(e) => onChange({ attendanceFilter: e.target.value as AttendanceFilter })}
-              className="w-auto min-w-[150px]"
-            >
-              <option value="ALL">All</option>
-              <option value="EXCELLENT">Excellent (90%+)</option>
-              <option value="GOOD">Good (75–89%)</option>
-              <option value="NEEDS_ATTENTION">Needs Attention (&lt;75%)</option>
-            </Select>
-          </FormField>
-        )}
+        <FormField label="Student Status" className="w-auto">
+          <Select
+            value={state.studentStatus}
+            onChange={(e) => onChange({ studentStatus: e.target.value as StudentListFilterState["studentStatus"] })}
+            className="w-auto min-w-[130px]"
+          >
+            <option value="">All Statuses</option>
+            {Object.entries(STUDENT_STATUS_LABEL).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+        <FormField label="Gender" className="w-auto">
+          <Select value={state.gender} onChange={(e) => onChange({ gender: e.target.value as StudentListFilterState["gender"] })} className="w-auto">
+            <option value="">All</option>
+            <option value="MALE">Male</option>
+            <option value="FEMALE">Female</option>
+          </Select>
+        </FormField>
         <div className="relative min-w-[220px] flex-1">
           <label className="mb-1 block text-xs font-medium text-foreground-soft">Search</label>
           <div className="relative">
@@ -183,7 +268,88 @@ export function StudentListFilters({
             />
           </div>
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          icon={<SlidersHorizontal className="size-4" />}
+          onClick={() => setMoreOpen((v) => !v)}
+        >
+          More Filters
+          {moreOpen ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+        </Button>
       </div>
+
+      {moreOpen && (
+        <div className="grid grid-cols-1 gap-4 rounded-xl border border-border bg-surface-soft p-4 sm:grid-cols-2 lg:grid-cols-4">
+          {hasAttendanceData && (
+            <FormField label="Attendance % (this year)">
+              <Select
+                value={state.attendanceFilter}
+                onChange={(e) => onChange({ attendanceFilter: e.target.value as AttendanceFilter })}
+              >
+                <option value="ALL">All</option>
+                <option value="EXCELLENT">Excellent (90%+)</option>
+                <option value="GOOD">Good (75–89%)</option>
+                <option value="NEEDS_ATTENTION">Needs Attention (&lt;75%)</option>
+              </Select>
+            </FormField>
+          )}
+          <FormField label="Attendance Today">
+            <Select
+              value={state.attendanceTodayStatus}
+              onChange={(e) => onChange({ attendanceTodayStatus: e.target.value as StudentListFilterState["attendanceTodayStatus"] })}
+            >
+              <option value="">Any</option>
+              {Object.entries(ATTENDANCE_TODAY_LABEL).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          {canViewFinance && (
+            <>
+              <FormField label="Fee Status">
+                <Select value={state.feeStatus} onChange={(e) => onChange({ feeStatus: e.target.value as StudentListFilterState["feeStatus"] })}>
+                  <option value="">Any</option>
+                  {Object.entries(FEE_STATUS_LABEL).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Outstanding Balance">
+                <Select
+                  value={state.hasOutstandingBalance}
+                  onChange={(e) => onChange({ hasOutstandingBalance: e.target.value as TriState })}
+                >
+                  <option value="">Any</option>
+                  <option value="true">Has outstanding balance</option>
+                  <option value="false">No outstanding balance</option>
+                </Select>
+              </FormField>
+            </>
+          )}
+          <FormField label="Has Parent/Guardian">
+            <Select value={state.hasParent} onChange={(e) => onChange({ hasParent: e.target.value as TriState })}>
+              <option value="">Any</option>
+              <option value="true">Has parent/guardian on file</option>
+              <option value="false">No parent/guardian on file</option>
+            </Select>
+          </FormField>
+          <div className="col-span-full flex justify-end">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onChange(EMPTY_SECONDARY_FILTERS)}
+              disabled={!hasSecondaryFilters}
+            >
+              Reset Filters
+            </Button>
+          </div>
+        </div>
+      )}
 
       {(chips.length > 0 || hasNonYearFilters) && (
         <div className="flex flex-wrap items-center gap-2">
@@ -206,7 +372,16 @@ export function StudentListFilters({
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => onChange({ levelFilter: "ALL", classId: "", sectionId: "", attendanceFilter: "ALL", search: "" })}
+              onClick={() =>
+                onChange({
+                  levelFilter: "ALL",
+                  classId: "",
+                  sectionId: "",
+                  attendanceFilter: "ALL",
+                  search: "",
+                  ...EMPTY_SECONDARY_FILTERS,
+                })
+              }
             >
               Clear All
             </Button>

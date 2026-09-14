@@ -1,7 +1,7 @@
 "use client";
 
-import { Percent, UserCheck, Users, UsersRound } from "lucide-react";
-import type { StudentListItem } from "@/lib/api";
+import { CalendarCheck, DollarSign, UserCheck, Users } from "lucide-react";
+import type { StudentDirectorySummary } from "@/lib/api";
 import { Card } from "@/components/ui/Card";
 import { DECORATIVE_TONE_CLASSES } from "@/components/ui/decorativeTones";
 
@@ -34,42 +34,36 @@ function SummaryCard({
   );
 }
 
-// All figures are derived from exactly the students currently passing every
-// active filter — narrowing to Form 1 / Section A recomputes every card to
-// that section alone, never the whole school.
-export function StudentListSummaryCards({
-  students,
-  attendanceRates,
-}: {
-  students: StudentListItem[];
-  attendanceRates: Map<string, number | null> | null;
-}) {
-  const total = students.length;
-  const active = students.filter((s) => s.status === "ACTIVE").length;
-  const male = students.filter((s) => s.sex === "MALE").length;
-  const female = students.filter((s) => s.sex === "FEMALE").length;
-
-  let averageAttendance: number | null = null;
-  if (attendanceRates) {
-    const rates = students.map((s) => attendanceRates.get(s.enrollmentId)).filter((r): r is number => r !== null && r !== undefined);
-    if (rates.length > 0) {
-      averageAttendance = Math.round((rates.reduce((sum, r) => sum + r, 0) / rates.length) * 10) / 10;
-    }
+// Every figure here is computed server-side over the FULL current filtered
+// set (see StudentDirectoryService.summary) — never just the visible page,
+// and never a client-side guess. "Present Today" and "Outstanding Payments"
+// are shown only when the backend actually included them, i.e. the actor
+// holds attendance.view / finance.ledger.view respectively — their absence
+// here mirrors what the table itself would also be unable to show.
+export function StudentListSummaryCards({ summary, loading }: { summary: StudentDirectorySummary | null; loading?: boolean }) {
+  if (loading || !summary) {
+    return (
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <Card key={i}>
+            <div className="size-10 animate-pulse rounded-xl bg-surface-soft" />
+            <div className="mt-3 h-7 w-12 animate-pulse rounded bg-surface-soft" />
+            <div className="mt-1 h-3 w-20 animate-pulse rounded bg-surface-soft" />
+          </Card>
+        ))}
+      </div>
+    );
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-      <SummaryCard icon={Users} label="Total Students" value={total} tone="accent" />
-      <SummaryCard icon={UserCheck} label="Active" value={active} tone="success" />
-      <SummaryCard icon={UsersRound} label="Male" value={male} tone="violet" />
-      <SummaryCard icon={UsersRound} label="Female" value={female} tone="amber" />
-      {attendanceRates && (
-        <SummaryCard
-          icon={Percent}
-          label="Average Attendance"
-          value={averageAttendance !== null ? `${averageAttendance}%` : "—"}
-          tone="success"
-        />
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <SummaryCard icon={Users} label="Total Students" value={summary.total} tone="accent" />
+      <SummaryCard icon={UserCheck} label="Active Students" value={summary.active} tone="success" />
+      {summary.presentToday !== null && (
+        <SummaryCard icon={CalendarCheck} label="Present Today" value={summary.presentToday} tone="violet" />
+      )}
+      {summary.outstandingBalances !== null && (
+        <SummaryCard icon={DollarSign} label="Outstanding Payments" value={summary.outstandingBalances} tone="amber" />
       )}
     </div>
   );

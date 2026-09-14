@@ -740,6 +740,85 @@ export interface AttendanceSessionStatus {
   AFTERNOON: boolean;
 }
 
+export type FeeStatus = "PAID" | "PARTIALLY_PAID" | "PENDING" | "OVERDUE" | "NO_CHARGE";
+
+export interface StudentDirectoryFilters {
+  academicYearId: string;
+  classId?: string;
+  sectionId?: string;
+  search?: string;
+  gender?: Sex;
+  studentStatus?: StudentStatus;
+  hasParent?: boolean;
+  feeStatus?: FeeStatus;
+  hasOutstandingBalance?: boolean;
+  attendanceDate?: string;
+  attendanceSession?: AttendanceSession;
+  attendanceStatus?: AttendanceStatus | "NOT_RECORDED";
+  page?: number;
+  pageSize?: number;
+}
+
+export interface StudentDirectoryGuardian {
+  id: string;
+  name: string;
+  relationship: GuardianRelationship;
+  isPrimaryContact: boolean;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+}
+
+export interface StudentDirectoryFinance {
+  totalCharged: number;
+  totalPaid: number;
+  balance: number;
+  feeStatus: FeeStatus;
+  lastPaymentDate: string | null;
+}
+
+export interface StudentDirectoryItem {
+  enrollmentId: string;
+  studentId: string;
+  firstName: string;
+  lastName: string;
+  studentNumber: string;
+  rollNumber: number;
+  classId: string;
+  className: string;
+  sectionId: string;
+  sectionName: string;
+  academicYearId: string;
+  sex: Sex;
+  status: StudentStatus;
+  dateOfBirth: string;
+  // The date this student started their CURRENT enrollment — the closest
+  // real, existing field to "Admission Date" (Student itself has none).
+  admissionDate: string;
+  hasPortalAccount: boolean;
+  guardianCount: number;
+  guardian: StudentDirectoryGuardian | null;
+  // null (not just empty) means the actor's own permissions don't include
+  // attendance.view / finance.ledger.view — the backend omits the data
+  // entirely rather than the frontend merely hiding a column.
+  attendanceToday: Record<AttendanceSession, AttendanceStatus | null> | null;
+  finance: StudentDirectoryFinance | null;
+}
+
+export interface StudentDirectorySearchResult {
+  items: StudentDirectoryItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface StudentDirectorySummary {
+  total: number;
+  active: number;
+  presentToday: number | null;
+  outstandingBalances: number | null;
+}
+
 export type ExamType = "QUIZ" | "MIDTERM" | "FINAL" | "ASSIGNMENT" | "OTHER";
 
 export interface Exam {
@@ -2029,6 +2108,34 @@ export const api = {
         search: filters?.search,
       })}`,
       { accessToken },
+    ),
+  // The Advanced Student List — server-side filtering/pagination, plus
+  // per-row attendance-today and fee-summary data the backend only includes
+  // when the actor's own permissions allow it (see StudentDirectoryService).
+  searchStudentDirectory: (accessToken: string, schoolId: string, filters: StudentDirectoryFilters) =>
+    request<StudentDirectorySearchResult>(`/schools/${schoolId}/students/directory${auditLogQs(filters)}`, { accessToken }),
+  getStudentDirectorySummary: (accessToken: string, schoolId: string, filters: StudentDirectoryFilters) =>
+    request<StudentDirectorySummary>(
+      `/schools/${schoolId}/students/directory/summary${auditLogQs({ ...filters, page: undefined, pageSize: undefined })}`,
+      { accessToken },
+    ),
+  exportStudentDirectory: (
+    accessToken: string,
+    schoolId: string,
+    filters: StudentDirectoryFilters,
+    columns?: string[],
+    ids?: string[],
+  ) =>
+    downloadFile(
+      `/schools/${schoolId}/exports/students/directory${auditLogQs({
+        ...filters,
+        page: undefined,
+        pageSize: undefined,
+        columns: columns?.join(","),
+        ids: ids?.join(","),
+      })}`,
+      accessToken,
+      "students.csv",
     ),
   getStudentAttendanceHistory: (accessToken: string, studentId: string) =>
     request<StudentAttendanceHistoryRecord[]>(`/students/${studentId}/attendance`, { accessToken }),

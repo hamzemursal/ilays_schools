@@ -955,6 +955,12 @@ export class ExamsService {
   // Same shape as AttendanceService's check, but also pinned to the specific
   // subject: a teacher may enter marks only where they hold a
   // TeacherAssignment for exactly this section+subject+academicYear.
+  //
+  // The teacher lookup is by userId ALONE — never {userId, schoolId}; see
+  // the matching comment on AttendanceService.assertCanAccessSection for
+  // why scoping this lookup by the route's schoolId would silently treat a
+  // teacher with a legitimate cross-school assignment as an unrestricted
+  // admin instead of checking it.
   private async assertCanAccessSectionForSubject(
     actor: AuthenticatedUser,
     schoolId: string,
@@ -964,7 +970,7 @@ export class ExamsService {
   ) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
 
-    const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id, schoolId } });
+    const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id } });
     if (teacher) {
       const hasAssignment = await this.prisma.teacherAssignment.findFirst({
         where: { teacherId: teacher.id, sectionId, subjectId, academicYearId },

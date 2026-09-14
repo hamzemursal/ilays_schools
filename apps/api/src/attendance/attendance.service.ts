@@ -29,10 +29,21 @@ export class AttendanceService {
   // only touch a section they hold a TeacherAssignment for. A School/Super
   // Admin has no Teacher profile, so this check is a no-op for them beyond
   // the ordinary school-access check — this is the Phase 6 gate.
+  //
+  // The teacher lookup is by userId ALONE — never {userId, schoolId}. A
+  // Teacher row's own schoolId is just its home/employment school; a
+  // teacher can hold TeacherAssignments (and therefore real access) at
+  // other schools too, so filtering this lookup by the route's schoolId
+  // would silently return null for a legitimate cross-school assignment —
+  // and this function's own "if (teacher)" shape would then treat that
+  // teacher as an unrestricted admin for that section instead of checking
+  // their assignment at all. Always resolve the teacher profile first, then
+  // let the TeacherAssignment check below be the only thing that decides
+  // access — sectionId alone already pins the check to one specific school.
   private async assertCanAccessSection(actor: AuthenticatedUser, schoolId: string, sectionId: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
 
-    const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id, schoolId } });
+    const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id } });
     if (teacher) {
       const hasAssignment = await this.prisma.teacherAssignment.findFirst({
         where: { teacherId: teacher.id, sectionId },

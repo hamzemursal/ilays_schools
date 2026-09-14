@@ -438,6 +438,25 @@ describe("ExamsService — teacher-assignment authorization boundary", () => {
       service.getResultsForSection(TEACHER_ACTOR, SCHOOL_ID, EXAM_SUBJECT_ID, SECTION_ID),
     ).resolves.toBeDefined();
   });
+
+  // Regression for a real bug: the teacher profile lookup used to be
+  // {userId, schoolId} — for a teacher whose Teacher row's home school
+  // differs from the route's schoolId (exactly the shape a multi-school
+  // teacher has), that lookup silently returns null, and this function's
+  // own "if (teacher)" shape then treats them as an unrestricted admin
+  // instead of checking their TeacherAssignment at all. The lookup must be
+  // by userId alone — section/subject/year is what pins the check, not
+  // filtering the teacher lookup itself.
+  it("resolves the teacher profile by userId alone, never scoped by the route's schoolId", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.teacherAssignment.findFirst.mockImplementation((args: { where?: { teacherId?: string } }) =>
+      Promise.resolve(args?.where?.teacherId ? null : { id: "assignment-1", teacher: { firstName: "T", lastName: "R" } }),
+    );
+    await expect(
+      service.getResultsForSection(TEACHER_ACTOR, "a-different-school", EXAM_SUBJECT_ID, SECTION_ID),
+    ).rejects.toThrow(ForbiddenException);
+    expect(prisma.teacher.findFirst).toHaveBeenCalledWith({ where: { userId: TEACHER_ACTOR.id } });
+  });
 });
 
 describe("ExamsService.enterMarks — edit-window gating and validation", () => {

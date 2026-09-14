@@ -300,4 +300,20 @@ describe("AttendanceService — teacher authorization (school/section isolation)
     ).resolves.toEqual({ MORNING: false, AFTERNOON: false });
     expect(schools.findOneAccessibleOrThrow).toHaveBeenCalledWith(TEACHER_ACTOR, "school-1");
   });
+
+  // Regression for a real bug: the teacher profile lookup used to be
+  // {userId, schoolId} — for a teacher whose Teacher row's home school
+  // differs from the route's schoolId (exactly the shape a multi-school
+  // teacher has), that lookup silently returns null, and this function's
+  // own "if (teacher)" shape then treats them as an unrestricted admin for
+  // that section instead of checking their TeacherAssignment at all. The
+  // lookup must be by userId alone — sectionId is what pins the check to
+  // one school, not filtering the teacher lookup itself.
+  it("resolves the teacher profile by userId alone, never scoped by the route's schoolId", async () => {
+    prisma.teacherAssignment.findFirst.mockResolvedValue(null);
+    await expect(
+      service.getSessionStatusForSectionAndDate(TEACHER_ACTOR, "a-different-school", "some-section", today()),
+    ).rejects.toThrow("You are not assigned to this section");
+    expect(prisma.teacher.findFirst).toHaveBeenCalledWith({ where: { userId: TEACHER_ACTOR.id } });
+  });
 });

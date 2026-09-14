@@ -132,6 +132,19 @@ export class StudentsController {
     await this.students.assertAccessibleStudent(user, id);
     const guardian = await this.guardians.findOrCreate(this.prisma, user.organizationId!, dto);
     await this.guardians.linkToStudent(this.prisma, id, guardian.id, dto.relationship, dto.isPrimaryContact);
-    return guardian;
+    // relationship/isPrimaryContact live on StudentGuardian, not Guardian —
+    // findOrCreate's return value alone is missing them. Building the
+    // combined shape here (rather than a second fetch) since every field is
+    // already in hand: the guardian's own record, plus exactly what was
+    // just persisted by linkToStudent.
+    return {
+      id: guardian.id,
+      firstName: guardian.firstName,
+      lastName: guardian.lastName,
+      phone: guardian.phone,
+      email: guardian.email,
+      relationship: dto.relationship,
+      isPrimaryContact: dto.isPrimaryContact ?? false,
+    };
   }
 }

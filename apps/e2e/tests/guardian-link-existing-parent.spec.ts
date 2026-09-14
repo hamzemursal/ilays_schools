@@ -10,6 +10,12 @@ import { ADMIN } from "../fixtures/credentials";
 // record (with an accurate linked-student count) and reuses it instead of
 // creating a second "Amina Ali" — the exact duplicate this workflow exists
 // to prevent.
+//
+// The fixture school's only seeded class/section is Class 1 · A — the same
+// roster teacher-portal.spec.ts depends on having exactly one guardian-linked
+// student — so the new student created here is permanently deleted at the
+// end (the same "Delete" action already covered by its own coverage
+// elsewhere) to leave that roster exactly as every other spec found it.
 test("linking an existing parent to a new student reuses the real record instead of creating a duplicate", async ({ page }) => {
   await loginAt(page, "/admin/login", ADMIN.email, ADMIN.password);
   await expect(page).toHaveURL(/\/dashboard/);
@@ -33,6 +39,7 @@ test("linking an existing parent to a new student reuses the real record instead
   await expect(page.getByText("Student created")).toBeVisible();
   await page.getByRole("button", { name: "View student profile" }).click();
   await expect(page.getByRole("heading", { name: "Sakariye Hassan" })).toBeVisible();
+  const studentProfileUrl = page.url();
 
   await page.getByRole("button", { name: "Add guardian" }).click();
   await page.getByPlaceholder("Search parent by name, phone, or email…").fill("Amina");
@@ -49,7 +56,7 @@ test("linking an existing parent to a new student reuses the real record instead
   // Now linked to this student's profile — real record, not a duplicate.
   await expect(page.getByText("Guardian added.")).toBeVisible();
   await expect(page.getByText("Amina Ali", { exact: true })).toBeVisible();
-  await expect(page.getByText("Mother")).toBeVisible();
+  await expect(page.getByText("Mother", { exact: true })).toBeVisible();
 
   // Opening her existing Parent Profile from here must show BOTH children —
   // proof this reused the one real Guardian row rather than creating
@@ -59,4 +66,12 @@ test("linking an existing parent to a new student reuses the real record instead
   await expect(page.getByRole("heading", { name: "Amina Ali" })).toBeVisible();
   await expect(page.getByText("Hodan Ali")).toBeVisible();
   await expect(page.getByText("Sakariye Hassan")).toBeVisible();
+
+  // Cleanup: this test's only side effect on shared fixture data is this one
+  // new student (and the StudentGuardian row cascade-deleted with it) — the
+  // real Amina Ali record and her original link to Hodan Ali are untouched.
+  await page.goto(studentProfileUrl);
+  await page.getByRole("button", { name: "Delete" }).click();
+  await page.getByRole("button", { name: "Delete permanently" }).click();
+  await expect(page.getByText("Student deleted permanently.")).toBeVisible();
 });

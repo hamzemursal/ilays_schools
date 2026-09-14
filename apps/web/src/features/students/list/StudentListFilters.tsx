@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ChevronUp, Search, SlidersHorizontal, X } from "lucide-react";
-import type { AcademicYear, ClassWithSections, FeeStatus, School } from "@/lib/api";
+import { CalendarCheck, DollarSign, GraduationCap, Search, User, Users, X } from "lucide-react";
+import type { AcademicYear, AttendanceSession, ClassWithSections, FeeStatus, School } from "@/lib/api";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -25,6 +25,7 @@ export interface StudentListFilterState {
   feeStatus: "" | FeeStatus;
   hasOutstandingBalance: TriState;
   attendanceTodayStatus: "" | "PRESENT" | "ABSENT" | "LATE" | "EXCUSED" | "NOT_RECORDED";
+  attendanceTodaySession: "" | AttendanceSession;
 }
 
 export const EMPTY_SECONDARY_FILTERS = {
@@ -34,6 +35,7 @@ export const EMPTY_SECONDARY_FILTERS = {
   feeStatus: "" as const,
   hasOutstandingBalance: "" as const,
   attendanceTodayStatus: "" as const,
+  attendanceTodaySession: "" as const,
 };
 
 const STUDENT_STATUS_LABEL: Record<string, string> = {
@@ -58,6 +60,15 @@ const ATTENDANCE_TODAY_LABEL: Record<string, string> = {
   EXCUSED: "Excused",
   NOT_RECORDED: "Not Recorded",
 };
+
+// The advanced-filter categories shown as a horizontal tab bar. Every field
+// inside them maps to a real StudentDirectoryFilters param — nothing here is
+// invented; a few fields the reference design groups by category (parent
+// name/relationship, DOB/admission-date ranges, fee amount ranges) simply
+// have no backing filter on the directory API yet, so they're left out
+// rather than faked. "Academic Year" stays in the main row above the tabs
+// since every other filter (and the Class/Section cascade) depends on it.
+type CategoryId = "STUDENT" | "PARENTS" | "FEES" | "ATTENDANCE" | "ACADEMIC";
 
 export function StudentListFilters({
   schoolId,
@@ -86,7 +97,7 @@ export function StudentListFilters({
   onChange: (patch: Partial<StudentListFilterState>) => void;
 }) {
   const router = useRouter();
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<CategoryId | null>(null);
 
   // Only offer a level a School actually has classes for — same reasoning
   // as the Classes & Sections page's own level filter.
@@ -108,6 +119,41 @@ export function StudentListFilters({
     // one, so it (and whatever section was picked under it) gets cleared
     // rather than silently left pointing at a mismatched class.
     onChange({ levelFilter, classId: "", sectionId: "" });
+  }
+
+  const categories: { id: CategoryId; label: string; icon: typeof User; count: number }[] = [
+    { id: "STUDENT", label: "Student", icon: User, count: (state.studentStatus ? 1 : 0) + (state.gender ? 1 : 0) },
+    { id: "PARENTS", label: "Parents & Guardians", icon: Users, count: state.hasParent ? 1 : 0 },
+    ...(canViewFinance
+      ? [
+          {
+            id: "FEES" as const,
+            label: "Fees & Payments",
+            icon: DollarSign,
+            count: (state.feeStatus ? 1 : 0) + (state.hasOutstandingBalance ? 1 : 0),
+          },
+        ]
+      : []),
+    {
+      id: "ATTENDANCE",
+      label: "Attendance",
+      icon: CalendarCheck,
+      count: (state.attendanceFilter !== "ALL" ? 1 : 0) + (state.attendanceTodayStatus ? 1 : 0) + (state.attendanceTodaySession ? 1 : 0),
+    },
+    {
+      id: "ACADEMIC",
+      label: "Academic",
+      icon: GraduationCap,
+      count: (state.levelFilter !== "ALL" ? 1 : 0) + (state.classId ? 1 : 0) + (state.sectionId ? 1 : 0),
+    },
+  ];
+
+  function resetCategory(category: CategoryId) {
+    if (category === "STUDENT") onChange({ studentStatus: "", gender: "" });
+    if (category === "PARENTS") onChange({ hasParent: "" });
+    if (category === "FEES") onChange({ feeStatus: "", hasOutstandingBalance: "" });
+    if (category === "ATTENDANCE") onChange({ attendanceFilter: "ALL", attendanceTodayStatus: "", attendanceTodaySession: "" });
+    if (category === "ACADEMIC") onChange({ levelFilter: "ALL", classId: "", sectionId: "" });
   }
 
   const chips: { key: string; label: string; onRemove: () => void }[] = [];
@@ -158,6 +204,13 @@ export function StudentListFilters({
       onRemove: () => onChange({ hasOutstandingBalance: "" }),
     });
   }
+  if (state.attendanceTodaySession) {
+    chips.push({
+      key: "attendanceSession",
+      label: `Session: ${state.attendanceTodaySession === "MORNING" ? "Morning" : "Afternoon"}`,
+      onRemove: () => onChange({ attendanceTodaySession: "" }),
+    });
+  }
   if (state.attendanceTodayStatus) {
     chips.push({
       key: "attendanceToday",
@@ -167,7 +220,13 @@ export function StudentListFilters({
   }
 
   const hasSecondaryFilters =
-    !!state.gender || !!state.studentStatus || !!state.hasParent || !!state.feeStatus || !!state.hasOutstandingBalance || !!state.attendanceTodayStatus;
+    !!state.gender ||
+    !!state.studentStatus ||
+    !!state.hasParent ||
+    !!state.feeStatus ||
+    !!state.hasOutstandingBalance ||
+    !!state.attendanceTodayStatus ||
+    !!state.attendanceTodaySession;
   const hasNonYearFilters =
     state.levelFilter !== "ALL" || !!state.classId || !!state.sectionId || state.attendanceFilter !== "ALL" || !!state.search.trim() || hasSecondaryFilters;
 
@@ -201,62 +260,7 @@ export function StudentListFilters({
             </Select>
           </FormField>
         )}
-        {showLevelFilter && (
-          <FormField label="School Level" className="w-auto">
-            <Select value={state.levelFilter} onChange={(e) => onLevelChange(e.target.value as LevelFilter)} className="w-auto">
-              <option value="ALL">All levels</option>
-              <option value="SECONDARY">Secondary</option>
-              <option value="PRIMARY">Primary</option>
-            </Select>
-          </FormField>
-        )}
-        <FormField label="Class" className="w-auto">
-          <Select value={state.classId} onChange={(e) => onClassChange(e.target.value)} className="w-auto min-w-[140px]">
-            <option value="">All Classes</option>
-            {classesForLevel.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
-        </FormField>
-        <FormField label="Section" className="w-auto">
-          <Select
-            value={state.sectionId}
-            onChange={(e) => onChange({ sectionId: e.target.value })}
-            disabled={!selectedClass}
-            className="w-auto min-w-[130px]"
-          >
-            <option value="">All Sections</option>
-            {selectedClass?.sections.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
-        </FormField>
-        <FormField label="Student Status" className="w-auto">
-          <Select
-            value={state.studentStatus}
-            onChange={(e) => onChange({ studentStatus: e.target.value as StudentListFilterState["studentStatus"] })}
-            className="w-auto min-w-[130px]"
-          >
-            <option value="">All Statuses</option>
-            {Object.entries(STUDENT_STATUS_LABEL).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Select>
-        </FormField>
-        <FormField label="Gender" className="w-auto">
-          <Select value={state.gender} onChange={(e) => onChange({ gender: e.target.value as StudentListFilterState["gender"] })} className="w-auto">
-            <option value="">All</option>
-            <option value="MALE">Male</option>
-            <option value="FEMALE">Female</option>
-          </Select>
-        </FormField>
-        <div className="relative min-w-[220px] flex-1">
+        <div className="relative min-w-[240px] flex-1">
           <label className="mb-1 block text-xs font-medium text-foreground-soft">Search</label>
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-muted" />
@@ -268,47 +272,76 @@ export function StudentListFilters({
             />
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          icon={<SlidersHorizontal className="size-4" />}
-          onClick={() => setMoreOpen((v) => !v)}
-        >
-          More Filters
-          {moreOpen ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-        </Button>
       </div>
 
-      {moreOpen && (
-        <div className="grid grid-cols-1 gap-4 rounded-xl border border-border bg-surface-soft p-4 sm:grid-cols-2 lg:grid-cols-4">
-          {hasAttendanceData && (
-            <FormField label="Attendance % (this year)">
-              <Select
-                value={state.attendanceFilter}
-                onChange={(e) => onChange({ attendanceFilter: e.target.value as AttendanceFilter })}
-              >
-                <option value="ALL">All</option>
-                <option value="EXCELLENT">Excellent (90%+)</option>
-                <option value="GOOD">Good (75–89%)</option>
-                <option value="NEEDS_ATTENTION">Needs Attention (&lt;75%)</option>
-              </Select>
-            </FormField>
-          )}
-          <FormField label="Attendance Today">
-            <Select
-              value={state.attendanceTodayStatus}
-              onChange={(e) => onChange({ attendanceTodayStatus: e.target.value as StudentListFilterState["attendanceTodayStatus"] })}
+      <div className="flex flex-wrap items-center gap-2">
+        {categories.map((cat) => {
+          const isOpen = activeCategory === cat.id;
+          return (
+            <button
+              key={cat.id}
+              type="button"
+              aria-pressed={isOpen}
+              onClick={() => setActiveCategory(isOpen ? null : cat.id)}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+                isOpen
+                  ? "border-accent bg-accent-soft text-accent"
+                  : "border-border bg-background text-foreground-soft hover:border-accent/40 hover:text-foreground"
+              }`}
             >
-              <option value="">Any</option>
-              {Object.entries(ATTENDANCE_TODAY_LABEL).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </Select>
-          </FormField>
-          {canViewFinance && (
-            <>
+              <cat.icon className="size-3.5" />
+              {cat.label}
+              {cat.count > 0 && (
+                <span className="flex size-4 items-center justify-center rounded-full bg-accent text-[10px] font-semibold text-white">
+                  {cat.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeCategory && (
+        <div className="rounded-xl border border-border bg-surface-soft p-4">
+          {activeCategory === "STUDENT" && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <FormField label="Student Status">
+                <Select
+                  value={state.studentStatus}
+                  onChange={(e) => onChange({ studentStatus: e.target.value as StudentListFilterState["studentStatus"] })}
+                >
+                  <option value="">All Statuses</option>
+                  {Object.entries(STUDENT_STATUS_LABEL).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Gender">
+                <Select value={state.gender} onChange={(e) => onChange({ gender: e.target.value as StudentListFilterState["gender"] })}>
+                  <option value="">All</option>
+                  <option value="MALE">Male</option>
+                  <option value="FEMALE">Female</option>
+                </Select>
+              </FormField>
+            </div>
+          )}
+
+          {activeCategory === "PARENTS" && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <FormField label="Has Parent/Guardian">
+                <Select value={state.hasParent} onChange={(e) => onChange({ hasParent: e.target.value as TriState })}>
+                  <option value="">Any</option>
+                  <option value="true">Has parent/guardian on file</option>
+                  <option value="false">No parent/guardian on file</option>
+                </Select>
+              </FormField>
+            </div>
+          )}
+
+          {activeCategory === "FEES" && canViewFinance && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField label="Fee Status">
                 <Select value={state.feeStatus} onChange={(e) => onChange({ feeStatus: e.target.value as StudentListFilterState["feeStatus"] })}>
                   <option value="">Any</option>
@@ -329,23 +362,95 @@ export function StudentListFilters({
                   <option value="false">No outstanding balance</option>
                 </Select>
               </FormField>
-            </>
+            </div>
           )}
-          <FormField label="Has Parent/Guardian">
-            <Select value={state.hasParent} onChange={(e) => onChange({ hasParent: e.target.value as TriState })}>
-              <option value="">Any</option>
-              <option value="true">Has parent/guardian on file</option>
-              <option value="false">No parent/guardian on file</option>
-            </Select>
-          </FormField>
-          <div className="col-span-full flex justify-end">
+
+          {activeCategory === "ATTENDANCE" && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              {hasAttendanceData && (
+                <FormField label="Attendance % (this year)">
+                  <Select
+                    value={state.attendanceFilter}
+                    onChange={(e) => onChange({ attendanceFilter: e.target.value as AttendanceFilter })}
+                  >
+                    <option value="ALL">All</option>
+                    <option value="EXCELLENT">Excellent (90%+)</option>
+                    <option value="GOOD">Good (75–89%)</option>
+                    <option value="NEEDS_ATTENTION">Needs Attention (&lt;75%)</option>
+                  </Select>
+                </FormField>
+              )}
+              <FormField label="Attendance Session">
+                <Select
+                  value={state.attendanceTodaySession}
+                  onChange={(e) => onChange({ attendanceTodaySession: e.target.value as StudentListFilterState["attendanceTodaySession"] })}
+                >
+                  <option value="">Any</option>
+                  <option value="MORNING">Morning</option>
+                  <option value="AFTERNOON">Afternoon</option>
+                </Select>
+              </FormField>
+              <FormField label="Attendance Today">
+                <Select
+                  value={state.attendanceTodayStatus}
+                  onChange={(e) => onChange({ attendanceTodayStatus: e.target.value as StudentListFilterState["attendanceTodayStatus"] })}
+                >
+                  <option value="">Any</option>
+                  {Object.entries(ATTENDANCE_TODAY_LABEL).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <p className="col-span-full text-xs text-foreground-muted">
+                Attendance Session narrows which session the Attendance Today status checks (Morning, if none is chosen).
+              </p>
+            </div>
+          )}
+
+          {activeCategory === "ACADEMIC" && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              {showLevelFilter && (
+                <FormField label="School Level">
+                  <Select value={state.levelFilter} onChange={(e) => onLevelChange(e.target.value as LevelFilter)}>
+                    <option value="ALL">All levels</option>
+                    <option value="SECONDARY">Secondary</option>
+                    <option value="PRIMARY">Primary</option>
+                  </Select>
+                </FormField>
+              )}
+              <FormField label="Class">
+                <Select value={state.classId} onChange={(e) => onClassChange(e.target.value)}>
+                  <option value="">All Classes</option>
+                  {classesForLevel.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Section">
+                <Select value={state.sectionId} onChange={(e) => onChange({ sectionId: e.target.value })} disabled={!selectedClass}>
+                  <option value="">All Sections</option>
+                  {selectedClass?.sections.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+            </div>
+          )}
+
+          <div className="mt-3 flex justify-end">
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => onChange(EMPTY_SECONDARY_FILTERS)}
-              disabled={!hasSecondaryFilters}
+              onClick={() => resetCategory(activeCategory)}
+              disabled={categories.find((c) => c.id === activeCategory)?.count === 0}
             >
-              Reset Filters
+              Reset {categories.find((c) => c.id === activeCategory)?.label}
             </Button>
           </div>
         </div>

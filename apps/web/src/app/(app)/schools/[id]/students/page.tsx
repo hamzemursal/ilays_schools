@@ -121,6 +121,7 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
       feeStatus: filters.feeStatus || undefined,
       hasOutstandingBalance: filters.hasOutstandingBalance === "" ? undefined : filters.hasOutstandingBalance === "true",
       attendanceStatus: filters.attendanceTodayStatus || undefined,
+      attendanceSession: filters.attendanceTodaySession || undefined,
     };
   }
 
@@ -157,6 +158,7 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
     filters.feeStatus,
     filters.hasOutstandingBalance,
     filters.attendanceTodayStatus,
+    filters.attendanceTodaySession,
     page,
     pageSize,
   ]);
@@ -183,6 +185,7 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
     filters.feeStatus,
     filters.hasOutstandingBalance,
     filters.attendanceTodayStatus,
+    filters.attendanceTodaySession,
   ]);
 
   // The old client-side attendance-rate fetch still powers the "Attendance %

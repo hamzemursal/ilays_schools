@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarCheck, DollarSign, GraduationCap, Search, User, Users, X } from "lucide-react";
-import type { AcademicYear, AttendanceSession, ClassWithSections, FeeStatus, School } from "@/lib/api";
+import type { AcademicYear, AttendanceSession, ClassWithSections, FeeStatus, GuardianRelationship, School } from "@/lib/api";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -22,6 +22,9 @@ export interface StudentListFilterState {
   gender: "" | "MALE" | "FEMALE";
   studentStatus: "" | "ACTIVE" | "COMPLETED" | "GRADUATED" | "TRANSFERRED" | "WITHDRAWN" | "ARCHIVED";
   hasParent: TriState;
+  guardianName: string;
+  guardianRelationship: "" | GuardianRelationship;
+  hasGuardianContact: TriState;
   feeStatus: "" | FeeStatus;
   hasOutstandingBalance: TriState;
   attendanceTodayStatus: "" | "PRESENT" | "ABSENT" | "LATE" | "EXCUSED" | "NOT_RECORDED";
@@ -32,6 +35,9 @@ export const EMPTY_SECONDARY_FILTERS = {
   gender: "" as const,
   studentStatus: "" as const,
   hasParent: "" as const,
+  guardianName: "",
+  guardianRelationship: "" as const,
+  hasGuardianContact: "" as const,
   feeStatus: "" as const,
   hasOutstandingBalance: "" as const,
   attendanceTodayStatus: "" as const,
@@ -60,14 +66,19 @@ const ATTENDANCE_TODAY_LABEL: Record<string, string> = {
   EXCUSED: "Excused",
   NOT_RECORDED: "Not Recorded",
 };
+const RELATIONSHIP_LABEL: Record<string, string> = { FATHER: "Father", MOTHER: "Mother", GUARDIAN: "Guardian", OTHER: "Other" };
 
 // The advanced-filter categories shown as a horizontal tab bar. Every field
 // inside them maps to a real StudentDirectoryFilters param — nothing here is
-// invented; a few fields the reference design groups by category (parent
-// name/relationship, DOB/admission-date ranges, fee amount ranges) simply
-// have no backing filter on the directory API yet, so they're left out
-// rather than faked. "Academic Year" stays in the main row above the tabs
-// since every other filter (and the Class/Section cascade) depends on it.
+// invented; a couple of fields the reference design groups by category
+// (DOB/admission-date ranges, fee amount ranges) simply have no backing
+// filter on the directory API, so they're left out rather than faked.
+// "Academic Year" stays in the main row above the tabs since every other
+// filter (and the Class/Section cascade) depends on it. Parent Name,
+// Relationship and Has Contact all match against ANY of the student's
+// active guardian links, not only the "primary" one shown in the
+// Parent/Guardian column — the same scope the main Search box already uses
+// for guardian name/phone, so a filter and a search term never disagree.
 type CategoryId = "STUDENT" | "PARENTS" | "FEES" | "ATTENDANCE" | "ACADEMIC";
 
 export function StudentListFilters({
@@ -123,7 +134,13 @@ export function StudentListFilters({
 
   const categories: { id: CategoryId; label: string; icon: typeof User; count: number }[] = [
     { id: "STUDENT", label: "Student", icon: User, count: (state.studentStatus ? 1 : 0) + (state.gender ? 1 : 0) },
-    { id: "PARENTS", label: "Parents & Guardians", icon: Users, count: state.hasParent ? 1 : 0 },
+    {
+      id: "PARENTS",
+      label: "Parents & Guardians",
+      icon: Users,
+      count:
+        (state.hasParent ? 1 : 0) + (state.guardianName.trim() ? 1 : 0) + (state.guardianRelationship ? 1 : 0) + (state.hasGuardianContact ? 1 : 0),
+    },
     ...(canViewFinance
       ? [
           {
@@ -150,7 +167,7 @@ export function StudentListFilters({
 
   function resetCategory(category: CategoryId) {
     if (category === "STUDENT") onChange({ studentStatus: "", gender: "" });
-    if (category === "PARENTS") onChange({ hasParent: "" });
+    if (category === "PARENTS") onChange({ hasParent: "", guardianName: "", guardianRelationship: "", hasGuardianContact: "" });
     if (category === "FEES") onChange({ feeStatus: "", hasOutstandingBalance: "" });
     if (category === "ATTENDANCE") onChange({ attendanceFilter: "ALL", attendanceTodayStatus: "", attendanceTodaySession: "" });
     if (category === "ACADEMIC") onChange({ levelFilter: "ALL", classId: "", sectionId: "" });
@@ -194,6 +211,27 @@ export function StudentListFilters({
       onRemove: () => onChange({ hasParent: "" }),
     });
   }
+  if (state.guardianName.trim()) {
+    chips.push({
+      key: "guardianName",
+      label: `Parent: "${state.guardianName.trim()}"`,
+      onRemove: () => onChange({ guardianName: "" }),
+    });
+  }
+  if (state.guardianRelationship) {
+    chips.push({
+      key: "guardianRelationship",
+      label: `Relationship: ${RELATIONSHIP_LABEL[state.guardianRelationship]}`,
+      onRemove: () => onChange({ guardianRelationship: "" }),
+    });
+  }
+  if (state.hasGuardianContact) {
+    chips.push({
+      key: "hasGuardianContact",
+      label: state.hasGuardianContact === "true" ? "Has Parent Contact" : "No Parent Contact on file",
+      onRemove: () => onChange({ hasGuardianContact: "" }),
+    });
+  }
   if (state.feeStatus) {
     chips.push({ key: "feeStatus", label: `Fee: ${FEE_STATUS_LABEL[state.feeStatus]}`, onRemove: () => onChange({ feeStatus: "" }) });
   }
@@ -223,6 +261,9 @@ export function StudentListFilters({
     !!state.gender ||
     !!state.studentStatus ||
     !!state.hasParent ||
+    !!state.guardianName.trim() ||
+    !!state.guardianRelationship ||
+    !!state.hasGuardianContact ||
     !!state.feeStatus ||
     !!state.hasOutstandingBalance ||
     !!state.attendanceTodayStatus ||
@@ -329,12 +370,43 @@ export function StudentListFilters({
           )}
 
           {activeCategory === "PARENTS" && (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <FormField label="Has Parent/Guardian">
                 <Select value={state.hasParent} onChange={(e) => onChange({ hasParent: e.target.value as TriState })}>
                   <option value="">Any</option>
                   <option value="true">Has parent/guardian on file</option>
                   <option value="false">No parent/guardian on file</option>
+                </Select>
+              </FormField>
+              <FormField label="Parent/Guardian Name">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-muted" />
+                  <Input
+                    value={state.guardianName}
+                    onChange={(e) => onChange({ guardianName: e.target.value })}
+                    placeholder="Search by name…"
+                    className="pl-9"
+                  />
+                </div>
+              </FormField>
+              <FormField label="Relationship">
+                <Select
+                  value={state.guardianRelationship}
+                  onChange={(e) => onChange({ guardianRelationship: e.target.value as StudentListFilterState["guardianRelationship"] })}
+                >
+                  <option value="">Any</option>
+                  {Object.entries(RELATIONSHIP_LABEL).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Has Parent Contact">
+                <Select value={state.hasGuardianContact} onChange={(e) => onChange({ hasGuardianContact: e.target.value as TriState })}>
+                  <option value="">Any</option>
+                  <option value="true">Has a phone number on file</option>
+                  <option value="false">No phone number on file</option>
                 </Select>
               </FormField>
             </div>

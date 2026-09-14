@@ -750,6 +750,9 @@ export interface StudentDirectoryFilters {
   gender?: Sex;
   studentStatus?: StudentStatus;
   hasParent?: boolean;
+  guardianName?: string;
+  guardianRelationship?: GuardianRelationship;
+  hasGuardianContact?: boolean;
   feeStatus?: FeeStatus;
   hasOutstandingBalance?: boolean;
   attendanceDate?: string;

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { Prisma, type AttendanceSession, type AttendanceStatus, type Sex, type StudentStatus } from "@school-erp/database";
+import { Prisma, type AttendanceSession, type AttendanceStatus, type GuardianRelationship, type Sex, type StudentStatus } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import { AttendanceService } from "../attendance/attendance.service";
@@ -14,6 +14,14 @@ export interface StudentDirectoryFilters {
   gender?: Sex;
   studentStatus?: StudentStatus;
   hasParent?: boolean;
+  // These three match against ANY of the student's active guardian links,
+  // not only the "primary" one shown in the Parent/Guardian column — the
+  // same broad scope the free-text search's own guardian-name/phone match
+  // already uses below, so a filter and a search term never disagree about
+  // what counts as "this student's guardian."
+  guardianName?: string;
+  guardianRelationship?: GuardianRelationship;
+  hasGuardianContact?: boolean;
   feeStatus?: FeeStatus;
   hasOutstandingBalance?: boolean;
   attendanceDate?: string;
@@ -72,6 +80,35 @@ export class StudentDirectoryService {
       ...(filters.studentStatus ? { student: { currentStatus: filters.studentStatus } } : {}),
       ...(filters.hasParent === true ? { student: { guardians: { some: { status: "ACTIVE" } } } } : {}),
       ...(filters.hasParent === false ? { student: { guardians: { none: { status: "ACTIVE" } } } } : {}),
+      ...(filters.guardianName
+        ? {
+            student: {
+              guardians: {
+                some: {
+                  status: "ACTIVE",
+                  guardian: {
+                    OR: [
+                      { firstName: { contains: filters.guardianName, mode: "insensitive" } },
+                      { lastName: { contains: filters.guardianName, mode: "insensitive" } },
+                    ],
+                  },
+                },
+              },
+            },
+          }
+        : {}),
+      ...(filters.guardianRelationship
+        ? { student: { guardians: { some: { status: "ACTIVE", relationship: filters.guardianRelationship } } } }
+        : {}),
+      // Guards against both an absent phone (null) and a blank one ("") —
+      // the phone field is optional at the form level, so both are real,
+      // observed "no contact on file" states, not just the null case.
+      ...(filters.hasGuardianContact === true
+        ? { student: { guardians: { some: { status: "ACTIVE", guardian: { AND: [{ phone: { not: null } }, { phone: { not: "" } }] } } } } }
+        : {}),
+      ...(filters.hasGuardianContact === false
+        ? { student: { guardians: { none: { status: "ACTIVE", guardian: { AND: [{ phone: { not: null } }, { phone: { not: "" } }] } } } } }
+        : {}),
       ...(search
         ? {
             OR: [

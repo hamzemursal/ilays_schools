@@ -218,6 +218,40 @@ describe("StudentListFilters — Parents & Guardians category", () => {
     await user.selectOptions(fieldSelect("Has Parent/Guardian"), "false");
     expect(onChange).toHaveBeenCalledWith({ hasParent: "false" });
   });
+
+  it("calls onChange as the Parent/Guardian Name search box is typed into", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderFilters();
+    await openCategory(user, "Parents & Guardians");
+    await user.type(screen.getByPlaceholderText("Search by name…"), "A");
+    expect(onChange).toHaveBeenCalledWith({ guardianName: "A" });
+  });
+
+  it("calls onChange with the chosen Relationship", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderFilters();
+    await openCategory(user, "Parents & Guardians");
+    await user.selectOptions(fieldSelect("Relationship"), "MOTHER");
+    expect(onChange).toHaveBeenCalledWith({ guardianRelationship: "MOTHER" });
+  });
+
+  it("calls onChange with the chosen Has Parent Contact value", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderFilters();
+    await openCategory(user, "Parents & Guardians");
+    await user.selectOptions(fieldSelect("Has Parent Contact"), "true");
+    expect(onChange).toHaveBeenCalledWith({ hasGuardianContact: "true" });
+  });
+
+  it("resets all four parent/guardian filters together when Reset Parents & Guardians is clicked", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderFilters({
+      state: defaultState({ hasParent: "true", guardianName: "Amina", guardianRelationship: "MOTHER", hasGuardianContact: "false" }),
+    });
+    await openCategory(user, "Parents & Guardians");
+    await user.click(screen.getByRole("button", { name: "Reset Parents & Guardians" }));
+    expect(onChange).toHaveBeenCalledWith({ hasParent: "", guardianName: "", guardianRelationship: "", hasGuardianContact: "" });
+  });
 });
 
 describe("StudentListFilters — Fees & Payments category", () => {
@@ -439,6 +473,30 @@ describe("StudentListFilters — filter chips", () => {
     expect(screen.getByText("Fee: Overdue")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Remove Fee: Overdue filter" }));
     expect(onChange).toHaveBeenCalledWith({ feeStatus: "" });
+  });
+
+  it("shows a quoted chip for the guardian name filter and clears it on remove", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderFilters({ state: defaultState({ guardianName: "Amina" }) });
+    expect(screen.getByText('Parent: "Amina"')).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: 'Remove Parent: "Amina" filter' }));
+    expect(onChange).toHaveBeenCalledWith({ guardianName: "" });
+  });
+
+  it("shows a chip for the guardian relationship filter and clears it on remove", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderFilters({ state: defaultState({ guardianRelationship: "MOTHER" }) });
+    expect(screen.getByText("Relationship: Mother")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove Relationship: Mother filter" }));
+    expect(onChange).toHaveBeenCalledWith({ guardianRelationship: "" });
+  });
+
+  it("shows a chip for the has-parent-contact filter and clears it on remove", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderFilters({ state: defaultState({ hasGuardianContact: "true" }) });
+    expect(screen.getByText("Has Parent Contact")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove Has Parent Contact filter" }));
+    expect(onChange).toHaveBeenCalledWith({ hasGuardianContact: "" });
   });
 
   it("shows a chip for the attendance session filter and clears it on remove", async () => {

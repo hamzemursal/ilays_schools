@@ -254,6 +254,107 @@ describe("StudentDirectoryService — derived filters", () => {
     expect(prisma.studentEnrollment.findMany).toHaveBeenCalledTimes(1);
   });
 
+  it("filters by guardianName against any active guardian's first or last name", async () => {
+    const { service, prisma } = makeService();
+    prisma.studentEnrollment.findMany.mockResolvedValueOnce([{ id: "enr-1" }]).mockResolvedValueOnce([enrollmentRow()]);
+
+    await service.search(ADMIN_STUDENTS_ONLY, "school-1", { academicYearId: "year-1", guardianName: "Amina" });
+
+    const where = prisma.studentEnrollment.findMany.mock.calls[0][0].where;
+    expect(where.student.guardians.some).toEqual({
+      status: "ACTIVE",
+      guardian: {
+        OR: [
+          { firstName: { contains: "Amina", mode: "insensitive" } },
+          { lastName: { contains: "Amina", mode: "insensitive" } },
+        ],
+      },
+    });
+  });
+
+  it("filters by guardianRelationship against any active guardian link", async () => {
+    const { service, prisma } = makeService();
+    prisma.studentEnrollment.findMany.mockResolvedValueOnce([{ id: "enr-1" }]).mockResolvedValueOnce([enrollmentRow()]);
+
+    await service.search(ADMIN_STUDENTS_ONLY, "school-1", { academicYearId: "year-1", guardianRelationship: "MOTHER" });
+
+    const where = prisma.studentEnrollment.findMany.mock.calls[0][0].where;
+    expect(where.student.guardians.some).toEqual({ status: "ACTIVE", relationship: "MOTHER" });
+  });
+
+  it("filters by hasGuardianContact=true using a some-clause requiring a non-blank phone", async () => {
+    const { service, prisma } = makeService();
+    prisma.studentEnrollment.findMany.mockResolvedValueOnce([{ id: "enr-1" }]).mockResolvedValueOnce([enrollmentRow()]);
+
+    await service.search(ADMIN_STUDENTS_ONLY, "school-1", { academicYearId: "year-1", hasGuardianContact: true });
+
+    const where = prisma.studentEnrollment.findMany.mock.calls[0][0].where;
+    expect(where.student.guardians.some).toEqual({
+      status: "ACTIVE",
+      guardian: { AND: [{ phone: { not: null } }, { phone: { not: "" } }] },
+    });
+  });
+
+  it("filters by hasGuardianContact=false using a none-clause, treating both null and blank phone as no contact", async () => {
+    const { service, prisma } = makeService();
+    prisma.studentEnrollment.findMany.mockResolvedValueOnce([{ id: "enr-1" }]).mockResolvedValueOnce([enrollmentRow()]);
+
+    await service.search(ADMIN_STUDENTS_ONLY, "school-1", { academicYearId: "year-1", hasGuardianContact: false });
+
+    const where = prisma.studentEnrollment.findMany.mock.calls[0][0].where;
+    expect(where.student.guardians.none).toEqual({
+      status: "ACTIVE",
+      guardian: { AND: [{ phone: { not: null } }, { phone: { not: "" } }] },
+    });
+  });
+
+  it("keeps guardian filters scoped to the requested school — schoolId is always the outer where clause", async () => {
+    const { service, prisma } = makeService();
+    prisma.studentEnrollment.findMany.mockResolvedValueOnce([{ id: "enr-1" }]).mockResolvedValueOnce([enrollmentRow()]);
+
+    await service.search(ADMIN_STUDENTS_ONLY, "school-42", {
+      academicYearId: "year-1",
+      guardianName: "Amina",
+      guardianRelationship: "MOTHER",
+      hasGuardianContact: true,
+    });
+
+    const where = prisma.studentEnrollment.findMany.mock.calls[0][0].where;
+    // Guardian is not itself school-scoped in the schema — isolation instead
+    // comes from filtering StudentEnrollment rows (which ARE school-scoped)
+    // and only ever reading the guardian relation off an already-matched,
+    // in-school student. This asserts that scoping is still the outermost
+    // condition even once every guardian filter is combined.
+    expect(where.schoolId).toBe("school-42");
+  });
+
+  it("checks school access before running any guardian-filtered query", async () => {
+    const { service, prisma, schools } = makeService();
+    schools.findOneAccessibleOrThrow.mockRejectedValue(new Error("Forbidden"));
+
+    await expect(
+      service.search(ADMIN_STUDENTS_ONLY, "school-1", { academicYearId: "year-1", guardianName: "Amina" }),
+    ).rejects.toThrow("Forbidden");
+    expect(prisma.studentEnrollment.findMany).not.toHaveBeenCalled();
+  });
+
+  it("returns guardian data for a Primary School student with no portal account, same as any other student", async () => {
+    const { service, prisma } = makeService();
+    const primaryStudentRow = enrollmentRow({ startDate: new Date("2027-01-10") });
+    primaryStudentRow.student.userId = null; // Primary students have no Student Portal login
+    prisma.studentEnrollment.findMany
+      .mockResolvedValueOnce([{ id: "enr-1" }])
+      .mockResolvedValueOnce([primaryStudentRow]);
+
+    const result = await service.search(ADMIN_STUDENTS_ONLY, "school-1", {
+      academicYearId: "year-1",
+      guardianRelationship: "MOTHER",
+    });
+
+    expect(result.items[0].hasPortalAccount).toBe(false);
+    expect(result.items[0].guardian?.relationship).toBe("MOTHER");
+  });
+
   it("paginates the filtered id list, not the unfiltered candidate list", async () => {
     const { service, prisma } = makeService();
     const candidateIds = Array.from({ length: 30 }, (_, i) => ({ id: `enr-${i}` }));

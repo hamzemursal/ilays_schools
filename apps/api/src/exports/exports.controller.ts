@@ -1,7 +1,16 @@
 import { Controller, Get, Param, Query, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { ExportsService } from "./exports.service";
-import { ATTENDANCE_SESSIONS, ATTENDANCE_STATUSES, FEE_STATUSES, GENDERS, STUDENT_STATUSES, parseBool, parseEnum } from "../students/student-directory-query.util";
+import {
+  ATTENDANCE_SESSIONS,
+  ATTENDANCE_STATUSES,
+  FEE_STATUSES,
+  GENDERS,
+  GUARDIAN_RELATIONSHIPS,
+  STUDENT_STATUSES,
+  parseBool,
+  parseEnum,
+} from "../students/student-directory-query.util";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { RequirePermissions } from "../auth/decorators/require-permissions.decorator";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
@@ -38,6 +47,9 @@ export class ExportsController {
     @Query("gender") gender?: string,
     @Query("studentStatus") studentStatus?: string,
     @Query("hasParent") hasParent?: string,
+    @Query("guardianName") guardianName?: string,
+    @Query("guardianRelationship") guardianRelationship?: string,
+    @Query("hasGuardianContact") hasGuardianContact?: string,
     @Query("feeStatus") feeStatus?: string,
     @Query("hasOutstandingBalance") hasOutstandingBalance?: string,
     @Query("attendanceDate") attendanceDate?: string,
@@ -58,6 +70,9 @@ export class ExportsController {
         gender: parseEnum(gender, GENDERS, "gender"),
         studentStatus: parseEnum(studentStatus, STUDENT_STATUSES, "studentStatus"),
         hasParent: parseBool(hasParent),
+        guardianName,
+        guardianRelationship: parseEnum(guardianRelationship, GUARDIAN_RELATIONSHIPS, "guardianRelationship"),
+        hasGuardianContact: parseBool(hasGuardianContact),
         feeStatus: parseEnum(feeStatus, FEE_STATUSES, "feeStatus"),
         hasOutstandingBalance: parseBool(hasOutstandingBalance),
         attendanceDate,

@@ -5,6 +5,7 @@ import {
   ATTENDANCE_STATUSES,
   FEE_STATUSES,
   GENDERS,
+  GUARDIAN_RELATIONSHIPS,
   STUDENT_STATUSES,
   parseBool,
   parseEnum,
@@ -26,6 +27,9 @@ interface RawFilterQuery {
   gender?: string;
   studentStatus?: string;
   hasParent?: string;
+  guardianName?: string;
+  guardianRelationship?: string;
+  hasGuardianContact?: string;
   feeStatus?: string;
   hasOutstandingBalance?: string;
   attendanceDate?: string;
@@ -44,6 +48,9 @@ function parseFilters(q: RawFilterQuery) {
     gender: parseEnum(q.gender, GENDERS, "gender"),
     studentStatus: parseEnum(q.studentStatus, STUDENT_STATUSES, "studentStatus"),
     hasParent: parseBool(q.hasParent),
+    guardianName: q.guardianName,
+    guardianRelationship: parseEnum(q.guardianRelationship, GUARDIAN_RELATIONSHIPS, "guardianRelationship"),
+    hasGuardianContact: parseBool(q.hasGuardianContact),
     feeStatus: parseEnum(q.feeStatus, FEE_STATUSES, "feeStatus"),
     hasOutstandingBalance: parseBool(q.hasOutstandingBalance),
     attendanceDate: q.attendanceDate,

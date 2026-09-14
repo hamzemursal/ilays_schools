@@ -118,6 +118,9 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
       gender: filters.gender || undefined,
       studentStatus: filters.studentStatus || undefined,
       hasParent: filters.hasParent === "" ? undefined : filters.hasParent === "true",
+      guardianName: filters.guardianName.trim() || undefined,
+      guardianRelationship: filters.guardianRelationship || undefined,
+      hasGuardianContact: filters.hasGuardianContact === "" ? undefined : filters.hasGuardianContact === "true",
       feeStatus: filters.feeStatus || undefined,
       hasOutstandingBalance: filters.hasOutstandingBalance === "" ? undefined : filters.hasOutstandingBalance === "true",
       attendanceStatus: filters.attendanceTodayStatus || undefined,
@@ -135,6 +138,12 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
     const handle = setTimeout(() => setDebouncedSearch(filters.search), 300);
     return () => clearTimeout(handle);
   }, [filters.search]);
+
+  const [debouncedGuardianName, setDebouncedGuardianName] = useState(filters.guardianName);
+  useEffect(() => {
+    const handle = setTimeout(() => setDebouncedGuardianName(filters.guardianName), 300);
+    return () => clearTimeout(handle);
+  }, [filters.guardianName]);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -155,6 +164,9 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
     filters.gender,
     filters.studentStatus,
     filters.hasParent,
+    debouncedGuardianName,
+    filters.guardianRelationship,
+    filters.hasGuardianContact,
     filters.feeStatus,
     filters.hasOutstandingBalance,
     filters.attendanceTodayStatus,
@@ -182,6 +194,9 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
     filters.gender,
     filters.studentStatus,
     filters.hasParent,
+    debouncedGuardianName,
+    filters.guardianRelationship,
+    filters.hasGuardianContact,
     filters.feeStatus,
     filters.hasOutstandingBalance,
     filters.attendanceTodayStatus,

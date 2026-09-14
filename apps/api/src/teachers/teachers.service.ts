@@ -14,10 +14,15 @@ import { CreateTeacherAssignmentInputDto } from "./dto/create-teacher-assignment
 import { UpdateTeacherDto } from "./dto/update-teacher.dto";
 import { UpdateMyTeacherProfileDto } from "./dto/update-my-teacher-profile.dto";
 
+// Includes the school a given assignment is actually AT — never assume
+// that's the same as the teacher's own home school (Teacher.schoolId);
+// TeacherAssignment.school is what the Teacher Portal's multi-school
+// grouping is built from.
 const ASSIGNMENT_INCLUDE = {
   subject: true,
   section: { include: { class: true } },
   academicYear: true,
+  school: { select: { id: true, name: true, type: true } },
 } as const;
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -140,6 +145,41 @@ export class TeachersService {
     return this.prisma.teacher.findMany({
       where: { schoolId },
       include: { assignments: { include: ASSIGNMENT_INCLUDE } },
+      orderBy: { lastName: "asc" },
+    });
+  }
+
+  // Backs "assign an existing teacher to also teach at this school" — a
+  // teacher's Teacher row lives at one home school, so an admin at a
+  // DIFFERENT school needs a way to find that existing person (by name,
+  // employee number, or email) before calling addAssignment, rather than
+  // ever creating a second Teacher record for someone who already has one.
+  // Scoped to the organization, not to `schoolId` — that's the whole point.
+  async searchAcrossOrg(actor: AuthenticatedUser, schoolId: string, query: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    if (query.trim().length < 2) return [];
+
+    return this.prisma.teacher.findMany({
+      where: {
+        status: "ACTIVE",
+        school: { organizationId: actor.organizationId! },
+        OR: [
+          { firstName: { contains: query, mode: "insensitive" } },
+          { lastName: { contains: query, mode: "insensitive" } },
+          { employeeNumber: { contains: query, mode: "insensitive" } },
+          { email: { contains: query, mode: "insensitive" } },
+        ],
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        employeeNumber: true,
+        email: true,
+        phone: true,
+        school: { select: { id: true, name: true, type: true } },
+      },
+      take: 10,
       orderBy: { lastName: "asc" },
     });
   }
@@ -299,7 +339,7 @@ export class TeachersService {
 
         return tx.teacher.findUniqueOrThrow({
           where: { id: teacher.id },
-          include: { assignments: { include: { subject: true, section: true } } },
+          include: { assignments: { include: ASSIGNMENT_INCLUDE } },
         });
       }, { timeout: 30_000 });
     } catch (error) {
@@ -310,11 +350,20 @@ export class TeachersService {
     }
   }
 
+  // A teacher may be assigned to teach at a DIFFERENT school than the one
+  // that employs them (Teacher.schoolId is just their home/employment
+  // record) — so this deliberately looks the teacher up across the whole
+  // organization, not scoped to `schoolId`, then relies on
+  // assertAssignmentBelongsToSchool to guarantee the assignment itself
+  // (section/subject/year) genuinely belongs to `schoolId`. Cross-organization
+  // is still impossible: the lookup is scoped by `school.organizationId`.
   async addAssignment(actor: AuthenticatedUser, schoolId: string, teacherId: string, dto: CreateTeacherAssignmentInputDto) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
 
-    const teacher = await this.prisma.teacher.findFirst({ where: { id: teacherId, schoolId } });
-    if (!teacher) throw new NotFoundException("Teacher not found in this school");
+    const teacher = await this.prisma.teacher.findFirst({
+      where: { id: teacherId, school: { organizationId: actor.organizationId! } },
+    });
+    if (!teacher) throw new NotFoundException("Teacher not found in your organization");
 
     await this.assertAssignmentBelongsToSchool(schoolId, dto);
 
@@ -327,7 +376,7 @@ export class TeachersService {
           sectionId: dto.sectionId,
           subjectId: dto.subjectId,
         },
-        include: { subject: true, section: true },
+        include: ASSIGNMENT_INCLUDE,
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -337,13 +386,21 @@ export class TeachersService {
     }
   }
 
+  // Same cross-school-same-org lookup as addAssignment (a teacher's home
+  // school and the school removing their assignment here can differ) —
+  // but the assignment lookup itself now explicitly checks schoolId too,
+  // which the old same-school teacher check made redundant; without it,
+  // relaxing the teacher lookup would let this school's admin delete an
+  // assignment that's actually at some OTHER school this teacher teaches at.
   async removeAssignment(actor: AuthenticatedUser, schoolId: string, teacherId: string, assignmentId: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    const teacher = await this.prisma.teacher.findFirst({ where: { id: teacherId, schoolId } });
-    if (!teacher) throw new NotFoundException("Teacher not found in this school");
+    const teacher = await this.prisma.teacher.findFirst({
+      where: { id: teacherId, school: { organizationId: actor.organizationId! } },
+    });
+    if (!teacher) throw new NotFoundException("Teacher not found in your organization");
 
-    const assignment = await this.prisma.teacherAssignment.findFirst({ where: { id: assignmentId, teacherId } });
-    if (!assignment) throw new NotFoundException("Assignment not found for this teacher");
+    const assignment = await this.prisma.teacherAssignment.findFirst({ where: { id: assignmentId, teacherId, schoolId } });
+    if (!assignment) throw new NotFoundException("Assignment not found for this teacher at this school");
 
     await this.prisma.teacherAssignment.delete({ where: { id: assignmentId } });
     return { success: true };

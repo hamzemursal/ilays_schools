@@ -445,9 +445,30 @@ describe("TeachersService.addAssignment / removeAssignment", () => {
     return { academicYearId: "year-1", sectionId: "sec-1", subjectId: "subj-1" };
   }
 
-  it("addAssignment throws NotFoundException for a teacher not in this school", async () => {
+  it("addAssignment throws NotFoundException for a teacher not in this organization", async () => {
     prisma.teacher.findFirst.mockResolvedValue(null);
     await expect(service.addAssignment(ACTOR, "school-1", "teacher-1", dto())).rejects.toThrow(NotFoundException);
+    await expect(service.addAssignment(ACTOR, "school-1", "teacher-1", dto())).rejects.toThrow(
+      "Teacher not found in your organization",
+    );
+  });
+
+  // The multi-school feature itself: a teacher whose Teacher row's home
+  // school is NOT "school-1" must still be assignable here, as long as
+  // they're in the same organization — the lookup is by organizationId,
+  // never by schoolId.
+  it("addAssignment succeeds for a teacher whose home school differs from this one, same organization", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1", schoolId: "some-other-school" });
+    prisma.teacherAssignment.create.mockResolvedValue({ id: "assignment-1" });
+
+    await service.addAssignment(ACTOR, "school-1", "teacher-1", dto());
+
+    expect(prisma.teacher.findFirst).toHaveBeenCalledWith({
+      where: { id: "teacher-1", school: { organizationId: "org-1" } },
+    });
+    expect(prisma.teacherAssignment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ teacherId: "teacher-1", schoolId: "school-1" }) }),
+    );
   });
 
   it("addAssignment translates a P2002 violation into a ConflictException with a specific message", async () => {
@@ -458,7 +479,7 @@ describe("TeachersService.addAssignment / removeAssignment", () => {
     );
   });
 
-  it("removeAssignment throws NotFoundException for a teacher not in this school", async () => {
+  it("removeAssignment throws NotFoundException for a teacher not in this organization", async () => {
     prisma.teacher.findFirst.mockResolvedValue(null);
     await expect(service.removeAssignment(ACTOR, "school-1", "teacher-1", "assignment-1")).rejects.toThrow(NotFoundException);
   });
@@ -471,12 +492,71 @@ describe("TeachersService.addAssignment / removeAssignment", () => {
     );
   });
 
+  // Now that the teacher lookup is org-wide rather than same-school, the
+  // assignment lookup is what must stop this school's admin from deleting
+  // an assignment that's actually at a DIFFERENT school this teacher
+  // teaches at — asserted explicitly since the old same-school teacher
+  // check used to make this redundant.
+  it("removeAssignment throws NotFoundException when the assignment belongs to a different school", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.teacherAssignment.findFirst.mockResolvedValue(null); // findFirst is given schoolId in its where, so a cross-school row is never returned
+    await expect(service.removeAssignment(ACTOR, "school-1", "teacher-1", "assignment-1")).rejects.toThrow(NotFoundException);
+    expect(prisma.teacherAssignment.findFirst).toHaveBeenCalledWith({
+      where: { id: "assignment-1", teacherId: "teacher-1", schoolId: "school-1" },
+    });
+  });
+
   it("removeAssignment deletes the assignment once ownership is confirmed", async () => {
     prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
     prisma.teacherAssignment.findFirst.mockResolvedValue({ id: "assignment-1", teacherId: "teacher-1" });
     const result = await service.removeAssignment(ACTOR, "school-1", "teacher-1", "assignment-1");
     expect(prisma.teacherAssignment.delete).toHaveBeenCalledWith({ where: { id: "assignment-1" } });
     expect(result).toEqual({ success: true });
+  });
+});
+
+describe("TeachersService.searchAcrossOrg", () => {
+  let prisma: MockPrisma;
+  let service: TeachersService;
+
+  beforeEach(() => {
+    prisma = createMockPrisma();
+    ({ service } = createService(prisma));
+  });
+
+  it("returns nothing for a query shorter than 2 characters, without querying the database", async () => {
+    const result = await service.searchAcrossOrg(ACTOR, "school-1", "A");
+    expect(result).toEqual([]);
+    expect(prisma.teacher.findMany).not.toHaveBeenCalled();
+  });
+
+  it("searches by first/last name, employee number, and email", async () => {
+    prisma.teacher.findMany.mockResolvedValue([]);
+    await service.searchAcrossOrg(ACTOR, "school-1", "Ahmed");
+    const where = prisma.teacher.findMany.mock.calls[0][0].where;
+    expect(where.OR).toContainEqual({ firstName: { contains: "Ahmed", mode: "insensitive" } });
+    expect(where.OR).toContainEqual({ lastName: { contains: "Ahmed", mode: "insensitive" } });
+    expect(where.OR).toContainEqual({ employeeNumber: { contains: "Ahmed", mode: "insensitive" } });
+    expect(where.OR).toContainEqual({ email: { contains: "Ahmed", mode: "insensitive" } });
+  });
+
+  // The whole point: results span every school in the organization, not
+  // just schoolId — an admin at School B must be able to find a teacher
+  // whose home Teacher row is at School A.
+  it("scopes the search to the organization, not to a single school", async () => {
+    prisma.teacher.findMany.mockResolvedValue([]);
+    await service.searchAcrossOrg(ACTOR, "school-1", "Ahmed");
+    const where = prisma.teacher.findMany.mock.calls[0][0].where;
+    expect(where.school).toEqual({ organizationId: "org-1" });
+    expect(where.schoolId).toBeUndefined();
+  });
+
+  it("includes each result's home school, so the admin can see where they already teach", async () => {
+    prisma.teacher.findMany.mockResolvedValue([
+      { id: "teacher-1", firstName: "Ahmed", lastName: "Mohamed", employeeNumber: "EMP-0002", email: null, phone: "0611111111", school: { id: "school-2", name: "Ilays Secondary School", type: "SECONDARY" } },
+    ]);
+    const result = await service.searchAcrossOrg(ACTOR, "school-1", "Ahmed");
+    expect(result[0].school).toEqual({ id: "school-2", name: "Ilays Secondary School", type: "SECONDARY" });
   });
 });
 

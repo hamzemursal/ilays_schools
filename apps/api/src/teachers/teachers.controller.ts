@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { TeachersService } from "./teachers.service";
 import { DocumentsService } from "../documents/documents.service";
@@ -17,9 +17,17 @@ export class TeachersController {
     private readonly documents: DocumentsService,
   ) {}
 
+  // Bare GET stays dual-purpose, same as GuardiansController: ?search=...
+  // is the org-wide "find an existing teacher to assign here" lookup;
+  // no search param returns this school's own teacher list as before.
   @RequirePermissions("teachers.view")
   @Get()
-  list(@CurrentUser() user: AuthenticatedUser, @Param("schoolId") schoolId: string) {
+  list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Query("search") search?: string,
+  ) {
+    if (search !== undefined) return this.teachers.searchAcrossOrg(user, schoolId, search);
     return this.teachers.listForSchool(user, schoolId);
   }
 

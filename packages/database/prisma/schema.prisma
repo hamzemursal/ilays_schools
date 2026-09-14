@@ -59,6 +59,11 @@ model School {
   subjects      Subject[]
   enrollments   StudentEnrollment[]
   teachers      Teacher[]
+  // A teacher's own Teacher row lives at exactly one "home" school (above),
+  // but a TeacherAssignment may point at a *different* school's section —
+  // this is the multi-school teaching relation, kept separate from
+  // `teachers` above on purpose.
+  teacherAssignments TeacherAssignment[]
   invitations   Invitation[]
   exams         Exam[]
   feeStructures FeeStructure[]
@@ -515,7 +520,16 @@ model TeacherAssignment {
   id             String       @id @default(uuid())
   teacherId      String
   teacher        Teacher      @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  // Deliberately independent of Teacher.schoolId (the teacher's home/
+  // employment school) — this is what a teacher may teach at, which can be
+  // a different school in the same organization than the one that employs
+  // them. sectionId alone would already pin the assignment to one real
+  // school transitively (Section -> Class -> Division -> School), but a
+  // direct, indexed, FK-enforced column here is what makes "every
+  // assignment at this school" and "every assignment for this teacher
+  // across schools" both cheap, indexed queries instead of a multi-hop join.
   schoolId       String
+  school         School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   academicYearId String
   academicYear   AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   sectionId      String
@@ -526,6 +540,7 @@ model TeacherAssignment {
   createdAt DateTime @default(now())
 
   @@unique([teacherId, sectionId, subjectId, academicYearId])
+  @@index([teacherId, schoolId])
   @@map("teacher_assignments")
 }
 

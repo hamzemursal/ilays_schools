@@ -1376,11 +1376,27 @@ export type TeacherStatus = "ACTIVE" | "ON_LEAVE" | "INACTIVE";
 
 export interface TeacherAssignmentRecord {
   id: string;
+  // The school this specific assignment is AT — not necessarily the
+  // teacher's own home school (see Teacher.schoolId elsewhere); a teacher
+  // can hold assignments at more than one school in the organization.
   schoolId: string;
+  school: { id: string; name: string; type: SchoolType };
   academicYearId: string;
   subject: { id: string; name: string };
   section: { id: string; name: string; class: { id: string; name: string } };
   academicYear: { id: string; name: string };
+}
+
+export interface TeacherSearchResult {
+  id: string;
+  firstName: string;
+  lastName: string;
+  employeeNumber: string;
+  email: string | null;
+  phone: string | null;
+  // Where this teacher already has their Teacher profile — shown so an
+  // admin assigning them at a different school can see that up front.
+  school: { id: string; name: string; type: SchoolType };
 }
 
 export interface Teacher {
@@ -2274,6 +2290,11 @@ export const api = {
 
   listTeachers: (accessToken: string, schoolId: string) =>
     request<Teacher[]>(`/schools/${schoolId}/teachers`, { accessToken }),
+  // Org-wide, not school-wide — backs "assign an existing teacher to also
+  // teach at this school" so a second Teacher profile is never created for
+  // someone who already has one elsewhere in the organization.
+  searchTeachers: (accessToken: string, schoolId: string, search: string) =>
+    request<TeacherSearchResult[]>(`/schools/${schoolId}/teachers${auditLogQs({ search })}`, { accessToken }),
   createTeacher: (accessToken: string, schoolId: string, body: CreateTeacherInput) =>
     request<Teacher>(`/schools/${schoolId}/teachers`, { method: "POST", body, accessToken }),
   getTeacher: (accessToken: string, schoolId: string, teacherId: string) =>

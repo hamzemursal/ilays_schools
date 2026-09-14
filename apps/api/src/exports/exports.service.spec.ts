@@ -154,9 +154,24 @@ describe("ExportsService.exportStudentDirectory — Advanced Student List export
 
     const csv = await service.exportStudentDirectory(ACTOR, "school-1", { academicYearId: "year-1" }, undefined, undefined);
 
-    expect(csv.split("\r\n")[0]).toBe(
-      "Student Name,Student ID,Roll Number,Class,Section,Attendance Today,Fee Status,Parent Name,Parent Contact",
+    expect(csv.split("\r\n")[0]).toBe("Student Name,Student ID,Roll Number,Gender,Class,Section,Attendance Today");
+  });
+
+  it("exports Morning Session and Afternoon Session as separate columns, with a real Not Recorded — never Absent — for an unmarked session", async () => {
+    const { service, directory } = createService();
+    directory.searchAll.mockResolvedValue([row({ attendanceToday: { MORNING: "PRESENT", AFTERNOON: null } })]);
+
+    const csv = await service.exportStudentDirectory(
+      ACTOR,
+      "school-1",
+      { academicYearId: "year-1" },
+      ["attendanceMorning", "attendanceAfternoon"],
+      undefined,
     );
+
+    expect(csv.split("\r\n")[0]).toBe("Morning Session,Afternoon Session");
+    expect(csv.split("\r\n")[1]).toBe("PRESENT,Not Recorded");
+    expect(csv).not.toContain("Absent");
   });
 
   it("exports exactly the requested columns, in the requested order, and ignores unknown ids", async () => {

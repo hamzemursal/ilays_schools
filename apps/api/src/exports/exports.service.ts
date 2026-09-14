@@ -35,6 +35,8 @@ const DIRECTORY_COLUMNS: Record<string, CsvColumn<DirectoryRow>> = {
         ? `AM: ${r.attendanceToday.MORNING ?? "Not Recorded"}, PM: ${r.attendanceToday.AFTERNOON ?? "Not Recorded"}`
         : "",
   },
+  attendanceMorning: { header: "Morning Session", value: (r) => (r.attendanceToday ? (r.attendanceToday.MORNING ?? "Not Recorded") : "") },
+  attendanceAfternoon: { header: "Afternoon Session", value: (r) => (r.attendanceToday ? (r.attendanceToday.AFTERNOON ?? "Not Recorded") : "") },
   feeStatus: { header: "Fee Status", value: (r) => r.finance?.feeStatus ?? "" },
   totalFees: { header: "Total Fees", value: (r) => money(r.finance?.totalCharged) },
   amountPaid: { header: "Amount Paid", value: (r) => money(r.finance?.totalPaid) },
@@ -49,7 +51,10 @@ const DIRECTORY_COLUMNS: Record<string, CsvColumn<DirectoryRow>> = {
   parentEmail: { header: "Parent Email", value: (r) => r.guardian?.email ?? "" },
   parentAddress: { header: "Parent Address", value: (r) => r.guardian?.address ?? "" },
 };
-const DEFAULT_DIRECTORY_COLUMNS = ["name", "studentId", "rollNumber", "class", "section", "attendanceToday", "feeStatus", "parentName", "parentContact"];
+// Matches the frontend's always-on core columns — used only as a fallback
+// when a caller omits `columns` entirely; the Advanced Student List itself
+// always sends explicit columns (core + whatever's currently checked).
+const DEFAULT_DIRECTORY_COLUMNS = ["name", "studentId", "rollNumber", "gender", "class", "section", "attendanceToday"];
 
 @Injectable()
 export class ExportsService {

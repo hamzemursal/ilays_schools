@@ -140,8 +140,13 @@ describe("StudentListFilters — Search", () => {
 });
 
 describe("StudentListFilters — category tab bar", () => {
-  it("shows all five categories when finance is viewable", () => {
-    renderFilters({ canViewFinance: true });
+  const bothLevels = [
+    klass({ id: "c1", division: { id: "div-1", type: "PRIMARY" } }),
+    klass({ id: "c2", division: { id: "div-2", type: "SECONDARY" } }),
+  ];
+
+  it("shows all five categories when finance is viewable and the school has more than one level", () => {
+    renderFilters({ canViewFinance: true, classes: bothLevels });
     expect(screen.getByRole("button", { name: /^Student/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Parents & Guardians/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Fees & Payments/ })).toBeInTheDocument();
@@ -152,6 +157,11 @@ describe("StudentListFilters — category tab bar", () => {
   it("omits the Fees & Payments tab entirely when canViewFinance is false", () => {
     renderFilters({ canViewFinance: false });
     expect(screen.queryByRole("button", { name: /^Fees & Payments/ })).not.toBeInTheDocument();
+  });
+
+  it("omits the Academic tab entirely when the school only has one level (Class/Section are in the main row already)", () => {
+    renderFilters({ classes: [klass({ division: { id: "div-1", type: "PRIMARY" } })] });
+    expect(screen.queryByRole("button", { name: /^Academic/ })).not.toBeInTheDocument();
   });
 
   it("shows no category panel until a tab is clicked", () => {
@@ -317,9 +327,8 @@ describe("StudentListFilters — Attendance category", () => {
   });
 });
 
-describe("StudentListFilters — Academic category", () => {
-  it("only offers classes matching the selected level", async () => {
-    const user = userEvent.setup();
+describe("StudentListFilters — Class/Section (main row)", () => {
+  it("only offers classes matching the selected level", () => {
     renderFilters({
       classes: [
         klass({ id: "c1", name: "Class 1", division: { id: "div-1", type: "PRIMARY" } }),
@@ -327,27 +336,46 @@ describe("StudentListFilters — Academic category", () => {
       ],
       state: defaultState({ levelFilter: "SECONDARY" }),
     });
-    await openCategory(user, "Academic");
     const classSelect = fieldSelect("Class");
     expect(within(classSelect).queryByText("Class 1")).not.toBeInTheDocument();
     expect(within(classSelect).getByText("Form 1")).toBeInTheDocument();
   });
 
-  it("hides the level filter when the school only has one division type", async () => {
+  it("clears the section when the class changes", async () => {
     const user = userEvent.setup();
+    const { onChange } = renderFilters({ state: defaultState({ sectionId: "section-1" }) });
+    await user.selectOptions(fieldSelect("Class"), "class-1");
+    expect(onChange).toHaveBeenCalledWith({ classId: "class-1", sectionId: "" });
+  });
+
+  it("disables the Section selector until a class is chosen", () => {
+    renderFilters({ state: defaultState({ classId: "" }) });
+    expect(fieldSelect("Section")).toBeDisabled();
+  });
+
+  it("offers only the selected class's own sections", () => {
+    renderFilters({ state: defaultState({ classId: "class-1" }) });
+    const sectionSelect = fieldSelect("Section");
+    expect(sectionSelect).toBeEnabled();
+    expect(within(sectionSelect).getByText("A")).toBeInTheDocument();
+    expect(within(sectionSelect).getByText("B")).toBeInTheDocument();
+  });
+});
+
+describe("StudentListFilters — Academic category (School Level)", () => {
+  const bothLevels = [
+    klass({ id: "c1", division: { id: "div-1", type: "PRIMARY" } }),
+    klass({ id: "class-1", division: { id: "div-2", type: "SECONDARY" } }),
+  ];
+
+  it("hides the level filter (and the whole Academic tab) when the school only has one division type", () => {
     renderFilters({ classes: [klass({ division: { id: "div-1", type: "PRIMARY" } })] });
-    await openCategory(user, "Academic");
     expect(queryFieldSelect("School Level")).not.toBeInTheDocument();
   });
 
   it("shows the level filter only when both PRIMARY and SECONDARY classes exist", async () => {
     const user = userEvent.setup();
-    renderFilters({
-      classes: [
-        klass({ id: "c1", division: { id: "div-1", type: "PRIMARY" } }),
-        klass({ id: "c2", division: { id: "div-2", type: "SECONDARY" } }),
-      ],
-    });
+    renderFilters({ classes: bothLevels });
     await openCategory(user, "Academic");
     expect(fieldSelect("School Level")).toBeInTheDocument();
   });
@@ -355,10 +383,7 @@ describe("StudentListFilters — Academic category", () => {
   it("clears the selected class and section when the level changes", async () => {
     const user = userEvent.setup();
     const { onChange } = renderFilters({
-      classes: [
-        klass({ id: "c1", division: { id: "div-1", type: "PRIMARY" } }),
-        klass({ id: "c2", division: { id: "div-2", type: "SECONDARY" } }),
-      ],
+      classes: bothLevels,
       state: defaultState({ classId: "c1", sectionId: "section-1" }),
     });
     await openCategory(user, "Academic");
@@ -366,38 +391,10 @@ describe("StudentListFilters — Academic category", () => {
     expect(onChange).toHaveBeenCalledWith({ levelFilter: "SECONDARY", classId: "", sectionId: "" });
   });
 
-  it("clears the section when the class changes", async () => {
-    const user = userEvent.setup();
-    const { onChange } = renderFilters({ state: defaultState({ sectionId: "section-1" }) });
-    await openCategory(user, "Academic");
-    await user.selectOptions(fieldSelect("Class"), "class-1");
-    expect(onChange).toHaveBeenCalledWith({ classId: "class-1", sectionId: "" });
-  });
-
-  it("disables the Section selector until a class is chosen", async () => {
-    const user = userEvent.setup();
-    renderFilters({ state: defaultState({ classId: "" }) });
-    await openCategory(user, "Academic");
-    expect(fieldSelect("Section")).toBeDisabled();
-  });
-
-  it("offers only the selected class's own sections", async () => {
-    const user = userEvent.setup();
-    renderFilters({ state: defaultState({ classId: "class-1" }) });
-    await openCategory(user, "Academic");
-    const sectionSelect = fieldSelect("Section");
-    expect(sectionSelect).toBeEnabled();
-    expect(within(sectionSelect).getByText("A")).toBeInTheDocument();
-    expect(within(sectionSelect).getByText("B")).toBeInTheDocument();
-  });
-
-  it("resets level, class and section together when Reset Academic is clicked", async () => {
+  it("resets the level filter when Reset Academic is clicked", async () => {
     const user = userEvent.setup();
     const { onChange } = renderFilters({
-      classes: [
-        klass({ id: "c1", division: { id: "div-1", type: "PRIMARY" } }),
-        klass({ id: "class-1", division: { id: "div-2", type: "SECONDARY" } }),
-      ],
+      classes: bothLevels,
       state: defaultState({ levelFilter: "SECONDARY", classId: "class-1", sectionId: "section-1" }),
     });
     await openCategory(user, "Academic");

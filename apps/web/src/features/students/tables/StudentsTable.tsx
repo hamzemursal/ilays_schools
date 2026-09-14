@@ -9,7 +9,7 @@ import { DataTable, type Column, type TableSelection } from "@/components/ui/Dat
 import { Badge } from "@/components/ui/Badge";
 import { ActionsMenu } from "@/components/ui/ActionsMenu";
 import { StudentAvatar } from "../components/StudentAvatar";
-import { AttendanceTodayCell } from "../list/AttendanceTodayCell";
+import { AttendanceTodayCell, SingleSessionPill } from "../list/AttendanceTodayCell";
 import { FeeStatusBadge } from "../list/FeeStatusBadge";
 
 const STATUS_TONE: Record<StudentStatus, "success" | "accent" | "neutral" | "warning"> = {
@@ -55,23 +55,22 @@ export function StudentsTable({
   // guardians.view permission the destination profile route itself
   // enforces, so this never offers a link the backend would refuse anyway.
   canViewGuardianProfile: boolean;
+  // Only OPTIONAL columns (see columns.ts) — the core columns below are
+  // always rendered regardless of this set, per the approved design's
+  // "core student information is always visible and cannot be hidden" rule.
   visibleColumns: Set<string>;
   academicYearName: string;
 }) {
   const router = useRouter();
   const has = (id: string) => visibleColumns.has(id);
 
-  const columns: Column<StudentDirectoryItem>[] = [];
-
-  if (has("photo")) {
-    columns.push({
+  const columns: Column<StudentDirectoryItem>[] = [
+    {
       key: "photo",
       header: "Photo",
       render: (s) => <StudentAvatar accessToken={accessToken} studentId={s.studentId} name={`${s.firstName} ${s.lastName}`} />,
-    });
-  }
-  if (has("name")) {
-    columns.push({
+    },
+    {
       key: "name",
       header: "Student",
       sortValue: (s) => `${s.lastName} ${s.firstName}`,
@@ -80,22 +79,28 @@ export function StudentsTable({
           {s.firstName} {s.lastName}
         </span>
       ),
-    });
-  }
-  if (has("studentId")) {
-    columns.push({
+    },
+    {
       key: "studentId",
       header: "Student ID",
       sortValue: (s) => s.studentNumber,
       render: (s) => <span className="font-mono text-xs text-foreground-soft">{s.studentNumber}</span>,
-    });
-  }
-  if (has("rollNumber")) {
-    columns.push({ key: "rollNumber", header: "Roll", sortValue: (s) => s.rollNumber, render: (s) => s.rollNumber });
-  }
-  if (has("gender")) {
-    columns.push({ key: "gender", header: "Gender", render: (s) => (s.sex === "MALE" ? "Male" : "Female") });
-  }
+    },
+    { key: "rollNumber", header: "Roll", sortValue: (s) => s.rollNumber, render: (s) => s.rollNumber },
+    { key: "gender", header: "Gender", render: (s) => (s.sex === "MALE" ? "Male" : "Female") },
+    {
+      key: "classSection",
+      header: "Class / Section",
+      sortValue: (s) => `${s.className} ${s.sectionName}`,
+      render: (s) => `${s.className} · ${s.sectionName}`,
+    },
+    {
+      key: "attendanceToday",
+      header: "Attendance",
+      render: (s) => (s.attendanceToday ? <AttendanceTodayCell attendance={s.attendanceToday} /> : DASH),
+    },
+  ];
+
   if (has("dateOfBirth")) {
     columns.push({ key: "dateOfBirth", header: "Date of Birth", render: (s) => formatDate(s.dateOfBirth) });
   }
@@ -110,22 +115,48 @@ export function StudentsTable({
       render: (s) => <Badge tone={STATUS_TONE[s.status]}>{s.status.charAt(0) + s.status.slice(1).toLowerCase()}</Badge>,
     });
   }
-  if (has("academicYear")) {
-    columns.push({ key: "academicYear", header: "Academic Year", render: () => academicYearName });
-  }
-  if (has("class") || has("section")) {
+  if (has("parentName")) {
     columns.push({
-      key: "classSection",
-      header: has("class") && has("section") ? "Class / Section" : has("class") ? "Class" : "Section",
-      sortValue: (s) => `${s.className} ${s.sectionName}`,
-      render: (s) => (has("class") && has("section") ? `${s.className} · ${s.sectionName}` : has("class") ? s.className : s.sectionName),
+      key: "parentName",
+      header: "Parent / Guardian",
+      render: (s) =>
+        !s.guardian ? (
+          DASH
+        ) : canViewGuardianProfile ? (
+          <Link
+            href={`/schools/${schoolId}/parents/${s.guardian.id}`}
+            onClick={(e) => e.stopPropagation()}
+            className="font-medium text-accent hover:underline"
+          >
+            {s.guardian.name}
+          </Link>
+        ) : (
+          <span className="text-foreground">{s.guardian.name}</span>
+        ),
     });
   }
-  if (has("attendanceToday")) {
+  if (has("parentContact")) {
+    columns.push({ key: "parentContact", header: "Parent Contact", render: (s) => s.guardian?.phone ?? DASH });
+  }
+  if (has("relationship")) {
+    columns.push({ key: "relationship", header: "Relationship", render: (s) => (s.guardian ? RELATIONSHIP_LABEL[s.guardian.relationship] : DASH) });
+  }
+  if (has("parentProfile")) {
     columns.push({
-      key: "attendanceToday",
-      header: "Attendance",
-      render: (s) => (s.attendanceToday ? <AttendanceTodayCell attendance={s.attendanceToday} /> : DASH),
+      key: "parentProfile",
+      header: "Parent Profile",
+      render: (s) =>
+        s.guardian && canViewGuardianProfile ? (
+          <Link
+            href={`/schools/${schoolId}/parents/${s.guardian.id}`}
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1 text-sm text-accent hover:underline"
+          >
+            View <ExternalLink className="size-3" />
+          </Link>
+        ) : (
+          DASH
+        ),
     });
   }
   if (has("feeStatus")) {
@@ -153,55 +184,22 @@ export function StudentsTable({
   if (has("lastPayment")) {
     columns.push({ key: "lastPayment", header: "Last Payment", render: (s) => (s.finance?.lastPaymentDate ? formatDate(s.finance.lastPaymentDate) : DASH) });
   }
-  if (has("parentName")) {
+  if (has("attendanceMorning")) {
     columns.push({
-      key: "parentName",
-      header: "Parent / Guardian",
-      render: (s) =>
-        !s.guardian ? (
-          DASH
-        ) : canViewGuardianProfile ? (
-          <Link
-            href={`/schools/${schoolId}/parents/${s.guardian.id}`}
-            onClick={(e) => e.stopPropagation()}
-            className="font-medium text-accent hover:underline"
-          >
-            {s.guardian.name}
-          </Link>
-        ) : (
-          <span className="text-foreground">{s.guardian.name}</span>
-        ),
+      key: "attendanceMorning",
+      header: "Morning Session",
+      render: (s) => (s.attendanceToday ? <SingleSessionPill status={s.attendanceToday.MORNING} /> : DASH),
     });
   }
-  if (has("relationship")) {
-    columns.push({ key: "relationship", header: "Relationship", render: (s) => (s.guardian ? RELATIONSHIP_LABEL[s.guardian.relationship] : DASH) });
-  }
-  if (has("parentContact")) {
-    columns.push({ key: "parentContact", header: "Parent Contact", render: (s) => s.guardian?.phone ?? DASH });
-  }
-  if (has("parentEmail")) {
-    columns.push({ key: "parentEmail", header: "Parent Email", render: (s) => s.guardian?.email ?? DASH });
-  }
-  if (has("parentAddress")) {
-    columns.push({ key: "parentAddress", header: "Parent Address", render: (s) => s.guardian?.address ?? DASH });
-  }
-  if (has("parentProfile")) {
+  if (has("attendanceAfternoon")) {
     columns.push({
-      key: "parentProfile",
-      header: "Parent Profile",
-      render: (s) =>
-        s.guardian && canViewGuardianProfile ? (
-          <Link
-            href={`/schools/${schoolId}/parents/${s.guardian.id}`}
-            onClick={(e) => e.stopPropagation()}
-            className="inline-flex items-center gap-1 text-sm text-accent hover:underline"
-          >
-            View <ExternalLink className="size-3" />
-          </Link>
-        ) : (
-          DASH
-        ),
+      key: "attendanceAfternoon",
+      header: "Afternoon Session",
+      render: (s) => (s.attendanceToday ? <SingleSessionPill status={s.attendanceToday.AFTERNOON} /> : DASH),
     });
+  }
+  if (has("academicYear")) {
+    columns.push({ key: "academicYear", header: "Academic Year", render: () => academicYearName });
   }
 
   columns.push({

@@ -31,6 +31,18 @@ function SessionPill({ label, status }: { label: string; status: AttendanceStatu
   );
 }
 
+// A single session's status on its own — for the optional "Morning Session"
+// / "Afternoon Session" columns, distinct from the always-visible combined
+// cell below which shows both sessions at once.
+export function SingleSessionPill({ status }: { status: AttendanceStatus | null }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-sm">
+      <span className={`size-1.5 rounded-full ${status ? STATUS_DOT[status] : "border border-foreground-muted bg-transparent"}`} />
+      <span className={status ? "text-foreground" : "text-foreground-muted"}>{status ? STATUS_LABEL[status] : "Not Recorded"}</span>
+    </span>
+  );
+}
+
 // Compact "AM ✓  PM ○" cell for the Advanced Student List. Clicking opens a
 // small popover with both sessions' full status — the row itself never
 // needs to grow to show both at once.

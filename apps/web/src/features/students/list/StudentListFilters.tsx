@@ -157,12 +157,20 @@ export function StudentListFilters({
       icon: CalendarCheck,
       count: (state.attendanceFilter !== "ALL" ? 1 : 0) + (state.attendanceTodayStatus ? 1 : 0) + (state.attendanceTodaySession ? 1 : 0),
     },
-    {
-      id: "ACADEMIC",
-      label: "Academic",
-      icon: GraduationCap,
-      count: (state.levelFilter !== "ALL" ? 1 : 0) + (state.classId ? 1 : 0) + (state.sectionId ? 1 : 0),
-    },
+    // Class and Section live in the main filter row (they, together with
+    // Academic Year, are what "controls" the list per the approved design) —
+    // School Level is the only thing left for this tab, so it's only worth
+    // showing when the school actually has more than one division to filter.
+    ...(showLevelFilter
+      ? [
+          {
+            id: "ACADEMIC" as const,
+            label: "Academic",
+            icon: GraduationCap,
+            count: state.levelFilter !== "ALL" ? 1 : 0,
+          },
+        ]
+      : []),
   ];
 
   function resetCategory(category: CategoryId) {
@@ -170,7 +178,7 @@ export function StudentListFilters({
     if (category === "PARENTS") onChange({ hasParent: "", guardianName: "", guardianRelationship: "", hasGuardianContact: "" });
     if (category === "FEES") onChange({ feeStatus: "", hasOutstandingBalance: "" });
     if (category === "ATTENDANCE") onChange({ attendanceFilter: "ALL", attendanceTodayStatus: "", attendanceTodaySession: "" });
-    if (category === "ACADEMIC") onChange({ levelFilter: "ALL", classId: "", sectionId: "" });
+    if (category === "ACADEMIC") onLevelChange("ALL");
   }
 
   const chips: { key: string; label: string; onRemove: () => void }[] = [];
@@ -301,6 +309,31 @@ export function StudentListFilters({
             </Select>
           </FormField>
         )}
+        <FormField label="Class" className="w-auto">
+          <Select value={state.classId} onChange={(e) => onClassChange(e.target.value)} className="w-auto min-w-[140px]">
+            <option value="">All Classes</option>
+            {classesForLevel.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+        <FormField label="Section" className="w-auto">
+          <Select
+            value={state.sectionId}
+            onChange={(e) => onChange({ sectionId: e.target.value })}
+            disabled={!selectedClass}
+            className="w-auto min-w-[130px]"
+          >
+            <option value="">All Sections</option>
+            {selectedClass?.sections.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </Select>
+        </FormField>
         <div className="relative min-w-[240px] flex-1">
           <label className="mb-1 block text-xs font-medium text-foreground-soft">Search</label>
           <div className="relative">
@@ -483,33 +516,11 @@ export function StudentListFilters({
 
           {activeCategory === "ACADEMIC" && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              {showLevelFilter && (
-                <FormField label="School Level">
-                  <Select value={state.levelFilter} onChange={(e) => onLevelChange(e.target.value as LevelFilter)}>
-                    <option value="ALL">All levels</option>
-                    <option value="SECONDARY">Secondary</option>
-                    <option value="PRIMARY">Primary</option>
-                  </Select>
-                </FormField>
-              )}
-              <FormField label="Class">
-                <Select value={state.classId} onChange={(e) => onClassChange(e.target.value)}>
-                  <option value="">All Classes</option>
-                  {classesForLevel.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </Select>
-              </FormField>
-              <FormField label="Section">
-                <Select value={state.sectionId} onChange={(e) => onChange({ sectionId: e.target.value })} disabled={!selectedClass}>
-                  <option value="">All Sections</option>
-                  {selectedClass?.sections.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
+              <FormField label="School Level">
+                <Select value={state.levelFilter} onChange={(e) => onLevelChange(e.target.value as LevelFilter)}>
+                  <option value="ALL">All levels</option>
+                  <option value="SECONDARY">Secondary</option>
+                  <option value="PRIMARY">Primary</option>
                 </Select>
               </FormField>
             </div>

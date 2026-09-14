@@ -39,29 +39,21 @@ function student(overrides: Partial<StudentDirectoryItem> = {}): StudentDirector
 }
 
 const ALL_COLUMN_IDS = new Set([
-  "photo",
-  "name",
-  "studentId",
-  "rollNumber",
-  "gender",
   "dateOfBirth",
   "admissionDate",
   "status",
-  "academicYear",
-  "class",
-  "section",
-  "attendanceToday",
+  "parentName",
+  "parentContact",
+  "relationship",
+  "parentProfile",
   "feeStatus",
   "totalFees",
   "amountPaid",
   "amountDue",
   "lastPayment",
-  "parentName",
-  "relationship",
-  "parentContact",
-  "parentEmail",
-  "parentAddress",
-  "parentProfile",
+  "attendanceMorning",
+  "attendanceAfternoon",
+  "academicYear",
 ]);
 
 function renderTable(overrides: Partial<React.ComponentProps<typeof StudentsTable>> = {}) {
@@ -99,27 +91,41 @@ describe("StudentsTable — loading/empty states", () => {
   });
 });
 
-describe("StudentsTable — default columns", () => {
-  it("renders the default column set's fields", () => {
-    renderTable();
+describe("StudentsTable — core columns (always visible, cannot be hidden)", () => {
+  it("renders every core column's fields with an empty visibleColumns set", () => {
+    renderTable({ visibleColumns: new Set() });
     expect(screen.getByText("STU-2027-00001")).toBeInTheDocument();
     expect(screen.getByText("Hodan Ali")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getByText("Female")).toBeInTheDocument();
     expect(screen.getByText("Class 1 · A")).toBeInTheDocument();
+    expect(screen.getByText(/AM.*Present/)).toBeInTheDocument();
+  });
+
+  it("never omits a core column, even when visibleColumns contains unrelated optional ids", () => {
+    renderTable({ visibleColumns: new Set(["feeStatus"]) });
+    expect(screen.getByText("Hodan Ali")).toBeInTheDocument();
+    expect(screen.getByText("Class 1 · A")).toBeInTheDocument();
+    expect(screen.getByText("Female")).toBeInTheDocument();
+  });
+});
+
+describe("StudentsTable — optional columns", () => {
+  it("omits every optional column by default (empty visibleColumns)", () => {
+    renderTable({ visibleColumns: new Set() });
+    expect(screen.queryByText("Amina Ali")).not.toBeInTheDocument();
+    expect(screen.queryByText("0611111111")).not.toBeInTheDocument();
+  });
+
+  it("shows Parent Name and Parent Contact once toggled on", () => {
+    renderTable({ visibleColumns: new Set(["parentName", "parentContact"]) });
     expect(screen.getByText("Amina Ali")).toBeInTheDocument();
     expect(screen.getByText("0611111111")).toBeInTheDocument();
   });
 
-  it("omits a column entirely when it isn't in visibleColumns", () => {
-    renderTable({ visibleColumns: new Set(["name", "studentId"]) });
-    expect(screen.queryByText("Class 1 · A")).not.toBeInTheDocument();
-    expect(screen.queryByText("Amina Ali")).not.toBeInTheDocument();
-  });
-
-  it("shows every registered column when all are toggled on", () => {
+  it("shows every registered optional column when all are toggled on", () => {
     renderTable({ visibleColumns: ALL_COLUMN_IDS });
     expect(screen.getByText("2026/2027")).toBeInTheDocument();
-    expect(screen.getByText("Female")).toBeInTheDocument();
     expect(screen.getByText("Mother")).toBeInTheDocument();
   });
 });
@@ -152,6 +158,26 @@ describe("StudentsTable — attendance today", () => {
   });
 });
 
+describe("StudentsTable — standalone Morning/Afternoon Session columns (optional)", () => {
+  it("shows each session's status on its own when toggled on, never labeling Not Recorded as Absent", () => {
+    renderTable({
+      students: [student({ attendanceToday: { MORNING: "PRESENT", AFTERNOON: null } })],
+      visibleColumns: new Set(["attendanceMorning", "attendanceAfternoon"]),
+    });
+    expect(screen.getByText("Present")).toBeInTheDocument();
+    expect(screen.getByText("Not Recorded")).toBeInTheDocument();
+    expect(screen.queryByText("Absent")).not.toBeInTheDocument();
+  });
+
+  it("shows a dash for each session column when attendanceToday is null", () => {
+    renderTable({
+      students: [student({ attendanceToday: null })],
+      visibleColumns: new Set(["attendanceMorning", "attendanceAfternoon"]),
+    });
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+});
+
 describe("StudentsTable — fee status", () => {
   it.each([
     ["PAID", "Paid"],
@@ -162,31 +188,32 @@ describe("StudentsTable — fee status", () => {
   ] as const)("shows the %s fee status as %s", (feeStatus, label) => {
     renderTable({
       students: [student({ finance: { totalCharged: 100, totalPaid: 0, balance: 100, feeStatus, lastPaymentDate: null } })],
+      visibleColumns: new Set(["feeStatus"]),
     });
     expect(screen.getByText(label)).toBeInTheDocument();
   });
 
   it("shows a dash when finance is null (no finance.ledger.view permission)", () => {
-    renderTable({ students: [student({ finance: null })] });
+    renderTable({ students: [student({ finance: null })], visibleColumns: new Set(["feeStatus"]) });
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 });
 
 describe("StudentsTable — parent/guardian", () => {
   it("links the parent name to their profile when canViewGuardianProfile is true", () => {
-    renderTable();
+    renderTable({ visibleColumns: new Set(["parentName"]) });
     const link = screen.getByRole("link", { name: "Amina Ali" });
     expect(link).toHaveAttribute("href", "/schools/school-1/parents/grd-1");
   });
 
   it("shows the parent name as plain text when canViewGuardianProfile is false", () => {
-    renderTable({ canViewGuardianProfile: false });
+    renderTable({ canViewGuardianProfile: false, visibleColumns: new Set(["parentName"]) });
     expect(screen.queryByRole("link", { name: "Amina Ali" })).not.toBeInTheDocument();
     expect(screen.getByText("Amina Ali")).toBeInTheDocument();
   });
 
   it("shows a dash for a student with no guardian on file", () => {
-    renderTable({ students: [student({ guardian: null })] });
+    renderTable({ students: [student({ guardian: null })], visibleColumns: new Set(["parentName"]) });
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 });

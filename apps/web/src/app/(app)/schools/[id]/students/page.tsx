@@ -23,9 +23,9 @@ import { runBulkAction, summarizeBulkResult } from "@/lib/bulkAction";
 import { StudentsTable } from "@/features/students/tables/StudentsTable";
 import { StudentListFilters, EMPTY_SECONDARY_FILTERS, type StudentListFilterState } from "@/features/students/list/StudentListFilters";
 import { StudentListSummaryCards } from "@/features/students/list/StudentListSummaryCards";
-import { ChooseColumnsPanel } from "@/features/students/list/ChooseColumnsPanel";
+import { VisibleColumnsSection } from "@/features/students/list/VisibleColumnsSection";
 import { ExportMenu } from "@/features/students/list/ExportMenu";
-import { loadColumnPrefs, saveColumnPrefs } from "@/features/students/list/columns";
+import { CORE_EXPORTABLE_COLUMN_IDS, loadColumnPrefs, saveColumnPrefs } from "@/features/students/list/columns";
 import { Archive, ArrowLeftRight, Upload, UserPlus } from "lucide-react";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -227,7 +227,7 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
           return rate < 75;
         });
 
-  function onChooseColumnsApply(columns: string[]) {
+  function onVisibleColumnsChange(columns: string[]) {
     setVisibleColumns(columns);
     saveColumnPrefs(columns);
   }
@@ -240,7 +240,9 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
     try {
       const ids =
         kind === "current" ? (result?.items.map((s) => s.enrollmentId) ?? []) : kind === "selected" ? [...selectedIds] : undefined;
-      await api.exportStudentDirectory(accessToken, schoolId, directoryFilters, visibleColumns, ids);
+      // The export always matches what's on screen — the always-on core
+      // columns plus whatever optional ones are currently checked.
+      await api.exportStudentDirectory(accessToken, schoolId, directoryFilters, [...CORE_EXPORTABLE_COLUMN_IDS, ...visibleColumns], ids);
     } catch (err) {
       show(err instanceof ApiError ? err.message : "Failed to export students", "danger");
     } finally {
@@ -331,8 +333,8 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
 
               <StudentListSummaryCards summary={summary} loading={!summary && !error} />
 
-              <div className="flex justify-end print:hidden">
-                <ChooseColumnsPanel visibleColumns={visibleColumns} onApply={onChooseColumnsApply} />
+              <div className="print:hidden">
+                <VisibleColumnsSection visibleColumns={visibleColumns} onChange={onVisibleColumnsChange} />
               </div>
 
               {canSelect && (

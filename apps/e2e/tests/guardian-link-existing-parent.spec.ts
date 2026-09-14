@@ -64,8 +64,11 @@ test("linking an existing parent to a new student reuses the real record instead
   await page.getByRole("link", { name: /View profile/ }).click();
   await expect(page).toHaveURL(/\/parents\//);
   await expect(page.getByRole("heading", { name: "Amina Ali" })).toBeVisible();
-  await expect(page.getByText("Hodan Ali")).toBeVisible();
-  await expect(page.getByText("Sakariye Hassan")).toBeVisible();
+  await expect(page.getByText("Hodan Ali", { exact: true })).toBeVisible();
+  // exact:true — the wizard's own "Sakariye Hassan created." toast can still
+  // be on screen this far into the test (toasts here don't auto-dismiss
+  // quickly) and would otherwise collide with a non-exact match.
+  await expect(page.getByText("Sakariye Hassan", { exact: true })).toBeVisible();
 
   // Cleanup: this test's only side effect on shared fixture data is this one
   // new student (and the StudentGuardian row cascade-deleted with it) — the

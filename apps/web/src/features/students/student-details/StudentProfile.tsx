@@ -99,6 +99,7 @@ export function StudentProfile({ studentId }: { studentId: string }) {
   const canUpdate = user?.permissions.includes("students.update") ?? false;
   const canDelete = user?.permissions.includes("students.archive") ?? false;
   const canManageGuardians = user?.permissions.includes("guardians.manage") ?? false;
+  const canViewGuardianProfile = user?.permissions.includes("guardians.view") ?? false;
   const canTransfer = (user?.permissions.includes("transfers.create") ?? false) && !!activeEnrollment;
   // Financial data is opt-in visibility, not default — a Teacher viewing a
   // student's profile never sees this tab at all, per the non-negotiable
@@ -318,6 +319,7 @@ export function StudentProfile({ studentId }: { studentId: string }) {
           {addingGuardian && accessToken && (
             <GuardianForm
               accessToken={accessToken}
+              schoolId={activeEnrollment?.school.id ?? student.enrollments[0]?.school.id ?? ""}
               studentId={student.id}
               onCancel={() => setAddingGuardian(false)}
               onAdded={(guardian: GuardianRecord) => {
@@ -330,7 +332,14 @@ export function StudentProfile({ studentId }: { studentId: string }) {
           {student.guardians.length === 0 && !addingGuardian ? (
             <EmptyState icon={User} title="No guardians on file" description="Add a parent or guardian for this student." />
           ) : (
-            student.guardians.map((g) => <GuardianCard key={g.id} guardian={g} />)
+            student.guardians.map((g) => (
+              <GuardianCard
+                key={g.id}
+                guardian={g}
+                schoolId={activeEnrollment?.school.id ?? student.enrollments[0]?.school.id}
+                canViewProfile={canViewGuardianProfile}
+              />
+            ))
           )}
         </div>
       </Card>

@@ -384,6 +384,10 @@ export interface GuardianSearchResult {
   lastName: string;
   phone: string | null;
   email: string | null;
+  // How many students this guardian is already actively linked to within
+  // this school — lets the admin see "Ahmed Hassan already has 2 children
+  // here" before deciding to reuse the record.
+  linkedStudentCount: number;
 }
 
 export type ParentStatus = "ACTIVE" | "ARCHIVED";

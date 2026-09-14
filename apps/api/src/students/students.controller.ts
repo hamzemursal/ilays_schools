@@ -130,7 +130,7 @@ export class StudentsController {
     @Body() dto: GuardianInputDto,
   ) {
     await this.students.assertAccessibleStudent(user, id);
-    const guardian = await this.guardians.findOrCreate(this.prisma, dto);
+    const guardian = await this.guardians.findOrCreate(this.prisma, user.organizationId!, dto);
     await this.guardians.linkToStudent(this.prisma, id, guardian.id, dto.relationship, dto.isPrimaryContact);
     return guardian;
   }

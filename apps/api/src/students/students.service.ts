@@ -473,7 +473,7 @@ export class StudentsService {
 
         const linkedGuardians = [];
         for (const g of dto.guardians ?? []) {
-          const guardian = await this.guardians.findOrCreate(tx, g);
+          const guardian = await this.guardians.findOrCreate(tx, actor.organizationId!, g);
           await this.guardians.linkToStudent(tx, student.id, guardian.id, g.relationship, g.isPrimaryContact);
           linkedGuardians.push(guardian);
         }

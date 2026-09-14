@@ -119,7 +119,14 @@ describe("GuardianStep — search existing", () => {
 
   it("lets an admin pick a result, set relationship and primary contact, and add it", async () => {
     const user = userEvent.setup();
-    const result: GuardianSearchResult = { id: "guardian-9", firstName: "Ifrah", lastName: "Warsame", phone: "0699999999", email: null };
+    const result: GuardianSearchResult = {
+      id: "guardian-9",
+      firstName: "Ifrah",
+      lastName: "Warsame",
+      phone: "0699999999",
+      email: null,
+      linkedStudentCount: 1,
+    };
     apiMock.searchGuardians.mockResolvedValue([result]);
     const { onChange } = renderStep();
     await user.click(screen.getByRole("button", { name: "Add guardian" }));

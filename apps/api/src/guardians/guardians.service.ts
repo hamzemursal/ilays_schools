@@ -39,11 +39,29 @@ export class GuardiansService {
   // time the same parent is added to another child. Exact-match only, never
   // fuzzy — unlike student duplicate detection, there's no ambiguity worth
   // flagging for human review here.
-  async findOrCreate(tx: Tx, input: GuardianInputDto) {
+  //
+  // organizationId is checked even for existingGuardianId: the admin-facing
+  // search this id normally comes from (searchForSchool) is already scoped
+  // to this org/school, but this endpoint has no schoolId route param to
+  // re-derive that scope from, so this is the backend's own independent
+  // check — never trust that a client only ever sends ids it was shown.
+  // A guardian with zero relationships yet (freshly created via the
+  // Parents page, not linked to anyone) is allowed through, same as
+  // assertAccessibleGuardian's own definition of "accessible".
+  async findOrCreate(tx: Tx, organizationId: string, input: GuardianInputDto) {
     if (input.existingGuardianId) {
-      const existing = await tx.guardian.findUnique({ where: { id: input.existingGuardianId } });
+      const existing = await tx.guardian.findUnique({
+        where: { id: input.existingGuardianId },
+        include: { students: { select: { student: { select: { organizationId: true } } } } },
+      });
       if (!existing) throw new NotFoundException("Selected guardian no longer exists");
-      return existing;
+      const accessible = existing.students.length === 0 || existing.students.some((sg) => sg.student.organizationId === organizationId);
+      if (!accessible) throw new NotFoundException("Selected guardian no longer exists");
+      // Strip the `students` relation used only for the check above — the
+      // returned shape should stay a plain Guardian record, matching every
+      // other branch of this function and what callers already expect.
+      const { students: _students, ...guardian } = existing;
+      return guardian;
     }
     if (input.phone) {
       const existing = await tx.guardian.findFirst({ where: { phone: input.phone } });
@@ -105,13 +123,14 @@ export class GuardiansService {
     return links.map((l) => ({ ...l.guardian, relationship: l.relationship, isPrimaryContact: l.isPrimaryContact }));
   }
 
-  // Backs the "search for an existing guardian" step in student creation —
+  // Backs the "search for an existing guardian" step both in student
+  // creation and when linking a guardian to an already-existing student —
   // scoped to guardians already linked to a student enrolled in this school,
   // so an admin can find "Ahmed Hassan" (parent of an existing student) and
   // reuse that exact record instead of retyping his details.
   async searchForSchool(organizationId: string, schoolId: string, query: string) {
     if (query.trim().length < 2) return [];
-    return this.prisma.guardian.findMany({
+    const guardians = await this.prisma.guardian.findMany({
       where: {
         status: "ACTIVE",
         students: {
@@ -124,9 +143,23 @@ export class GuardiansService {
           { email: { contains: query, mode: "insensitive" } },
         ],
       },
+      include: {
+        // ACTIVE links to a student currently enrolled in THIS school — the
+        // same scope toListView already uses for its own "children" count,
+        // so this number means the same thing everywhere it's shown.
+        students: { where: { status: "ACTIVE", student: { enrollments: { some: { schoolId } } } }, select: { studentId: true } },
+      },
       take: 10,
       orderBy: { lastName: "asc" },
     });
+    return guardians.map((g) => ({
+      id: g.id,
+      firstName: g.firstName,
+      lastName: g.lastName,
+      phone: g.phone,
+      email: g.email,
+      linkedStudentCount: g.students.length,
+    }));
   }
 
   // Every parent-management endpoint below is scoped to "guardians this

@@ -106,6 +106,16 @@ export class TeachersController {
   }
 
   @RequirePermissions("teachers.update")
+  @Post(":teacherId/resend-invite")
+  resendInvite(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("teacherId") teacherId: string,
+  ) {
+    return this.teachers.resendInvite(user, schoolId, teacherId);
+  }
+
+  @RequirePermissions("teachers.update")
   @Post(":teacherId/photo")
   @UseInterceptors(FileInterceptor("photo", { limits: { fileSize: 5 * 1024 * 1024 } }))
   uploadPhoto(

@@ -25,6 +25,15 @@ const ASSIGNMENT_INCLUDE = {
   school: { select: { id: true, name: true, type: true } },
 } as const;
 
+// user.status lets the frontend tell "no login yet" (userId null) apart
+// from "invited but never finished setup" (PENDING_SETUP — Resend invite
+// makes sense) from "already logged in at least once" (ACTIVE — nothing to
+// resend).
+const TEACHER_INCLUDE = {
+  assignments: { include: ASSIGNMENT_INCLUDE },
+  user: { select: { status: true } },
+} as const;
+
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 function hashToken(raw: string): string {
@@ -149,7 +158,7 @@ export class TeachersService {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     return this.prisma.teacher.findMany({
       where: { OR: [{ schoolId }, { assignments: { some: { schoolId } } }] },
-      include: { assignments: { include: ASSIGNMENT_INCLUDE } },
+      include: TEACHER_INCLUDE,
       orderBy: { lastName: "asc" },
     });
   }
@@ -196,7 +205,7 @@ export class TeachersService {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     const teacher = await this.prisma.teacher.findFirst({
       where: { id: teacherId, OR: [{ schoolId }, { assignments: { some: { schoolId } } }] },
-      include: { assignments: { include: ASSIGNMENT_INCLUDE } },
+      include: TEACHER_INCLUDE,
     });
     if (!teacher) throw new NotFoundException("Teacher not found in this school");
     return teacher;
@@ -224,7 +233,7 @@ export class TeachersService {
         emergencyContactName: dto.emergencyContactName,
         emergencyContactPhone: dto.emergencyContactPhone,
       },
-      include: { assignments: { include: ASSIGNMENT_INCLUDE } },
+      include: TEACHER_INCLUDE,
     });
 
     await this.audit.record({
@@ -347,7 +356,7 @@ export class TeachersService {
 
         return tx.teacher.findUniqueOrThrow({
           where: { id: teacher.id },
-          include: { assignments: { include: ASSIGNMENT_INCLUDE } },
+          include: TEACHER_INCLUDE,
         });
       }, { timeout: 30_000 });
     } catch (error) {
@@ -491,6 +500,70 @@ export class TeachersService {
 
     const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3010";
     return { email: result.email, acceptUrl: `${webOrigin}/accept-invite?token=${rawToken}` };
+  }
+
+  // For when the original acceptUrl was never actually given to the
+  // teacher (lost, not copied, never sent) — inviteLogin itself can't be
+  // called again once teacher.userId is set, so this is the only way back.
+  // Issues a fresh token/expiry and revokes any still-pending older
+  // invitations for the same user, so a since-lost link can't resurface
+  // and get used after the fact.
+  async resendInvite(actor: AuthenticatedUser, schoolId: string, teacherId: string) {
+    const school = await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+
+    const teacher = await this.prisma.teacher.findFirst({
+      where: { id: teacherId, schoolId },
+      include: { user: { select: { id: true, email: true, status: true } } },
+    });
+    if (!teacher) throw new NotFoundException("Teacher not found in this school");
+    if (!teacher.userId || !teacher.user) {
+      throw new BadRequestException("This teacher has no login yet — use Invite to log in instead");
+    }
+    if (teacher.user.status === "ACTIVE") {
+      throw new ConflictException("This teacher has already completed their login setup");
+    }
+
+    const role = await this.prisma.role.findUniqueOrThrow({ where: { name: "TEACHER" } });
+    const rawToken = randomBytes(32).toString("hex");
+    const userId = teacher.userId;
+    const userEmail = teacher.user.email;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.invitation.updateMany({
+        where: { userId, status: "PENDING" },
+        data: { status: "REVOKED" },
+      });
+
+      await tx.invitation.create({
+        data: {
+          organizationId: school.organizationId,
+          schoolId,
+          roleId: role.id,
+          userId,
+          invitedByUserId: actor.id,
+          tokenHash: hashToken(rawToken),
+          expiresAt: new Date(Date.now() + INVITATION_TTL_MS),
+        },
+      });
+
+      await this.audit.record(
+        {
+          actor,
+          organizationId: school.organizationId,
+          schoolId,
+          action: AuditAction.TEACHER_LOGIN_INVITE_RESENT,
+          module: AuditModuleName.TEACHERS,
+          resourceType: "Teacher",
+          resourceId: teacher.id,
+          resourceName: `${teacher.firstName} ${teacher.lastName}`,
+          after: { email: userEmail },
+        },
+        tx,
+      );
+    }, { timeout: 30_000 });
+
+    const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3010";
+    return { email: userEmail, acceptUrl: `${webOrigin}/accept-invite?token=${rawToken}` };
   }
 
   // Format: EMP-{sequence within this school}, e.g. "EMP-00006". Scoped per

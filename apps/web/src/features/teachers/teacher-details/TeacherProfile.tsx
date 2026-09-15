@@ -76,6 +76,25 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
     }
   }
 
+  // For a login that was already created (userId set) but whose original
+  // link never actually reached the teacher — inviteLogin itself refuses a
+  // second call once userId is set, so this is the only way back.
+  async function onResendInvite() {
+    if (!accessToken || !teacher) return;
+    setInviting(true);
+    setInviteError(null);
+    setInviteResult(null);
+    try {
+      const result = await teachersApi.resendInvite(accessToken, schoolId, teacher.id);
+      setInviteResult(result);
+      show(`Invitation resent for ${result.email}.`);
+    } catch (err) {
+      setInviteError(err instanceof ApiError ? err.message : "Failed to resend invite");
+    } finally {
+      setInviting(false);
+    }
+  }
+
   async function onToggleStatus() {
     if (!accessToken || !teacher) return;
     setTogglingStatus(true);
@@ -231,6 +250,16 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
               onClick={onInvite}
             >
               Invite to log in
+            </Button>
+          </div>
+        )}
+        {canUpdate && teacher.userId && teacher.user?.status === "PENDING_SETUP" && !editing && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
+            <p className="text-sm text-foreground-soft">
+              This teacher has a login but hasn&apos;t finished setting it up yet.
+            </p>
+            <Button size="sm" variant="outline" icon={<Send className="size-4" />} loading={inviting} onClick={onResendInvite}>
+              Resend invite
             </Button>
           </div>
         )}

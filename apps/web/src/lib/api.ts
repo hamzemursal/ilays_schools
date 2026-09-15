@@ -1400,6 +1400,8 @@ export interface TeacherSearchResult {
   school: { id: string; name: string; type: SchoolType };
 }
 
+export type UserStatus = "PENDING_SETUP" | "ACTIVE" | "SUSPENDED";
+
 export interface Teacher {
   id: string;
   userId: string | null;
@@ -1418,6 +1420,9 @@ export interface Teacher {
   emergencyContactPhone: string | null;
   status: TeacherStatus;
   assignments: TeacherAssignmentRecord[];
+  // Absent (undefined) on responses that don't include it (e.g. myProfile).
+  // null means userId is also null — no login exists yet.
+  user?: { status: UserStatus } | null;
 }
 
 export interface CreateTeacherInput {
@@ -2330,6 +2335,14 @@ export const api = {
     request<{ email: string; acceptUrl: string }>(`/schools/${schoolId}/teachers/${teacherId}/invite-login`, {
       method: "POST",
       body: { email },
+      accessToken,
+    }),
+  // For when the original invite link was never actually given to the
+  // teacher (lost, not copied, never sent) — invite-login itself refuses a
+  // second call once the teacher already has a login.
+  resendTeacherInvite: (accessToken: string, schoolId: string, teacherId: string) =>
+    request<{ email: string; acceptUrl: string }>(`/schools/${schoolId}/teachers/${teacherId}/resend-invite`, {
+      method: "POST",
       accessToken,
     }),
   uploadTeacherPhoto: (accessToken: string, schoolId: string, teacherId: string, file: File) =>

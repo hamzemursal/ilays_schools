@@ -12,6 +12,7 @@ export const teachersApi = {
   addAssignment: api.addTeacherAssignment,
   removeAssignment: api.removeTeacherAssignment,
   inviteLogin: api.inviteTeacherLogin,
+  resendInvite: api.resendTeacherInvite,
   uploadPhoto: api.uploadTeacherPhoto,
   getPhotoUrl: api.getTeacherPhotoUrl,
   uploadDocument: api.uploadTeacherDocument,

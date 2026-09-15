@@ -43,7 +43,7 @@ type MockPrisma = {
   role: { findUniqueOrThrow: jest.Mock };
   userRole: { upsert: jest.Mock };
   userSchool: { upsert: jest.Mock };
-  invitation: { create: jest.Mock };
+  invitation: { create: jest.Mock; updateMany: jest.Mock };
   section: { findFirst: jest.Mock };
   subject: { findFirst: jest.Mock };
   academicYear: { findFirst: jest.Mock };
@@ -69,7 +69,7 @@ function createMockPrisma(): MockPrisma {
     role: { findUniqueOrThrow: jest.fn() },
     userRole: { upsert: jest.fn() },
     userSchool: { upsert: jest.fn() },
-    invitation: { create: jest.fn() },
+    invitation: { create: jest.fn(), updateMany: jest.fn() },
     section: { findFirst: jest.fn() },
     subject: { findFirst: jest.fn() },
     academicYear: { findFirst: jest.fn() },
@@ -653,6 +653,93 @@ describe("TeachersService.inviteLogin", () => {
   it("returns the resolved email and an acceptUrl carrying a real token, never the raw token itself outside the URL", async () => {
     prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1", firstName: "Amina", lastName: "Hassan", userId: null, email: "t@example.com" });
     const result = await service.inviteLogin(ACTOR, "school-1", "teacher-1");
+    expect(result.email).toBe("t@example.com");
+    expect(result.acceptUrl).toMatch(/\/accept-invite\?token=[0-9a-f]{64}$/);
+  });
+});
+
+describe("TeachersService.resendInvite", () => {
+  let prisma: MockPrisma;
+  let service: TeachersService;
+  let audit: { record: jest.Mock };
+
+  beforeEach(() => {
+    prisma = createMockPrisma();
+    ({ service, audit } = createService(prisma));
+    prisma.role.findUniqueOrThrow.mockResolvedValue({ id: "role-teacher" });
+  });
+
+  it("throws NotFoundException for a teacher not in this school", async () => {
+    prisma.teacher.findFirst.mockResolvedValue(null);
+    await expect(service.resendInvite(ACTOR, "school-1", "teacher-1")).rejects.toThrow(NotFoundException);
+  });
+
+  it("throws BadRequestException when the teacher has no login yet — that's Invite to log in's job", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1", userId: null, user: null });
+    await expect(service.resendInvite(ACTOR, "school-1", "teacher-1")).rejects.toThrow(
+      "This teacher has no login yet — use Invite to log in instead",
+    );
+  });
+
+  it("throws ConflictException once the teacher has already finished setup (ACTIVE) — nothing left to resend", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({
+      id: "teacher-1",
+      userId: "user-1",
+      user: { id: "user-1", email: "t@example.com", status: "ACTIVE" },
+    });
+    await expect(service.resendInvite(ACTOR, "school-1", "teacher-1")).rejects.toThrow(
+      "This teacher has already completed their login setup",
+    );
+  });
+
+  it("revokes any still-pending older invitations for this user before creating a fresh one", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({
+      id: "teacher-1",
+      firstName: "Amina",
+      lastName: "Hassan",
+      userId: "user-1",
+      user: { id: "user-1", email: "t@example.com", status: "PENDING_SETUP" },
+    });
+
+    await service.resendInvite(ACTOR, "school-1", "teacher-1");
+
+    expect(prisma.invitation.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", status: "PENDING" },
+      data: { status: "REVOKED" },
+    });
+    expect(prisma.invitation.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ userId: "user-1", schoolId: "school-1" }) }),
+    );
+  });
+
+  it("records a TEACHER_LOGIN_INVITE_RESENT audit entry", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({
+      id: "teacher-1",
+      firstName: "Amina",
+      lastName: "Hassan",
+      userId: "user-1",
+      user: { id: "user-1", email: "t@example.com", status: "PENDING_SETUP" },
+    });
+
+    await service.resendInvite(ACTOR, "school-1", "teacher-1");
+
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "TEACHER_LOGIN_INVITE_RESENT", after: { email: "t@example.com" } }),
+      prisma,
+    );
+  });
+
+  it("returns the same teacher's email with a fresh acceptUrl token", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({
+      id: "teacher-1",
+      firstName: "Amina",
+      lastName: "Hassan",
+      userId: "user-1",
+      user: { id: "user-1", email: "t@example.com", status: "PENDING_SETUP" },
+    });
+
+    const result = await service.resendInvite(ACTOR, "school-1", "teacher-1");
+
     expect(result.email).toBe("t@example.com");
     expect(result.acceptUrl).toMatch(/\/accept-invite\?token=[0-9a-f]{64}$/);
   });

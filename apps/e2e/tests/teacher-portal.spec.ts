@@ -40,6 +40,10 @@ test("Teacher views their real classes/exams, edits their own profile, and is de
   // announcer-duplication risk as the dashboard's title above, so .first().
   await expect(page.getByText("Amran Hassan").first()).toBeVisible();
   await expect(page.getByText("#EMP-0001")).toBeVisible();
+  // /my-classes lists schools, not classes directly — Amran has exactly one,
+  // so drill into it before the class/subject text becomes visible.
+  await page.getByRole("link", { name: "Saamalay Primary School" }).click();
+  await expect(page).toHaveURL(/\/my-classes\/[^/]+$/);
   await expect(page.getByText("Class 1 · A", { exact: true })).toBeVisible();
   await expect(page.getByText("Mathematics", { exact: true })).toBeVisible();
 

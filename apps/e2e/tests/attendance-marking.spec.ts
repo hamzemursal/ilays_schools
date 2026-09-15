@@ -14,7 +14,12 @@ test("Teacher marks daily attendance for their section", async ({ page }) => {
   // dashboard (Teacher role) — scope to the sidebar <nav> to avoid that
   // collision, same pattern as "Students" in student-duplicate-detection.spec.ts.
   await page.getByRole("navigation").getByRole("link", { name: "My classes" }).click();
-  await expect(page).toHaveURL(/\/my-classes/);
+  await expect(page).toHaveURL(/\/my-classes$/);
+
+  // /my-classes now lists schools, not classes directly — Amran has exactly
+  // one, so drill into it to reach the school-scoped "Mark attendance" button.
+  await page.getByRole("link", { name: "Saamalay Primary School" }).click();
+  await expect(page).toHaveURL(/\/my-classes\/.+/);
 
   await page.getByRole("button", { name: "Mark attendance" }).click();
   await expect(page).toHaveURL(/\/schools\/.+\/sections\/.+\/attendance/);

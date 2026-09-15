@@ -25,8 +25,8 @@ import { formatStudentListForShare } from "@/lib/share";
 import { SkeletonCards, SkeletonTable } from "@/components/ui/Skeleton";
 import { ClipboardCheck, PenLine, Search, Users } from "lucide-react";
 
-export default function MyAssignmentPage({ params }: { params: Promise<{ assignmentId: string }> }) {
-  const { assignmentId } = use(params);
+export default function MyAssignmentPage({ params }: { params: Promise<{ schoolId: string; assignmentId: string }> }) {
+  const { schoolId, assignmentId } = use(params);
   const { accessToken, user } = useAuth();
   const router = useRouter();
 
@@ -99,7 +99,11 @@ export default function MyAssignmentPage({ params }: { params: Promise<{ assignm
         eyebrow="Teaching"
         title={`${assignment.section.class.name} · ${assignment.section.name} — ${assignment.subject.name}`}
         description={assignment.academicYear.name}
-        breadcrumbs={[{ label: "My classes", href: "/my-classes" }, { label: assignment.subject.name }]}
+        breadcrumbs={[
+          { label: "My classes", href: "/my-classes" },
+          { label: assignment.school.name, href: `/my-classes/${schoolId}` },
+          { label: assignment.subject.name },
+        ]}
       />
 
       <div className="space-y-5 p-4 sm:p-6">

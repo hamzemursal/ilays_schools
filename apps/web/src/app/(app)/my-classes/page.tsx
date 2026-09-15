@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type Teacher, type TeacherAssignmentRecord } from "@/lib/api";
 import { MyPhotoUpload } from "@/features/my-classes/components/MyPhotoUpload";
 import { EditMyProfileForm } from "@/features/my-classes/EditMyProfileForm";
+import { groupAssignmentsBySchool } from "@/features/my-classes/schoolGrouping";
+import { SchoolCard } from "@/features/my-classes/components/SchoolCard";
 import { DocumentsCard } from "@/features/teachers/components/DocumentsCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
-import { Cake, ClipboardCheck, GraduationCap, MapPin, Pencil, Phone, ShieldAlert, User } from "lucide-react";
+import { Cake, GraduationCap, MapPin, Pencil, Phone, School as SchoolIcon, ShieldAlert, User } from "lucide-react";
 
 const STATUS_TONE: Record<Teacher["status"], "success" | "warning" | "neutral"> = {
   ACTIVE: "success",
@@ -24,7 +24,7 @@ const STATUS_TONE: Record<Teacher["status"], "success" | "warning" | "neutral"> 
 };
 
 export default function MyClassesPage() {
-  const { accessToken, user } = useAuth();
+  const { accessToken } = useAuth();
 
   const [teacher, setTeacher] = useState<Teacher | null | undefined>(undefined);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -46,9 +46,10 @@ export default function MyClassesPage() {
 
   // Total students is "how many distinct students am I responsible for",
   // not a per-assignment count — a student in two of my sections (or two
-  // of my subjects in the same section) must only be counted once. There's
-  // no single endpoint for this, so we fetch the roster once per distinct
-  // section and dedupe by studentId client-side.
+  // of my subjects in the same section, even across two different schools)
+  // must only be counted once. There's no single endpoint for this, so we
+  // fetch the roster once per distinct section and dedupe by studentId
+  // client-side.
   useEffect(() => {
     if (!accessToken || !teacher) return;
     if (teacher.assignments.length === 0) {
@@ -67,7 +68,7 @@ export default function MyClassesPage() {
       .catch(() => setTotalStudents(null));
   }, [accessToken, teacher]);
 
-  const canMarkAttendance = user?.permissions.includes("attendance.mark") ?? false;
+  const schools = teacher ? groupAssignmentsBySchool(teacher.assignments) : [];
 
   return (
     <div>
@@ -82,7 +83,7 @@ export default function MyClassesPage() {
           <EmptyState icon={GraduationCap} title="No teacher profile" description="This account isn't linked to a teacher profile." />
         ) : (
           <>
-            <SummaryStats assignments={teacher.assignments} totalStudents={totalStudents} />
+            <SummaryStats schoolCount={schools.length} assignments={teacher.assignments} totalStudents={totalStudents} />
 
             <Card>
               <div className="flex flex-wrap items-center gap-4">
@@ -148,7 +149,23 @@ export default function MyClassesPage() {
               />
             )}
 
-            <AssignmentsCard assignments={teacher.assignments} canMarkAttendance={canMarkAttendance} />
+            <Card padding="none">
+              <CardHeader
+                title="My schools"
+                description={
+                  schools.length <= 1
+                    ? "The school you teach at."
+                    : `You teach at ${schools.length} schools. Open one to see its classes and subjects.`
+                }
+              />
+              <div className="space-y-2 p-5">
+                {schools.length === 0 ? (
+                  <EmptyState icon={GraduationCap} title="No assignments yet" description="Ask your School Admin to assign you to a class and subject." />
+                ) : (
+                  schools.map((school) => <SchoolCard key={school.id} school={school} />)
+                )}
+              </div>
+            </Card>
 
             <DocumentsCard
               canUpload
@@ -174,12 +191,21 @@ function Field({ icon: Icon, label, value }: { icon?: React.ComponentType<{ clas
   );
 }
 
-function SummaryStats({ assignments, totalStudents }: { assignments: TeacherAssignmentRecord[]; totalStudents: number | null }) {
+function SummaryStats({
+  schoolCount,
+  assignments,
+  totalStudents,
+}: {
+  schoolCount: number;
+  assignments: TeacherAssignmentRecord[];
+  totalStudents: number | null;
+}) {
   const totalClasses = new Set(assignments.map((a) => a.section.class.id)).size;
   const totalSections = new Set(assignments.map((a) => a.section.id)).size;
   const totalSubjects = new Set(assignments.map((a) => a.subject.id)).size;
 
-  const stats: { label: string; value: number | null }[] = [
+  const stats: { label: string; value: number | null; icon?: React.ComponentType<{ className?: string }> }[] = [
+    { label: "Schools", value: schoolCount, icon: SchoolIcon },
     { label: "Classes", value: totalClasses },
     { label: "Sections", value: totalSections },
     { label: "Subjects", value: totalSubjects },
@@ -187,7 +213,7 @@ function SummaryStats({ assignments, totalStudents }: { assignments: TeacherAssi
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
       {stats.map((s) => (
         <Card key={s.label} padding="sm" className="text-center">
           <p className="text-2xl font-semibold text-foreground">{s.value ?? "—"}</p>
@@ -195,69 +221,5 @@ function SummaryStats({ assignments, totalStudents }: { assignments: TeacherAssi
         </Card>
       ))}
     </div>
-  );
-}
-
-function AssignmentsCard({ assignments, canMarkAttendance }: { assignments: TeacherAssignmentRecord[]; canMarkAttendance: boolean }) {
-  const router = useRouter();
-  const today = new Date().toISOString().slice(0, 10);
-
-  const byYear = assignments.reduce<Record<string, TeacherAssignmentRecord[]>>((acc, a) => {
-    (acc[a.academicYear.name] ??= []).push(a);
-    return acc;
-  }, {});
-
-  function attendanceUrl(a: TeacherAssignmentRecord) {
-    const params = new URLSearchParams({
-      date: today,
-      year: a.academicYear.name,
-      class: a.section.class.name,
-      section: a.section.name,
-      subject: a.subject.name,
-    });
-    return `/schools/${a.schoolId}/sections/${a.section.id}/attendance?${params.toString()}`;
-  }
-
-  return (
-    <Card padding="none">
-      <CardHeader title="My classes" description="Every class, section, and subject you're assigned to teach." />
-      <div className="space-y-4 p-5">
-        {assignments.length === 0 ? (
-          <EmptyState icon={GraduationCap} title="No assignments yet" description="Ask your School Admin to assign you to a class and subject." />
-        ) : (
-          Object.entries(byYear).map(([yearName, list]) => (
-            <div key={yearName}>
-              <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">{yearName}</p>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {list.map((a) => (
-                  <Card
-                    key={a.id}
-                    padding="sm"
-                    className="cursor-pointer transition-colors hover:border-accent"
-                    onClick={() => router.push(`/my-classes/${a.id}`)}
-                  >
-                    <p className="font-medium text-foreground">
-                      {a.section.class.name} · {a.section.name}
-                    </p>
-                    <p className="text-sm text-foreground-soft">{a.subject.name}</p>
-                    {canMarkAttendance && (
-                      <Link
-                        href={attendanceUrl(a)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="mt-2 inline-flex"
-                      >
-                        <Button size="sm" variant="outline" icon={<ClipboardCheck className="size-4" />}>
-                          Mark attendance
-                        </Button>
-                      </Link>
-                    )}
-                  </Card>
-                ))}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </Card>
   );
 }

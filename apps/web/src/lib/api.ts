@@ -713,6 +713,7 @@ export type AttendanceSession = "MORNING" | "AFTERNOON";
 export interface MyAssignment {
   id: string;
   schoolId: string;
+  school: { id: string; name: string; type: SchoolType };
   section: { id: string; name: string; class: { id: string; name: string } };
   subject: { id: string; name: string };
   academicYear: { id: string; name: string };

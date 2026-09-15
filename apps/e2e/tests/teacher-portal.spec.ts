@@ -40,6 +40,23 @@ test("Teacher views their real classes/exams, edits their own profile, and is de
   // announcer-duplication risk as the dashboard's title above, so .first().
   await expect(page.getByText("Amran Hassan").first()).toBeVisible();
   await expect(page.getByText("#EMP-0001")).toBeVisible();
+
+  // --- Real self-service mutation: edit contact details, done here on the
+  // top-level /my-classes page since that's where the profile card (and
+  // its "Edit my profile" button) lives — schools are a section below it,
+  // not a separate page. Amran has no phone on file in the seed, so this
+  // both exercises the real PATCH and proves the field goes from absent to
+  // present. Neither the Phone nor Address inputs have an
+  // id/htmlFor/placeholder (see EditMyProfileForm), so the form is scoped
+  // by its own unique "Save changes" button and the Phone field is
+  // targeted by DOM order (first textbox in that form). ---
+  await page.getByRole("button", { name: "Edit my profile" }).click();
+  const editForm = page.locator("form").filter({ hasText: "Emergency contact phone" });
+  await editForm.getByRole("textbox").first().fill("0699999999");
+  await editForm.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Profile updated.")).toBeVisible();
+  await expect(page.getByText("0699999999")).toBeVisible();
+
   // /my-classes lists schools, not classes directly — Amran has exactly one,
   // so drill into it before the class/subject text becomes visible. The
   // school page renders the same assignment in both "My classes" (by year)
@@ -51,27 +68,14 @@ test("Teacher views their real classes/exams, edits their own profile, and is de
   await expect(page.getByText("Class 1 · A", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Mathematics", { exact: true }).first()).toBeVisible();
 
-  // --- Real self-service mutation: edit contact details. Amran has no
-  // phone on file in the seed, so this both exercises the real PATCH and
-  // proves the field goes from absent to present. Neither the Phone nor
-  // Address inputs have an id/htmlFor/placeholder (see EditMyProfileForm),
-  // so the form is scoped by its own unique "Save changes" button and the
-  // Phone field is targeted by DOM order (first textbox in that form). ---
-  await page.getByRole("button", { name: "Edit my profile" }).click();
-  const editForm = page.locator("form").filter({ hasText: "Emergency contact phone" });
-  await editForm.getByRole("textbox").first().fill("0699999999");
-  await editForm.getByRole("button", { name: "Save changes" }).click();
-  await expect(page.getByText("Profile updated.")).toBeVisible();
-  await expect(page.getByText("0699999999")).toBeVisible();
-
   // --- Click into the assignment: real roster (Hodan Ali), a real
   // attendance summary reflecting the ABSENT mark from
   // attendance-marking.spec.ts, and the real linked guardian. ---
   const markAttendanceHref = await page.getByRole("link", { name: "Mark attendance" }).first().getAttribute("href");
   const schoolId = markAttendanceHref!.match(/\/schools\/([^/]+)\//)![1];
 
-  await page.getByText("Class 1 · A", { exact: true }).click();
-  await expect(page).toHaveURL(/\/my-classes\/.+/);
+  await page.getByText("Class 1 · A", { exact: true }).first().click();
+  await expect(page).toHaveURL(/\/my-classes\/.+\/.+/);
   // "Hodan Ali" (and her attendance counts) render twice on this page — once
   // in the Students roster, again in the "Attendance summary" table further
   // down, which also lists students. .first() targets whichever renders

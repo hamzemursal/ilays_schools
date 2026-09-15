@@ -58,11 +58,14 @@ export function TeachersTable({
     {
       key: "assignments",
       header: "Assignments",
-      render: (t) => (
-        <span className="text-foreground-soft">
-          {t.assignments.length === 0 ? "None" : `${t.assignments.length} class-subject`}
-        </span>
-      ),
+      // Scoped to THIS school — a teacher assigned here from another school
+      // (see AssignExistingTeacherForm) also holds assignments elsewhere in
+      // the organization, but this table is this school's own teacher list,
+      // so it must only ever count what's actually happening here.
+      render: (t) => {
+        const here = t.assignments.filter((a) => a.schoolId === schoolId).length;
+        return <span className="text-foreground-soft">{here === 0 ? "None" : `${here} class-subject`}</span>;
+      },
     },
     {
       key: "status",

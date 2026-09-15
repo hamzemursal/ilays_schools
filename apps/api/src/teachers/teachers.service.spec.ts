@@ -228,19 +228,32 @@ describe("TeachersService.listForSchool / getOne", () => {
     ({ service } = createService(prisma));
   });
 
-  it("listForSchool checks school access and orders by lastName", async () => {
+  it("listForSchool checks school access, orders by lastName, and matches home school OR a cross-school assignment here", async () => {
     prisma.teacher.findMany.mockResolvedValue([]);
     const { service: svc, schools } = createService(prisma);
     await svc.listForSchool(ACTOR, "school-1");
     expect(schools.findOneAccessibleOrThrow).toHaveBeenCalledWith(ACTOR, "school-1");
     expect(prisma.teacher.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { schoolId: "school-1" }, orderBy: { lastName: "asc" } }),
+      expect.objectContaining({
+        where: { OR: [{ schoolId: "school-1" }, { assignments: { some: { schoolId: "school-1" } } }] },
+        orderBy: { lastName: "asc" },
+      }),
     );
   });
 
-  it("getOne throws NotFoundException for a teacher not in this school", async () => {
+  it("getOne throws NotFoundException for a teacher not in this school and not assigned here", async () => {
     prisma.teacher.findFirst.mockResolvedValue(null);
     await expect(service.getOne(ACTOR, "school-1", "teacher-1")).rejects.toThrow(NotFoundException);
+  });
+
+  it("getOne looks up by home school OR a cross-school assignment here — a teacher assigned here from another school isn't a 404", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1", schoolId: "school-2", assignments: [] });
+    await service.getOne(ACTOR, "school-1", "teacher-1");
+    expect(prisma.teacher.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "teacher-1", OR: [{ schoolId: "school-1" }, { assignments: { some: { schoolId: "school-1" } } }] },
+      }),
+    );
   });
 });
 

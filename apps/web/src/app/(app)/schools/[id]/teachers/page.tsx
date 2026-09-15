@@ -2,10 +2,12 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { Download, Power, UserPlus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Download, Power, UserPlus, Users } from "lucide-react";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type Teacher } from "@/lib/api";
 import { teachersApi } from "@/features/teachers/api";
+import { AssignExistingTeacherForm } from "@/features/teachers/forms/AssignExistingTeacherForm";
 import { TeachersTable } from "@/features/teachers/tables/TeachersTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -19,6 +21,7 @@ export default function TeachersListPage({ params }: { params: Promise<{ id: str
   const { id: schoolId } = use(params);
   const { user, accessToken } = useAuth();
   const { show } = useToast();
+  const router = useRouter();
 
   const [teachers, setTeachers] = useState<Teacher[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +29,7 @@ export default function TeachersListPage({ params }: { params: Promise<{ id: str
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
   const [bulkDeactivating, setBulkDeactivating] = useState(false);
+  const [assigningExisting, setAssigningExisting] = useState(false);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -84,6 +88,11 @@ export default function TeachersListPage({ params }: { params: Promise<{ id: str
                 Export
               </Button>
             )}
+            {canCreate && !assigningExisting && (
+              <Button variant="outline" icon={<Users className="size-4" />} onClick={() => setAssigningExisting(true)}>
+                Assign existing teacher
+              </Button>
+            )}
             {canCreate && (
               <Link href={`/schools/${schoolId}/teachers/new`}>
                 <Button icon={<UserPlus className="size-4" />}>Add teacher</Button>
@@ -98,6 +107,18 @@ export default function TeachersListPage({ params }: { params: Promise<{ id: str
         ) : (
           accessToken && (
             <>
+              {assigningExisting && (
+                <AssignExistingTeacherForm
+                  accessToken={accessToken}
+                  schoolId={schoolId}
+                  onCancel={() => setAssigningExisting(false)}
+                  onAssigned={(teacherId) => {
+                    setAssigningExisting(false);
+                    show("Teacher assigned to this school.");
+                    router.push(`/schools/${schoolId}/teachers/${teacherId}`);
+                  }}
+                />
+              )}
               {canUpdate && (
                 <BulkActionBar count={selectedIds.size} onClear={() => setSelectedIds(new Set())}>
                   <Button size="sm" variant="danger" icon={<Power className="size-4" />} onClick={() => setShowBulkConfirm(true)}>

@@ -165,7 +165,17 @@ export function AssignmentsManager({
     }
   }
 
-  const assignmentsByYear = teacher.assignments.reduce<Record<string, typeof teacher.assignments>>((acc, a) => {
+  // Scoped to THIS school only — a teacher assigned here from another
+  // school (see AssignExistingTeacherForm) still has assignments elsewhere
+  // in the organization, but showing those here would mix two schools'
+  // classes into one flat list, which is exactly what the Teacher Portal's
+  // own multi-school design deliberately avoids on the teacher-facing side.
+  const schoolAssignments = teacher.assignments.filter((a) => a.schoolId === schoolId);
+  const otherSchoolCount = new Set(
+    teacher.assignments.filter((a) => a.schoolId !== schoolId).map((a) => a.schoolId),
+  ).size;
+
+  const assignmentsByYear = schoolAssignments.reduce<Record<string, typeof teacher.assignments>>((acc, a) => {
     (acc[a.academicYear.name] ??= []).push(a);
     return acc;
   }, {});
@@ -174,7 +184,11 @@ export function AssignmentsManager({
     <Card padding="none">
       <CardHeader
         title="Classes & subjects"
-        description="Every assignment this teacher currently holds, by academic year."
+        description={
+          otherSchoolCount > 0
+            ? `Every assignment this teacher holds at this school, by academic year. Also teaches at ${otherSchoolCount} other school${otherSchoolCount === 1 ? "" : "s"}.`
+            : "Every assignment this teacher currently holds, by academic year."
+        }
         actions={
           canManage &&
           (editing ? (
@@ -189,16 +203,16 @@ export function AssignmentsManager({
         }
       />
       <div className="space-y-4 p-5">
-        {teacher.assignments.length === 0 ? (
+        {schoolAssignments.length === 0 ? (
           <EmptyState
             icon={BookUser}
-            title="No assignments yet"
+            title="No assignments at this school yet"
             description={
               canManage
                 ? editing
                   ? "Assign this teacher to a class and subject below."
                   : "Click Edit to assign this teacher to a class and subject."
-                : "This teacher has no assignments yet."
+                : "This teacher has no assignments at this school yet."
             }
           />
         ) : (
@@ -323,7 +337,11 @@ export function AssignmentsManager({
   );
 }
 
-function ClassSubjectChecklist({
+// Exported for AssignExistingTeacherForm, which needs the identical
+// subject checklist when assigning an existing teacher to a class/section
+// here for the first time — same "one owning teacher per subject/section"
+// rule, no reason to re-implement it.
+export function ClassSubjectChecklist({
   accessToken,
   schoolId,
   classId,

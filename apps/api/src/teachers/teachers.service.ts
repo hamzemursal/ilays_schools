@@ -140,10 +140,15 @@ export class TeachersService {
     return { assignment, students };
   }
 
+  // A teacher shows up here either because this is their home school
+  // (Teacher.schoolId) or because they hold at least one TeacherAssignment
+  // at this school despite being employed elsewhere — otherwise a teacher
+  // just cross-school-assigned here (see addAssignment) would vanish from
+  // the very school admin who assigned them.
   async listForSchool(actor: AuthenticatedUser, schoolId: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     return this.prisma.teacher.findMany({
-      where: { schoolId },
+      where: { OR: [{ schoolId }, { assignments: { some: { schoolId } } }] },
       include: { assignments: { include: ASSIGNMENT_INCLUDE } },
       orderBy: { lastName: "asc" },
     });
@@ -184,10 +189,13 @@ export class TeachersService {
     });
   }
 
+  // Same home-school-OR-cross-school-assignment reach as listForSchool —
+  // an admin who just assigned an existing teacher here must be able to
+  // open that teacher's own detail page, not hit a 404.
   async getOne(actor: AuthenticatedUser, schoolId: string, teacherId: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     const teacher = await this.prisma.teacher.findFirst({
-      where: { id: teacherId, schoolId },
+      where: { id: teacherId, OR: [{ schoolId }, { assignments: { some: { schoolId } } }] },
       include: { assignments: { include: ASSIGNMENT_INCLUDE } },
     });
     if (!teacher) throw new NotFoundException("Teacher not found in this school");

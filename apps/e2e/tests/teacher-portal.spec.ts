@@ -41,11 +41,15 @@ test("Teacher views their real classes/exams, edits their own profile, and is de
   await expect(page.getByText("Amran Hassan").first()).toBeVisible();
   await expect(page.getByText("#EMP-0001")).toBeVisible();
   // /my-classes lists schools, not classes directly — Amran has exactly one,
-  // so drill into it before the class/subject text becomes visible.
+  // so drill into it before the class/subject text becomes visible. The
+  // school page renders the same assignment in both "My classes" (by year)
+  // and "My subjects" (by subject) sections, so "Class 1 · A" and
+  // "Mathematics" each appear twice — .first() targets the "My classes"
+  // section, which renders first in DOM order.
   await page.getByRole("link", { name: "Saamalay Primary School" }).click();
   await expect(page).toHaveURL(/\/my-classes\/[^/]+$/);
-  await expect(page.getByText("Class 1 · A", { exact: true })).toBeVisible();
-  await expect(page.getByText("Mathematics", { exact: true })).toBeVisible();
+  await expect(page.getByText("Class 1 · A", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Mathematics", { exact: true }).first()).toBeVisible();
 
   // --- Real self-service mutation: edit contact details. Amran has no
   // phone on file in the seed, so this both exercises the real PATCH and

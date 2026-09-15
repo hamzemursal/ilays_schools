@@ -914,3 +914,180 @@ describe("ExamsService.listResultSubmissions / listExamPapers — viewpoint scop
     expect(rows[0].resultSubmissionId).toBe("sub-1");
   });
 });
+
+// Phase 3: listExams/listExamSubjects were school-scoped but not
+// assignment-scoped — any actor with results.view (every Teacher, to see
+// their own marks) could list every class+subject an exam covers
+// school-wide, not just their own. Metadata, not marks, but still not
+// theirs to see, and the frontend's own client-side filtering (My Classes'
+// workspace page) was never a substitute for a real backend boundary.
+describe("ExamsService.listExams — teacher narrowing (Phase 3)", () => {
+  let prisma: MockPrisma;
+  let service: ExamsService;
+
+  function examRow(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      id: "exam-1",
+      schoolId: SCHOOL_ID,
+      academicYearId: "year-1",
+      examSubjects: [
+        { id: "es-math-c1a", classId: "class-1", subjectId: "subject-math", class: { name: "Class 1" }, subject: { name: "Mathematics" } },
+        { id: "es-sci-c1a", classId: "class-1", subjectId: "subject-sci", class: { name: "Class 1" }, subject: { name: "Science" } },
+      ],
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    prisma = createMockPrisma();
+    ({ service } = createService(prisma));
+    prisma.exam.findMany.mockResolvedValue([examRow()]);
+  });
+
+  it("returns every exam and examSubject unchanged for an Admin (no Teacher profile)", async () => {
+    prisma.teacher.findFirst.mockResolvedValue(null);
+    const result = await service.listExams(ADMIN_ACTOR, SCHOOL_ID);
+    expect(result).toHaveLength(1);
+    expect(result[0].examSubjects).toHaveLength(2);
+  });
+
+  it("narrows a Teacher's view to only the class+subject they're assigned to teach", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.teacherAssignment.findMany.mockResolvedValue([
+      { academicYearId: "year-1", subjectId: "subject-math", section: { classId: "class-1" } },
+    ]);
+
+    const result = await service.listExams(TEACHER_ACTOR, SCHOOL_ID);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].examSubjects).toEqual([
+      expect.objectContaining({ id: "es-math-c1a" }),
+    ]);
+  });
+
+  it("drops an exam entirely when none of its examSubjects match the teacher's assignments", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.teacherAssignment.findMany.mockResolvedValue([
+      { academicYearId: "year-1", subjectId: "subject-history", section: { classId: "class-9" } },
+    ]);
+
+    const result = await service.listExams(TEACHER_ACTOR, SCHOOL_ID);
+    expect(result).toEqual([]);
+  });
+
+  it("respects academic year — an assignment for a different year never grants access to this exam's subjects", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.teacherAssignment.findMany.mockResolvedValue([
+      { academicYearId: "year-OLD", subjectId: "subject-math", section: { classId: "class-1" } },
+    ]);
+
+    const result = await service.listExams(TEACHER_ACTOR, SCHOOL_ID);
+    expect(result).toEqual([]);
+  });
+
+  it("scopes the teacher's own assignments to this school only", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.teacherAssignment.findMany.mockResolvedValue([]);
+
+    await service.listExams(TEACHER_ACTOR, SCHOOL_ID);
+
+    expect(prisma.teacherAssignment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { teacherId: "teacher-1", schoolId: SCHOOL_ID } }),
+    );
+  });
+});
+
+describe("ExamsService.listExamSubjects — teacher narrowing (Phase 3)", () => {
+  let prisma: MockPrisma;
+  let service: ExamsService;
+
+  const EXAM = { id: "exam-1", schoolId: SCHOOL_ID, academicYearId: "year-1" };
+  const SUBJECTS = [
+    { id: "es-math-c1a", classId: "class-1", subjectId: "subject-math", class: { name: "Class 1" }, subject: { name: "Mathematics" } },
+    { id: "es-sci-c1a", classId: "class-1", subjectId: "subject-sci", class: { name: "Class 1" }, subject: { name: "Science" } },
+  ];
+
+  beforeEach(() => {
+    prisma = createMockPrisma();
+    ({ service } = createService(prisma));
+    prisma.exam.findFirst.mockResolvedValue(EXAM);
+    prisma.examSubject.findMany.mockResolvedValue(SUBJECTS);
+  });
+
+  it("returns every examSubject unchanged for an Admin (no Teacher profile)", async () => {
+    prisma.teacher.findFirst.mockResolvedValue(null);
+    const result = await service.listExamSubjects(ADMIN_ACTOR, SCHOOL_ID, "exam-1");
+    expect(result).toHaveLength(2);
+  });
+
+  it("narrows a Teacher's view to only their own assigned class+subject", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.teacherAssignment.findMany.mockResolvedValue([{ subjectId: "subject-sci", section: { classId: "class-1" } }]);
+
+    const result = await service.listExamSubjects(TEACHER_ACTOR, SCHOOL_ID, "exam-1");
+
+    expect(result).toEqual([expect.objectContaining({ id: "es-sci-c1a" })]);
+  });
+
+  it("scopes the teacher's own assignments to this school and this exam's academic year", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.teacherAssignment.findMany.mockResolvedValue([]);
+
+    await service.listExamSubjects(TEACHER_ACTOR, SCHOOL_ID, "exam-1");
+
+    expect(prisma.teacherAssignment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { teacherId: "teacher-1", schoolId: SCHOOL_ID, academicYearId: "year-1" } }),
+    );
+  });
+});
+
+describe("ExamsService.listExamPapers — teacher narrowing (Phase 3)", () => {
+  let prisma: MockPrisma;
+  let service: ExamsService;
+
+  function submissionRow(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      id: "sub-1",
+      sectionId: SECTION_ID,
+      paperStatus: "SUBMITTED",
+      paperSubmittedAt: new Date("2027-02-01"),
+      section: { name: "A", class: { name: "Class 1" } },
+      examSubject: {
+        classId: "class-1",
+        subjectId: "subject-math",
+        exam: { id: "exam-1", name: "Term 1", schoolId: SCHOOL_ID, academicYearId: "year-1", school: { name: "Test School" }, academicYear: { name: "2027" } },
+        subject: { name: "Mathematics" },
+      },
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    prisma = createMockPrisma();
+    ({ service } = createService(prisma));
+    prisma.teacherAssignment.findFirst.mockResolvedValue(null); // per-row "responsible teacher" lookup used for display, not authorization
+  });
+
+  it("returns every submission unchanged for an Admin (no Teacher profile)", async () => {
+    prisma.teacher.findFirst.mockResolvedValue(null);
+    prisma.resultSubmission.findMany.mockResolvedValue([submissionRow(), submissionRow({ id: "sub-2", sectionId: "section-2" })]);
+
+    const rows = await service.listExamPapers(ADMIN_ACTOR, {});
+    expect(rows).toHaveLength(2);
+  });
+
+  it("narrows a Teacher to only their own (section, subject, year) submissions — never another teacher's papers in the same school", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.teacherAssignment.findMany.mockResolvedValue([
+      { sectionId: SECTION_ID, subjectId: "subject-math", academicYearId: "year-1" },
+    ]);
+    prisma.resultSubmission.findMany.mockResolvedValue([
+      submissionRow({ id: "sub-mine" }),
+      submissionRow({ id: "sub-not-mine", examSubject: { ...submissionRow().examSubject, subjectId: "subject-sci" } }),
+    ]);
+
+    const rows = await service.listExamPapers(TEACHER_ACTOR, {});
+
+    expect(rows.map((r: { resultSubmissionId: string }) => r.resultSubmissionId)).toEqual(["sub-mine"]);
+  });
+});

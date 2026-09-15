@@ -317,3 +317,96 @@ describe("AttendanceService — teacher authorization (school/section isolation)
     expect(prisma.teacher.findFirst).toHaveBeenCalledWith({ where: { userId: TEACHER_ACTOR.id } });
   });
 });
+
+describe("AttendanceService.attendanceRatesForSchool — teacher narrowing (Phase 3)", () => {
+  let prisma: {
+    teacher: { findFirst: jest.Mock };
+    teacherAssignment: { findMany: jest.Mock };
+    academicYear: { findFirst: jest.Mock };
+    attendance: { groupBy: jest.Mock };
+  };
+  let schools: { findOneAccessibleOrThrow: jest.Mock };
+  let service: AttendanceService;
+
+  const YEAR = { id: "year-1", startDate: new Date("2027-01-01"), endDate: new Date("2027-12-31") };
+
+  beforeEach(() => {
+    prisma = {
+      teacher: { findFirst: jest.fn() },
+      teacherAssignment: { findMany: jest.fn() },
+      academicYear: { findFirst: jest.fn().mockResolvedValue(YEAR) },
+      attendance: { groupBy: jest.fn().mockResolvedValue([]) },
+    };
+    schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
+    service = new AttendanceService(
+      prisma as unknown as PrismaService,
+      schools as unknown as SchoolsService,
+      {} as unknown as StudentsService,
+      { record: jest.fn() } as unknown as AuditService,
+      {} as unknown as DocumentsService,
+    );
+  });
+
+  it("an Admin (no Teacher profile) gets school-wide rates, no section restriction", async () => {
+    prisma.teacher.findFirst.mockResolvedValue(null);
+    await service.attendanceRatesForSchool(ADMIN_ACTOR, "school-1", { academicYearId: "year-1" });
+    const where = prisma.attendance.groupBy.mock.calls[0][0].where;
+    expect(where.enrollment.sectionId).toBeUndefined();
+    expect(prisma.teacherAssignment.findMany).not.toHaveBeenCalled();
+  });
+
+  // The bug this closes: attendanceRatesForSchool is reachable by anyone
+  // with attendance.view — every Teacher, to view their own sections — but
+  // classId/sectionId are optional filters, so a Teacher who omitted them
+  // used to get rates for the WHOLE school instead of just their own
+  // TeacherAssignment sections.
+  it("a Teacher with no explicit sectionId is restricted to their own assigned sections only", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.teacherAssignment.findMany.mockResolvedValue([{ sectionId: "sec-1" }, { sectionId: "sec-2" }]);
+
+    await service.attendanceRatesForSchool(TEACHER_ACTOR, "school-1", { academicYearId: "year-1" });
+
+    expect(prisma.teacherAssignment.findMany).toHaveBeenCalledWith({
+      where: { teacherId: "teacher-1", schoolId: "school-1", academicYearId: "year-1" },
+      select: { sectionId: true },
+    });
+    const where = prisma.attendance.groupBy.mock.calls[0][0].where;
+    expect(where.enrollment.sectionId).toEqual({ in: ["sec-1", "sec-2"] });
+  });
+
+  it("rejects an explicit sectionId the teacher does not hold an assignment for", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.teacherAssignment.findMany.mockResolvedValue([{ sectionId: "sec-1" }]);
+
+    await expect(
+      service.attendanceRatesForSchool(TEACHER_ACTOR, "school-1", { academicYearId: "year-1", sectionId: "someone-elses-section" }),
+    ).rejects.toThrow("You are not assigned to this section");
+    expect(prisma.attendance.groupBy).not.toHaveBeenCalled();
+  });
+
+  it("allows an explicit sectionId the teacher does hold an assignment for", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.teacherAssignment.findMany.mockResolvedValue([{ sectionId: "sec-1" }, { sectionId: "sec-2" }]);
+
+    await service.attendanceRatesForSchool(TEACHER_ACTOR, "school-1", { academicYearId: "year-1", sectionId: "sec-1" });
+
+    const where = prisma.attendance.groupBy.mock.calls[0][0].where;
+    expect(where.enrollment.sectionId).toBe("sec-1");
+  });
+
+  // Multi-school teacher: their assignments at a DIFFERENT school must
+  // never leak into this school's rates — the TeacherAssignment lookup is
+  // explicitly scoped by schoolId (asserted above), and academicYearId too,
+  // so a stale/other-year assignment for this same section never widens
+  // access either.
+  it("scopes the teacher's own assignments to this school and this academic year only", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.teacherAssignment.findMany.mockResolvedValue([{ sectionId: "sec-1" }]);
+
+    await service.attendanceRatesForSchool(TEACHER_ACTOR, "school-1", { academicYearId: "year-1" });
+
+    expect(prisma.teacherAssignment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { teacherId: "teacher-1", schoolId: "school-1", academicYearId: "year-1" } }),
+    );
+  });
+});

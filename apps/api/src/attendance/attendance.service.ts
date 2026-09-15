@@ -373,6 +373,15 @@ export class AttendanceService {
   // itself is the correct existing structure to scope by, same reasoning as
   // summaryForSection scoping by an explicit from/to). A student with zero
   // marked days gets `rate: null` — never a fabricated 0%.
+  // Built for the Student List's admin-facing Attendance column/filter, but
+  // reachable by anyone holding attendance.view — which every Teacher does,
+  // to view their own sections. Without a teacher-scoping check here, a
+  // Teacher could request rates for the WHOLE school (classId/sectionId are
+  // optional) rather than just their own assigned sections; a School/Super
+  // Admin (no Teacher profile) is unaffected. An explicit sectionId that
+  // isn't one of the teacher's own is rejected outright, rather than
+  // silently narrowed — the caller shouldn't be able to tell "empty
+  // results" apart from "not your section" here.
   async attendanceRatesForSchool(
     actor: AuthenticatedUser,
     schoolId: string,
@@ -385,6 +394,19 @@ export class AttendanceService {
     });
     if (!academicYear) throw new BadRequestException("That academic year does not belong to this school");
 
+    const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id } });
+    let allowedSectionIds: string[] | null = null;
+    if (teacher) {
+      const assignments = await this.prisma.teacherAssignment.findMany({
+        where: { teacherId: teacher.id, schoolId, academicYearId: filters.academicYearId },
+        select: { sectionId: true },
+      });
+      allowedSectionIds = [...new Set(assignments.map((a) => a.sectionId))];
+      if (filters.sectionId && !allowedSectionIds.includes(filters.sectionId)) {
+        throw new ForbiddenException("You are not assigned to this section");
+      }
+    }
+
     const counts = await this.prisma.attendance.groupBy({
       by: ["enrollmentId", "status"],
       where: {
@@ -394,7 +416,7 @@ export class AttendanceService {
           academicYearId: filters.academicYearId,
           status: "ACTIVE",
           ...(filters.classId ? { classId: filters.classId } : {}),
-          ...(filters.sectionId ? { sectionId: filters.sectionId } : {}),
+          sectionId: filters.sectionId ? filters.sectionId : (allowedSectionIds ? { in: allowedSectionIds } : undefined),
         },
       },
       _count: true,

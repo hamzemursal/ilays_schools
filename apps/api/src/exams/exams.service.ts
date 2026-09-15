@@ -67,13 +67,39 @@ export class ExamsService {
     return assignment?.teacher.userId ?? null;
   }
 
+  // A School/Super Admin (no Teacher profile) sees every exam. A Teacher
+  // sees only exams that include at least one class+subject they hold a
+  // TeacherAssignment for in this school and academic year — narrowed to
+  // exactly those examSubjects, not just the exams. Without this, any actor
+  // with results.view (which every Teacher has, to view their own marks)
+  // could list every class/subject an exam covers school-wide, not just
+  // their own — metadata, not marks, but still not this teacher's to see,
+  // and the frontend's own client-side filtering was never a substitute
+  // for this.
   async listExams(actor: AuthenticatedUser, schoolId: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    return this.prisma.exam.findMany({
+
+    const exams = await this.prisma.exam.findMany({
       where: { schoolId },
       include: { examSubjects: { include: { class: true, subject: true } } },
       orderBy: { createdAt: "desc" },
     });
+
+    const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id } });
+    if (!teacher) return exams;
+
+    const assignments = await this.prisma.teacherAssignment.findMany({
+      where: { teacherId: teacher.id, schoolId },
+      select: { academicYearId: true, subjectId: true, section: { select: { classId: true } } },
+    });
+    const allowedKeys = new Set(assignments.map((a) => `${a.academicYearId}|${a.section.classId}|${a.subjectId}`));
+
+    return exams
+      .map((exam) => ({
+        ...exam,
+        examSubjects: exam.examSubjects.filter((es) => allowedKeys.has(`${exam.academicYearId}|${es.classId}|${es.subjectId}`)),
+      }))
+      .filter((exam) => exam.examSubjects.length > 0);
   }
 
   async createExam(actor: AuthenticatedUser, schoolId: string, dto: CreateExamDto) {
@@ -156,10 +182,22 @@ export class ExamsService {
     }
   }
 
+  // Same teacher-narrowing as listExams, for the single-exam view.
   async listExamSubjects(actor: AuthenticatedUser, schoolId: string, examId: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    await this.getExamInSchoolOrThrow(schoolId, examId);
-    return this.prisma.examSubject.findMany({ where: { examId }, include: { class: true, subject: true } });
+    const exam = await this.getExamInSchoolOrThrow(schoolId, examId);
+    const examSubjects = await this.prisma.examSubject.findMany({ where: { examId }, include: { class: true, subject: true } });
+
+    const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id } });
+    if (!teacher) return examSubjects;
+
+    const assignments = await this.prisma.teacherAssignment.findMany({
+      where: { teacherId: teacher.id, schoolId, academicYearId: exam.academicYearId },
+      select: { subjectId: true, section: { select: { classId: true } } },
+    });
+    const allowedKeys = new Set(assignments.map((a) => `${a.section.classId}|${a.subjectId}`));
+
+    return examSubjects.filter((es) => allowedKeys.has(`${es.classId}|${es.subjectId}`));
   }
 
   async createExamSubject(actor: AuthenticatedUser, schoolId: string, examId: string, dto: CreateExamSubjectDto) {
@@ -852,6 +890,10 @@ export class ExamsService {
   // Admin-facing "Exam Papers" list — org-wide when filters.schoolId is
   // omitted and the actor has no schoolIds of their own (Super/Org Admin),
   // otherwise scoped exactly like every other admin list in this codebase.
+  // A Teacher also holds results.view (to see their own marks), so without
+  // the extra narrowing below they could list every OTHER teacher's exam
+  // paper submissions in their school(s) too — school-scoped isn't the same
+  // as assignment-scoped.
   async listExamPapers(actor: AuthenticatedUser, filters: ExamPaperListFilters) {
     const schoolIds = await this.resolveViewpointSchoolIds(actor, filters.schoolId);
 
@@ -869,7 +911,7 @@ export class ExamsService {
       ],
     };
 
-    const submissions = await this.prisma.resultSubmission.findMany({
+    let submissions = await this.prisma.resultSubmission.findMany({
       where,
       include: {
         section: { include: { class: true } },
@@ -877,6 +919,18 @@ export class ExamsService {
       },
       orderBy: { paperSubmittedAt: "desc" },
     });
+
+    const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id } });
+    if (teacher) {
+      const assignments = await this.prisma.teacherAssignment.findMany({
+        where: { teacherId: teacher.id },
+        select: { sectionId: true, subjectId: true, academicYearId: true },
+      });
+      const allowedKeys = new Set(assignments.map((a) => `${a.sectionId}|${a.subjectId}|${a.academicYearId}`));
+      submissions = submissions.filter((s) =>
+        allowedKeys.has(`${s.sectionId}|${s.examSubject.subjectId}|${s.examSubject.exam.academicYearId}`),
+      );
+    }
 
     const rows = await Promise.all(
       submissions.map(async (s) => {

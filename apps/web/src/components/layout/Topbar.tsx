@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
+  ArrowRight,
   Bell,
   Camera,
   Check,
@@ -22,9 +23,22 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { Avatar } from "@/components/ui/Avatar";
 import { useToast } from "@/components/ui/Toast";
-import { api, type AppNotification, type School } from "@/lib/api";
+import { api, type AppNotification, type School, type SchoolType } from "@/lib/api";
 import { useCurrentSchool } from "./Sidebar";
 import { orgNavItems, schoolNavItems, type NavItem } from "./nav-config";
+import { SchoolTypeBadge } from "@/features/my-classes/components/SchoolTypeBadge";
+import { DECORATIVE_TONE_PARTS } from "@/components/ui/decorativeTones";
+
+// The role label shown in the context block's "{LABEL} · CURRENT SCHOOL"
+// subtitle — Super Admin and Organization Admin get their own explicit
+// label; every other schools.view holder (Central Finance/HR viewers) gets
+// a generic one rather than a guess at which of their several roles is
+// "the" one worth naming.
+function contextRoleLabel(roles: string[]): string {
+  if (roles.includes("SUPER_ADMIN")) return "Super Admin";
+  if (roles.includes("ORGANIZATION_ADMIN")) return "Org Admin";
+  return "Admin";
+}
 
 export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   const router = useRouter();
@@ -136,7 +150,8 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
           <SchoolContextSwitcher
             accessToken={accessToken}
             currentSchoolId={currentSchool?.id ?? null}
-            currentSchoolName={currentSchool?.name ?? "Ilays Schools"}
+            fallbackName={currentSchool?.name ?? "Ilays Schools"}
+            roleLabel={contextRoleLabel(user.roles)}
           />
         ) : (
           <span className="max-w-[110px] truncate font-semibold text-foreground sm:max-w-[220px]">
@@ -311,23 +326,38 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   );
 }
 
-// The header's "which school am I looking at" control. Lazily fetches the
-// real, actor-scoped school list (the same endpoint the Schools page uses —
-// already correctly scoped server-side via accessibleWhere, so a School
-// Admin with schools.view still only ever sees their own authorized
-// schools here, never another organization's or another admin's) only once
-// the dropdown is actually opened, rather than on every page load. Reuses
-// the URL-is-the-context model everywhere else in this app already relies
-// on (see Sidebar's useCurrentSchool) — picking a school just navigates
-// there, no separate stored "selected school" state.
+// A small, subtly-tinted icon square per school row — Primary reuses the
+// same blue accent tone as SchoolTypeBadge's own Primary badge, Secondary
+// the same violet tone as its Secondary badge (see decorativeTones.ts),
+// so a school's color story is consistent between the badge and its icon
+// rather than inventing a second palette.
+function schoolIconTone(type: SchoolType): { soft: string; text: string } {
+  if (type === "SECONDARY") return DECORATIVE_TONE_PARTS.violet;
+  return { soft: "bg-accent-soft", text: "text-accent" };
+}
+
+// The header's "which school am I looking at" control. Fetches the real,
+// actor-scoped school list once on mount (the same endpoint the Schools
+// page uses — already correctly scoped server-side via accessibleWhere, so
+// a School Admin with schools.view still only ever sees their own
+// authorized schools here, never another organization's or another
+// admin's). Fetching on mount, not lazily on open, matters here: a Super
+// Admin never has a UserSchool row (that's what makes them org-wide), so
+// Sidebar's useCurrentSchool can't resolve their current school's real name
+// on its own — this list is what fills that in, the moment it loads.
+// Reuses the URL-is-the-context model everywhere else in this app already
+// relies on (see Sidebar's useCurrentSchool) — picking a school just
+// navigates there, no separate stored "selected school" state.
 function SchoolContextSwitcher({
   accessToken,
   currentSchoolId,
-  currentSchoolName,
+  fallbackName,
+  roleLabel,
 }: {
   accessToken: string;
   currentSchoolId: string | null;
-  currentSchoolName: string;
+  fallbackName: string;
+  roleLabel: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -336,21 +366,30 @@ function SchoolContextSwitcher({
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!open || schools || error) return;
     api
       .listSchools(accessToken)
       .then(setSchools)
       .catch(() => setError(true));
-  }, [open, schools, error, accessToken]);
+  }, [accessToken]);
 
   useEffect(() => {
     if (!open) return;
     function onClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
     document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }, [open]);
+
+  const current = schools?.find((s) => s.id === currentSchoolId);
+  const displayName = current?.name ?? fallbackName;
 
   return (
     <div ref={ref} className="relative">
@@ -359,14 +398,34 @@ function SchoolContextSwitcher({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label="Switch school context"
         className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-left hover:bg-surface-hover"
       >
-        <span className="max-w-[110px] truncate font-semibold text-foreground sm:max-w-[220px]">{currentSchoolName}</span>
+        <span className="flex min-w-0 flex-col leading-tight">
+          <span className="max-w-[140px] truncate font-semibold text-foreground sm:max-w-[220px]">{displayName}</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-foreground-muted">
+            {roleLabel} · Current school
+          </span>
+        </span>
         <ChevronDown className="size-4 shrink-0 text-foreground-soft" />
       </button>
       {open && (
-        <div role="menu" className="absolute left-0 z-50 mt-2 w-72 rounded-xl border border-border bg-background py-1 shadow-lg">
-          <p className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-foreground-muted">Switch school</p>
+        <div
+          role="menu"
+          aria-label="Switch school"
+          className="absolute left-0 z-50 mt-2 w-80 rounded-xl border border-border bg-background py-1 shadow-lg"
+        >
+          <div className="flex items-center justify-between gap-2 px-3 py-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">Switch school</p>
+            <Link
+              href="/schools"
+              onClick={() => setOpen(false)}
+              className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
+            >
+              View All Schools <ArrowRight className="size-3" />
+            </Link>
+          </div>
+          <div className="my-1 h-px bg-border" />
           {error ? (
             <p className="px-3 py-2 text-sm text-danger">Couldn&apos;t load your schools.</p>
           ) : !schools ? (
@@ -376,35 +435,40 @@ function SchoolContextSwitcher({
           ) : schools.length === 0 ? (
             <p className="px-3 py-2 text-sm text-foreground-muted">No authorized schools yet.</p>
           ) : (
-            schools.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false);
-                  if (s.id !== currentSchoolId) router.push(`/schools/${s.id}/dashboard`);
-                }}
-                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-surface-hover"
-              >
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium text-foreground">{s.name}</span>
-                  <span className="block text-xs text-foreground-muted">
-                    {s.studentCount} students · {s.teacherCount} teachers
+            schools.map((s) => {
+              const selected = s.id === currentSchoolId;
+              const tone = schoolIconTone(s.type);
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  role="menuitem"
+                  aria-current={selected ? "true" : undefined}
+                  onClick={() => {
+                    setOpen(false);
+                    if (s.id !== currentSchoolId) router.push(`/schools/${s.id}/dashboard`);
+                  }}
+                  className={`flex w-full items-center gap-2.5 border-l-2 px-3 py-2 text-left transition-colors ${
+                    selected ? "border-accent bg-accent-soft/50" : "border-transparent hover:bg-surface-hover"
+                  }`}
+                >
+                  <span className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${tone.soft} ${tone.text}`}>
+                    <GraduationCap className="size-4" />
                   </span>
-                </span>
-                {s.id === currentSchoolId && <Check className="size-4 shrink-0 text-accent" />}
-              </button>
-            ))
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-foreground">{s.name}</span>
+                    <span className="block text-xs text-foreground-muted">
+                      {s.studentCount} students · {s.teacherCount} teachers · {s.staffCount} staff
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    <SchoolTypeBadge type={s.type} />
+                    {selected && <Check className="size-4 shrink-0 text-accent" />}
+                  </span>
+                </button>
+              );
+            })
           )}
-          <div className="my-1 h-px bg-border" />
-          <Link
-            href="/schools"
-            onClick={() => setOpen(false)}
-            className="block px-3 py-2 text-sm font-medium text-accent hover:bg-surface-hover"
-          >
-            View All Schools
-          </Link>
         </div>
       )}
     </div>

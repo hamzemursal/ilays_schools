@@ -5,10 +5,13 @@ import { api } from "@/lib/api";
 // small enough to filter client-side, same idiom as Teachers.
 export const staffApi = {
   list: api.listStaff,
+  search: api.searchStaff,
   getOne: api.getStaffMember,
   create: api.createStaffMember,
   update: api.updateStaffMember,
   remove: api.deleteStaffMember,
+  assignToSchool: api.assignStaffToSchool,
+  deactivateAssignment: api.deactivateStaffAssignment,
 };
 
 export const departmentsApi = {

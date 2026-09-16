@@ -1,16 +1,38 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import type { Staff } from "@/lib/api";
+import type { Staff, StaffAssignmentStatus } from "@/lib/api";
 import { DataTable, type Column, type TableSelection } from "@/components/ui/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Avatar } from "@/components/ui/Avatar";
 
-const STATUS_TONE: Record<Staff["status"], "success" | "warning" | "neutral"> = {
-  ACTIVE: "success",
-  ON_LEAVE: "warning",
-  INACTIVE: "neutral",
-};
+// A staff member has at most one StaffAssignment per school (see the
+// [staffId, schoolId] unique constraint) — this finds THIS school's own
+// row. Falling back to the person-level fields only applies at their home
+// school with no explicit assignment yet (e.g. created before this
+// feature existed, or created without ever calling assignToSchool) —
+// never at any other school, where there's nothing sensible to fall back to.
+function assignmentAt(staff: Staff, schoolId: string) {
+  return staff.assignments.find((a) => a.schoolId === schoolId);
+}
+
+function departmentNameAt(staff: Staff, schoolId: string): string | null {
+  const assignment = assignmentAt(staff, schoolId);
+  if (assignment) return assignment.department?.name ?? null;
+  return staff.schoolId === schoolId ? (staff.department?.name ?? null) : null;
+}
+
+function roleAt(staff: Staff, schoolId: string): string | null {
+  const assignment = assignmentAt(staff, schoolId);
+  if (assignment) return assignment.role;
+  return staff.schoolId === schoolId ? staff.jobTitle : null;
+}
+
+function statusAt(staff: Staff, schoolId: string): StaffAssignmentStatus {
+  const assignment = assignmentAt(staff, schoolId);
+  if (assignment) return assignment.status;
+  return staff.schoolId === schoolId && staff.status !== "INACTIVE" ? "ACTIVE" : "INACTIVE";
+}
 
 export function StaffTable({
   schoolId,
@@ -45,13 +67,17 @@ export function StaffTable({
     {
       key: "department",
       header: "Department",
-      sortValue: (s) => s.department?.name ?? "",
-      render: (s) => <span className="text-foreground-soft">{s.department?.name ?? "—"}</span>,
+      sortValue: (s) => departmentNameAt(s, schoolId) ?? "",
+      render: (s) => <span className="text-foreground-soft">{departmentNameAt(s, schoolId) ?? "—"}</span>,
     },
     {
       key: "jobTitle",
-      header: "Job title",
-      render: (s) => <span className="text-foreground-soft">{s.jobTitle ?? "—"}</span>,
+      header: "Role",
+      // Scoped to THIS school — a staff member assigned here from another
+      // school (see AssignExistingStaffForm) may hold a different role at
+      // each, so this must never show their home-school title while
+      // browsing a different school's list.
+      render: (s) => <span className="text-foreground-soft">{roleAt(s, schoolId) ?? "—"}</span>,
     },
     {
       key: "contact",
@@ -66,9 +92,14 @@ export function StaffTable({
     },
     {
       key: "status",
-      header: "Status",
-      sortValue: (s) => s.status,
-      render: (s) => <Badge tone={STATUS_TONE[s.status]}>{s.status.replace("_", " ")}</Badge>,
+      header: "Status here",
+      // Scoped to THIS school's own assignment status, not the person's
+      // home-school HR status — a staff member deactivated at one school
+      // must not read as inactive everywhere they work, and vice versa.
+      render: (s) => {
+        const tone = statusAt(s, schoolId);
+        return <Badge tone={tone === "ACTIVE" ? "success" : "neutral"}>{tone === "ACTIVE" ? "Active" : "Inactive"}</Badge>;
+      },
     },
   ];
 

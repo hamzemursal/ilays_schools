@@ -1498,12 +1498,49 @@ export interface Department {
   updatedAt: string;
 }
 
+export type StaffAssignmentStatus = "ACTIVE" | "INACTIVE";
+
+export interface StaffAssignmentRecord {
+  id: string;
+  staffId: string;
+  schoolId: string;
+  school: { id: string; name: string; type: SchoolType };
+  departmentId: string | null;
+  department: { id: string; name: string; status: DepartmentStatus } | null;
+  role: string | null;
+  status: StaffAssignmentStatus;
+}
+
+export interface StaffSearchResult {
+  id: string;
+  firstName: string;
+  lastName: string;
+  staffNumber: string;
+  // Permanent, organization-wide identity — the thing to check when two
+  // search results look like the same name but aren't (or are).
+  staffCode: string | null;
+  email: string | null;
+  phone: string | null;
+  // Where this staff member already has their Staff profile — shown so an
+  // admin assigning them at a different school can see that up front.
+  school: { id: string; name: string; type: SchoolType };
+}
+
 export interface Staff {
   id: string;
   userId: string | null;
+  // Home/employing school — where this person's personal profile and
+  // login are managed. Not necessarily every school they work at; see
+  // `assignments` for that (mirrors Teacher.schoolId vs assignments).
+  schoolId: string;
   departmentId: string | null;
   department: { id: string; name: string; status: DepartmentStatus } | null;
   staffNumber: string;
+  // Permanent, organization-wide identity — never school-scoped, never
+  // reused. Null only for a staff member created before this field existed
+  // and not yet covered by the backfill; every staff member created from
+  // here on has one immediately.
+  staffCode: string | null;
   firstName: string;
   lastName: string;
   sex: Sex | null;
@@ -1516,6 +1553,7 @@ export interface Staff {
   status: StaffStatus;
   emergencyContactName: string | null;
   emergencyContactPhone: string | null;
+  assignments: StaffAssignmentRecord[];
 }
 
 export interface CreateStaffInput {
@@ -2360,6 +2398,11 @@ export const api = {
 
   listStaff: (accessToken: string, schoolId: string) =>
     request<Staff[]>(`/schools/${schoolId}/staff`, { accessToken }),
+  // Org-wide, not school-wide — backs "assign an existing staff member to
+  // also work at this school" so a second Staff profile is never created
+  // for someone who already has one elsewhere in the organization.
+  searchStaff: (accessToken: string, schoolId: string, search: string) =>
+    request<StaffSearchResult[]>(`/schools/${schoolId}/staff${auditLogQs({ search })}`, { accessToken }),
   createStaffMember: (accessToken: string, schoolId: string, body: CreateStaffInput) =>
     request<Staff>(`/schools/${schoolId}/staff`, { method: "POST", body, accessToken }),
   getStaffMember: (accessToken: string, schoolId: string, staffId: string) =>
@@ -2368,6 +2411,22 @@ export const api = {
     request<Staff>(`/schools/${schoolId}/staff/${staffId}`, { method: "PATCH", body, accessToken }),
   deleteStaffMember: (accessToken: string, schoolId: string, staffId: string) =>
     request<{ success: boolean }>(`/schools/${schoolId}/staff/${staffId}`, { method: "DELETE", accessToken }),
+  assignStaffToSchool: (
+    accessToken: string,
+    schoolId: string,
+    staffId: string,
+    body: { departmentId?: string; role?: string },
+  ) =>
+    request<StaffAssignmentRecord>(`/schools/${schoolId}/staff/${staffId}/assignments`, {
+      method: "POST",
+      body,
+      accessToken,
+    }),
+  deactivateStaffAssignment: (accessToken: string, schoolId: string, staffId: string, assignmentId: string) =>
+    request<StaffAssignmentRecord>(`/schools/${schoolId}/staff/${staffId}/assignments/${assignmentId}/deactivate`, {
+      method: "POST",
+      accessToken,
+    }),
 
   listDepartments: (accessToken: string, schoolId: string) =>
     request<Department[]>(`/schools/${schoolId}/departments`, { accessToken }),

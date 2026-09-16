@@ -8,8 +8,19 @@ import { createWithSequentialCode } from "../common/sequential-code.util";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateStaffDto } from "./dto/create-staff.dto";
 import { UpdateStaffDto } from "./dto/update-staff.dto";
+import { CreateStaffAssignmentInputDto } from "./dto/create-staff-assignment-input.dto";
 
-const STAFF_INCLUDE = { department: true } as const;
+// Includes the school a given assignment is actually AT — never assume
+// that's the same as the staff member's own home school (Staff.schoolId);
+// StaffAssignment.school is what makes this school's admin pages show a
+// cross-school-assigned staff member correctly, same as
+// TeacherAssignment.school does for Teacher.
+const STAFF_ASSIGNMENT_INCLUDE = {
+  school: { select: { id: true, name: true, type: true } },
+  department: true,
+} as const;
+
+const STAFF_INCLUDE = { department: true, assignments: { include: STAFF_ASSIGNMENT_INCLUDE } } as const;
 
 @Injectable()
 export class StaffService {
@@ -19,10 +30,16 @@ export class StaffService {
     private readonly audit: AuditService,
   ) {}
 
+  // A staff member shows up here either because this is their home school
+  // (Staff.schoolId) or because they hold at least one StaffAssignment at
+  // this school despite being employed elsewhere — same OR-matching as
+  // TeachersService.listForSchool, for the same reason: a staff member
+  // just cross-school-assigned here (see assignToSchool) must not vanish
+  // from the very school admin who assigned them.
   async listForSchool(actor: AuthenticatedUser, schoolId: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     return this.prisma.staff.findMany({
-      where: { schoolId },
+      where: { OR: [{ schoolId }, { assignments: { some: { schoolId } } }] },
       include: STAFF_INCLUDE,
       orderBy: { lastName: "asc" },
     });
@@ -31,11 +48,120 @@ export class StaffService {
   async getOne(actor: AuthenticatedUser, schoolId: string, staffId: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     const staff = await this.prisma.staff.findFirst({
-      where: { id: staffId, schoolId },
+      where: { id: staffId, OR: [{ schoolId }, { assignments: { some: { schoolId } } }] },
       include: STAFF_INCLUDE,
     });
     if (!staff) throw new NotFoundException("Staff member not found in this school");
     return staff;
+  }
+
+  // Backs "assign an existing staff member to also work at this school" —
+  // the same organization-wide search TeachersService.searchAcrossOrg
+  // offers, so a School Admin never creates a second Staff record for
+  // someone who already has one elsewhere in the organization.
+  async searchAcrossOrg(actor: AuthenticatedUser, schoolId: string, query: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    if (query.trim().length < 2) return [];
+
+    return this.prisma.staff.findMany({
+      where: {
+        status: "ACTIVE",
+        school: { organizationId: actor.organizationId! },
+        OR: [
+          { firstName: { contains: query, mode: "insensitive" } },
+          { lastName: { contains: query, mode: "insensitive" } },
+          { staffNumber: { contains: query, mode: "insensitive" } },
+          { staffCode: { contains: query, mode: "insensitive" } },
+          { email: { contains: query, mode: "insensitive" } },
+        ],
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        staffNumber: true,
+        staffCode: true,
+        email: true,
+        phone: true,
+        school: { select: { id: true, name: true, type: true } },
+      },
+      take: 10,
+      orderBy: { lastName: "asc" },
+    });
+  }
+
+  // Upsert on the [staffId, schoolId] unique pair — assigning someone who
+  // already has an (INACTIVE) assignment here reactivates that same row
+  // rather than fighting the unique constraint with a second one, which
+  // also naturally covers "un-deactivate this person at this school."
+  async assignToSchool(actor: AuthenticatedUser, schoolId: string, staffId: string, dto: CreateStaffAssignmentInputDto) {
+    const school = await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+
+    const staff = await this.prisma.staff.findFirst({
+      where: { id: staffId, school: { organizationId: actor.organizationId! } },
+    });
+    if (!staff) throw new NotFoundException("Staff member not found in your organization");
+
+    if (dto.departmentId) {
+      await this.assertDepartmentBelongsToSchool(schoolId, dto.departmentId);
+    }
+
+    const assignment = await this.prisma.staffAssignment.upsert({
+      where: { staffId_schoolId: { staffId, schoolId } },
+      create: { staffId, schoolId, departmentId: dto.departmentId, role: dto.role, status: "ACTIVE" },
+      update: { departmentId: dto.departmentId, role: dto.role, status: "ACTIVE" },
+      include: STAFF_ASSIGNMENT_INCLUDE,
+    });
+
+    await this.audit.record({
+      actor,
+      organizationId: school.organizationId,
+      schoolId,
+      action: AuditAction.STAFF_ASSIGNED_TO_SCHOOL,
+      module: AuditModuleName.STAFF,
+      resourceType: "Staff",
+      resourceId: staffId,
+      resourceName: `${staff.firstName} ${staff.lastName}`,
+      after: { schoolId, departmentId: dto.departmentId, role: dto.role },
+    });
+
+    return assignment;
+  }
+
+  // Soft — sets status: INACTIVE rather than deleting the row, so a staff
+  // member's assignment history (and their payroll/leave/attendance
+  // records, which point at Staff directly and are unaffected either way)
+  // is never destroyed just because they've stopped working at this
+  // school. assignToSchool's upsert reactivates this exact row later if
+  // they come back.
+  async deactivateAssignment(actor: AuthenticatedUser, schoolId: string, staffId: string, assignmentId: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    const staff = await this.prisma.staff.findFirst({
+      where: { id: staffId, school: { organizationId: actor.organizationId! } },
+    });
+    if (!staff) throw new NotFoundException("Staff member not found in your organization");
+
+    const assignment = await this.prisma.staffAssignment.findFirst({ where: { id: assignmentId, staffId, schoolId } });
+    if (!assignment) throw new NotFoundException("Assignment not found for this staff member at this school");
+
+    const updated = await this.prisma.staffAssignment.update({
+      where: { id: assignmentId },
+      data: { status: "INACTIVE" },
+      include: STAFF_ASSIGNMENT_INCLUDE,
+    });
+
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId,
+      action: AuditAction.STAFF_ASSIGNMENT_DEACTIVATED,
+      module: AuditModuleName.STAFF,
+      resourceType: "Staff",
+      resourceId: staffId,
+      resourceName: `${staff.firstName} ${staff.lastName}`,
+    });
+
+    return updated;
   }
 
   async create(actor: AuthenticatedUser, schoolId: string, dto: CreateStaffDto) {

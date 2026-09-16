@@ -79,6 +79,15 @@ export function StaffProfile({ schoolId, staffId }: { schoolId: string; staffId:
 
   const canUpdate = user?.permissions.includes("staff.update") ?? false;
 
+  // Scoped to THIS school — same reasoning as StaffTable: a staff member
+  // assigned here from another school may hold a different role/department
+  // at each, so the header must never show their home-school title while
+  // viewing them from a different school's admin pages.
+  const assignmentHere = staff.assignments.find((a) => a.schoolId === schoolId);
+  const roleHere = assignmentHere ? assignmentHere.role : staff.schoolId === schoolId ? staff.jobTitle : null;
+  const departmentHere = assignmentHere ? assignmentHere.department?.name : staff.schoolId === schoolId ? staff.department?.name : null;
+  const otherSchoolCount = new Set(staff.assignments.filter((a) => a.schoolId !== schoolId).map((a) => a.schoolId)).size;
+
   return (
     <div className="space-y-5">
       <Card>
@@ -92,9 +101,16 @@ export function StaffProfile({ schoolId, staffId }: { schoolId: string; staffId:
               <Badge tone={STATUS_TONE[staff.status]}>{staff.status.replace("_", " ")}</Badge>
             </div>
             <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-foreground-soft">
-              <span className="font-mono text-xs text-foreground-muted">#{staff.staffNumber}</span>
-              {staff.jobTitle && <span>{staff.jobTitle}</span>}
-              {staff.department && <span>{staff.department.name}</span>}
+              {staff.staffCode && (
+                <span className="font-mono text-xs font-medium text-accent" title="Permanent, organization-wide Staff ID">
+                  {staff.staffCode}
+                </span>
+              )}
+              <span className="font-mono text-xs text-foreground-muted" title="Staff number at this school">
+                #{staff.staffNumber}
+              </span>
+              {roleHere && <span>{roleHere}</span>}
+              {departmentHere && <span>{departmentHere}</span>}
               {staff.phone && (
                 <span className="inline-flex items-center gap-1.5">
                   <Phone className="size-3.5" /> {staff.phone}
@@ -102,6 +118,11 @@ export function StaffProfile({ schoolId, staffId }: { schoolId: string; staffId:
               )}
               {staff.email && <span>{staff.email}</span>}
             </div>
+            {otherSchoolCount > 0 && (
+              <p className="mt-1 text-xs text-foreground-muted">
+                Also works at {otherSchoolCount} other school{otherSchoolCount === 1 ? "" : "s"}.
+              </p>
+            )}
           </div>
           {canUpdate && !editing && (
             <div className="flex gap-2">

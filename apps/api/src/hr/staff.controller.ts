@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { StaffService } from "./staff.service";
 import { CreateStaffDto } from "./dto/create-staff.dto";
 import { UpdateStaffDto } from "./dto/update-staff.dto";
+import { CreateStaffAssignmentInputDto } from "./dto/create-staff-assignment-input.dto";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { RequirePermissions } from "../auth/decorators/require-permissions.decorator";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
@@ -10,9 +11,17 @@ import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 export class StaffController {
   constructor(private readonly staff: StaffService) {}
 
+  // Bare GET stays dual-purpose, same as TeachersController/GuardiansController:
+  // ?search=... is the org-wide "find an existing staff member to assign
+  // here" lookup; no search param returns this school's own staff list.
   @RequirePermissions("staff.view")
   @Get()
-  list(@CurrentUser() user: AuthenticatedUser, @Param("schoolId") schoolId: string) {
+  list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Query("search") search?: string,
+  ) {
+    if (search !== undefined) return this.staff.searchAcrossOrg(user, schoolId, search);
     return this.staff.listForSchool(user, schoolId);
   }
 
@@ -51,5 +60,27 @@ export class StaffController {
     @Param("staffId") staffId: string,
   ) {
     return this.staff.remove(user, schoolId, staffId);
+  }
+
+  @RequirePermissions("staff.update")
+  @Post(":staffId/assignments")
+  assignToSchool(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("staffId") staffId: string,
+    @Body() dto: CreateStaffAssignmentInputDto,
+  ) {
+    return this.staff.assignToSchool(user, schoolId, staffId, dto);
+  }
+
+  @RequirePermissions("staff.update")
+  @Post(":staffId/assignments/:assignmentId/deactivate")
+  deactivateAssignment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("staffId") staffId: string,
+    @Param("assignmentId") assignmentId: string,
+  ) {
+    return this.staff.deactivateAssignment(user, schoolId, staffId, assignmentId);
   }
 }

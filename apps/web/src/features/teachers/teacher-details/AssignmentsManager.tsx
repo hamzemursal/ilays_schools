@@ -51,12 +51,19 @@ export function AssignmentsManager({
   teacher,
   canManage,
   // Only a Super Admin / Organization Admin gets the cross-school "Assigned
-  // Schools" switcher and other schools' real names — everyone else keeps
-  // exactly the existing "Also teaches at N other school(s)" count-only
-  // behavior. Org-wide reach is decided the same way the backend itself
-  // decides it (see AuthenticatedUser.schoolIds / accessibleWhere): an
-  // empty schoolIds list means "not limited to specific schools."
+  // Schools" switcher and other schools' real names, counts, or totals —
+  // everyone else only ever sees their own school (see "My school" below).
+  // Org-wide reach is decided the same way the backend itself decides it
+  // (see AuthenticatedUser.schoolIds / accessibleWhere): an empty schoolIds
+  // list means "not limited to specific schools." The backend enforces the
+  // real boundary independently (teachers.service.ts's teacherInclude) —
+  // this prop only controls which of two already-safe views to render.
   canSeeAllSchools = false,
+  // This page's own school's real name, for the "My school" header a
+  // non-Super-Admin viewer sees instead of a switcher. Optional only
+  // because it's a display nicety, not a security boundary — omitting it
+  // falls back to a generic label, never to another school's name.
+  schoolName,
   onChange,
 }: {
   accessToken: string;
@@ -64,6 +71,7 @@ export function AssignmentsManager({
   teacher: Teacher;
   canManage: boolean;
   canSeeAllSchools?: boolean;
+  schoolName?: string;
   onChange: (teacher: Teacher) => void;
 }) {
   const { show } = useToast();
@@ -208,9 +216,22 @@ export function AssignmentsManager({
 
   // Every real school this teacher has at least one assignment at — a
   // Super Admin sees all of them as switchable cards; everyone else never
-  // computes this (canSeeAllSchools stays false, so this is just []).
+  // computes this (canSeeAllSchools stays false, so this is just []). A
+  // School Admin never sees a school count, name, or total from outside
+  // their own school — not even a bare "also teaches elsewhere" hint — and
+  // the backend enforces this by never sending those rows in the first
+  // place (see teachers.service.ts's teacherInclude), so there is nothing
+  // here for the frontend to additionally filter or hide.
   const schools = canSeeAllSchools ? groupAssignmentsBySchool(teacher.assignments) : [];
-  const otherSchoolCount = new Set(teacher.assignments.filter((a) => a.schoolId !== schoolId).map((a) => a.schoolId)).size;
+  // Organization-wide totals for the Super Admin's summary strip — deduped
+  // across every school this teacher works at, never per-school counts
+  // added together (a teacher who teaches Mathematics at two schools still
+  // has 1 distinct subject here, not 2). Super Admin only: a School Admin
+  // never computes these, and the backend never sends the cross-school rows
+  // that would make them meaningful anyway.
+  const orgClassCount = canSeeAllSchools ? new Set(teacher.assignments.map((a) => a.section.class.id)).size : 0;
+  const orgSectionCount = canSeeAllSchools ? new Set(teacher.assignments.map((a) => a.section.id)).size : 0;
+  const orgSubjectCount = canSeeAllSchools ? new Set(teacher.assignments.map((a) => a.subject.id)).size : 0;
 
   // The school currently on screen: the viewer's own explicit pick if it's
   // still one of this teacher's real schools, else this page's own school
@@ -270,6 +291,26 @@ export function AssignmentsManager({
       />
       <div className="space-y-5 p-5">
         {canSeeAllSchools && schools.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl bg-accent-soft/40 px-4 py-3 text-sm text-foreground-soft">
+            <span className="font-semibold text-foreground">
+              Assigned to {schools.length} {schools.length === 1 ? "school" : "schools"}
+            </span>
+            <span>
+              {teacher.assignments.length} class-subject assignment{teacher.assignments.length === 1 ? "" : "s"}
+            </span>
+            <span>
+              {orgSubjectCount} {orgSubjectCount === 1 ? "subject" : "subjects"}
+            </span>
+            <span>
+              {orgClassCount} {orgClassCount === 1 ? "class" : "classes"}
+            </span>
+            <span>
+              {orgSectionCount} {orgSectionCount === 1 ? "section" : "sections"}
+            </span>
+          </div>
+        )}
+
+        {canSeeAllSchools && schools.length > 0 && (
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground-muted">Assigned schools</p>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -307,10 +348,13 @@ export function AssignmentsManager({
           </div>
         )}
 
-        {!canSeeAllSchools && otherSchoolCount > 0 && (
-          <p className="text-sm text-foreground-soft">
-            Also teaches at {otherSchoolCount} other school{otherSchoolCount === 1 ? "" : "s"}.
-          </p>
+        {!canSeeAllSchools && (
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground-muted">My school</p>
+            <div className="rounded-xl border border-border bg-background p-3">
+              <span className="text-sm font-semibold text-foreground">{schoolName ?? "This school"}</span>
+            </div>
+          </div>
         )}
 
         {viewYears.length > 0 && (

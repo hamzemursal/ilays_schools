@@ -6,6 +6,7 @@ import { Cake, MapPin, Pencil, Phone, Power, Send, ShieldAlert, Trash2, User } f
 import { ApiError, useAuth } from "@/lib/auth-context";
 import type { Teacher } from "@/lib/api";
 import { teachersApi } from "../api";
+import { useCurrentSchool } from "@/components/layout/Sidebar";
 import { PhotoUpload } from "../components/PhotoUpload";
 import { DocumentsCard } from "../components/DocumentsCard";
 import { EditTeacherForm } from "./EditTeacherForm";
@@ -29,6 +30,7 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
   const { user, accessToken } = useAuth();
   const { show } = useToast();
   const router = useRouter();
+  const currentSchool = useCurrentSchool(user);
 
   const [teacher, setTeacher] = useState<Teacher | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -307,6 +309,7 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
         teacher={teacher}
         canManage={canUpdate}
         canSeeAllSchools={canSeeAllSchools}
+        schoolName={currentSchool?.name}
         onChange={setTeacher}
       />
 

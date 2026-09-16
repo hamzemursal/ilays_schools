@@ -91,17 +91,33 @@ describe("AssignmentsManager — non-Super-Admin viewers (school isolation)", ()
     expect(screen.queryByText("Physics")).not.toBeInTheDocument();
   });
 
-  it("notes that the teacher also works at other schools, without naming or detailing them", () => {
-    renderManager([SCHOOL_A_ASSIGNMENT, SCHOOL_B_ASSIGNMENT]);
+  it("shows a 'My school' header naming only this school — never a school count, another school's name, or 'also teaches elsewhere'", () => {
+    render(
+      <ToastProvider>
+        <AssignmentsManager
+          accessToken="token-1"
+          schoolId="school-a"
+          teacher={teacher({ assignments: [SCHOOL_A_ASSIGNMENT, SCHOOL_B_ASSIGNMENT] })}
+          canManage={false}
+          canSeeAllSchools={false}
+          schoolName="Ilays Primary School"
+          onChange={vi.fn()}
+        />
+      </ToastProvider>,
+    );
 
-    expect(screen.getByText(/Also teaches at 1 other school\./)).toBeInTheDocument();
-    expect(screen.queryByText(/Ilays Secondary School/)).not.toBeInTheDocument();
+    expect(screen.getByText("My school")).toBeInTheDocument();
+    expect(screen.getByText("Ilays Primary School")).toBeInTheDocument();
+    expect(screen.queryByText(/other school/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Assigned to \d+ schools?/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Ilays Secondary School")).not.toBeInTheDocument();
   });
 
-  it("says nothing about other schools when this teacher only works here", () => {
-    renderManager([SCHOOL_A_ASSIGNMENT]);
+  it("falls back to a generic label, never another school's name, when schoolName isn't provided", () => {
+    renderManager([SCHOOL_A_ASSIGNMENT, SCHOOL_B_ASSIGNMENT]);
 
-    expect(screen.queryByText(/other school/)).not.toBeInTheDocument();
+    expect(screen.getByText("This school")).toBeInTheDocument();
+    expect(screen.queryByText("Ilays Secondary School")).not.toBeInTheDocument();
   });
 
   it("shows the 'no assignments at this school' empty state when every assignment belongs to another school", () => {
@@ -115,6 +131,15 @@ describe("AssignmentsManager — non-Super-Admin viewers (school isolation)", ()
     renderManager([SCHOOL_A_ASSIGNMENT, SCHOOL_B_ASSIGNMENT]);
 
     expect(screen.queryByText("Assigned schools")).not.toBeInTheDocument();
+  });
+
+  it("shows no organization-wide class/section/subject totals — only this school's own counts, if any are shown at all", () => {
+    renderManager([SCHOOL_A_ASSIGNMENT, SCHOOL_A_ASSIGNMENT_2, SCHOOL_B_ASSIGNMENT]);
+
+    // Class 5 has 2 sections at school-a; nothing here should ever total in
+    // school-b's Form 2 on top of that.
+    expect(screen.getByText("2 sections")).toBeInTheDocument();
+    expect(screen.queryByText("3 sections")).not.toBeInTheDocument();
   });
 });
 
@@ -223,6 +248,19 @@ describe("AssignmentsManager — Super Admin, multiple schools", () => {
     expect(screen.getByText("Assigned schools")).toBeInTheDocument();
     expect(screen.getAllByText("Ilays Primary School").length).toBeGreaterThan(0);
     expect(screen.queryByText("Ilays Secondary School")).not.toBeInTheDocument();
+  });
+
+  it("shows a real organization-wide summary — schools/classes/sections/subjects deduped across every school, not per-school totals added up", () => {
+    renderManager([SCHOOL_A_ASSIGNMENT, SCHOOL_A_ASSIGNMENT_2, SCHOOL_B_ASSIGNMENT], { canSeeAllSchools: true });
+
+    expect(screen.getByText("Assigned to 2 schools")).toBeInTheDocument();
+    expect(screen.getByText("3 class-subject assignments")).toBeInTheDocument();
+    // Mathematics, English, Physics — 3 distinct subjects across both schools.
+    expect(screen.getByText("3 subjects")).toBeInTheDocument();
+    // Class 5 (school-a) and Form 2 (school-b) — 2 distinct classes.
+    expect(screen.getByText("2 classes")).toBeInTheDocument();
+    // 5A, 5B, 2A — 3 distinct sections.
+    expect(screen.getByText("3 sections")).toBeInTheDocument();
   });
 });
 

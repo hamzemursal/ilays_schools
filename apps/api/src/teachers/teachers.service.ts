@@ -26,14 +26,33 @@ const ASSIGNMENT_INCLUDE = {
   school: { select: { id: true, name: true, type: true } },
 } as const;
 
+// Organization-wide reach — Super Admin / Organization Admin — decided the
+// exact same way SchoolsService.accessibleWhere already decides "sees
+// every school in the org": no specific schoolIds means not limited to any.
+// This is the one place that decision is made for teacher-assignment
+// visibility; every admin-facing read below goes through it.
+function isOrgWide(actor: AuthenticatedUser): boolean {
+  return actor.schoolIds.length === 0;
+}
+
 // user.status lets the frontend tell "no login yet" (userId null) apart
 // from "invited but never finished setup" (PENDING_SETUP — Resend invite
 // makes sense) from "already logged in at least once" (ACTIVE — nothing to
 // resend).
-const TEACHER_INCLUDE = {
-  assignments: { include: ASSIGNMENT_INCLUDE },
-  user: { select: { status: true } },
-} as const;
+//
+// `assignments` is scoped to what `actor` is actually authorized to see: an
+// org-wide actor gets every assignment this teacher holds, anywhere in the
+// organization (the Super Admin "Assigned Schools" switcher depends on
+// this); a school-scoped actor (a School Admin) only ever gets this one
+// school's assignments back, regardless of how many other schools this
+// teacher also works at. This is enforced here, in the query itself — never
+// left for the frontend to filter or hide after the fact.
+function teacherInclude(actor: AuthenticatedUser, schoolId: string) {
+  return {
+    assignments: { where: isOrgWide(actor) ? undefined : { schoolId }, include: ASSIGNMENT_INCLUDE },
+    user: { select: { status: true } },
+  };
+}
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -159,7 +178,7 @@ export class TeachersService {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     return this.prisma.teacher.findMany({
       where: { OR: [{ schoolId }, { assignments: { some: { schoolId } } }] },
-      include: TEACHER_INCLUDE,
+      include: teacherInclude(actor, schoolId),
       orderBy: { lastName: "asc" },
     });
   }
@@ -208,7 +227,7 @@ export class TeachersService {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
     const teacher = await this.prisma.teacher.findFirst({
       where: { id: teacherId, OR: [{ schoolId }, { assignments: { some: { schoolId } } }] },
-      include: TEACHER_INCLUDE,
+      include: teacherInclude(actor, schoolId),
     });
     if (!teacher) throw new NotFoundException("Teacher not found in this school");
     return teacher;
@@ -236,7 +255,7 @@ export class TeachersService {
         emergencyContactName: dto.emergencyContactName,
         emergencyContactPhone: dto.emergencyContactPhone,
       },
-      include: TEACHER_INCLUDE,
+      include: teacherInclude(actor, schoolId),
     });
 
     await this.audit.record({
@@ -370,7 +389,7 @@ export class TeachersService {
 
             return tx.teacher.findUniqueOrThrow({
               where: { id: teacher.id },
-              include: TEACHER_INCLUDE,
+              include: teacherInclude(actor, schoolId),
             });
           }, { timeout: 30_000 }),
       );

@@ -257,6 +257,82 @@ describe("TeachersService.listForSchool / getOne", () => {
   });
 });
 
+// This is the actual security boundary: `assignments` must never come back
+// unscoped for an actor who isn't organization-wide, no matter what the
+// frontend later chooses to render. A School Admin's `schoolIds` always has
+// at least one entry (see accessibleWhere elsewhere in the app); a Super
+// Admin / Organization Admin's is empty, which is the one signal this
+// service trusts to widen the query at all.
+describe("TeachersService — teacher-assignment visibility is scoped in the query, not just in the response", () => {
+  let prisma: MockPrisma;
+  let service: TeachersService;
+
+  const SCHOOL_ADMIN: AuthenticatedUser = { ...ACTOR, schoolIds: ["school-1"] };
+  const SUPER_ADMIN: AuthenticatedUser = { ...ACTOR, roles: ["SUPER_ADMIN"], schoolIds: [] };
+
+  beforeEach(() => {
+    prisma = createMockPrisma();
+    ({ service } = createService(prisma));
+    prisma.teacher.findMany.mockResolvedValue([]);
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.teacher.update.mockResolvedValue({ id: "teacher-1", firstName: "Amina", lastName: "Hassan" });
+  });
+
+  it("listForSchool filters assignments to this school for a School Admin", async () => {
+    await service.listForSchool(SCHOOL_ADMIN, "school-1");
+    expect(prisma.teacher.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({ assignments: expect.objectContaining({ where: { schoolId: "school-1" } }) }),
+      }),
+    );
+  });
+
+  it("listForSchool does not filter assignments for a Super Admin — every school this teacher works at comes back", async () => {
+    await service.listForSchool(SUPER_ADMIN, "school-1");
+    expect(prisma.teacher.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({ assignments: expect.objectContaining({ where: undefined }) }),
+      }),
+    );
+  });
+
+  it("getOne filters assignments to this school for a School Admin", async () => {
+    await service.getOne(SCHOOL_ADMIN, "school-1", "teacher-1");
+    expect(prisma.teacher.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({ assignments: expect.objectContaining({ where: { schoolId: "school-1" } }) }),
+      }),
+    );
+  });
+
+  it("getOne does not filter assignments for a Super Admin", async () => {
+    await service.getOne(SUPER_ADMIN, "school-1", "teacher-1");
+    expect(prisma.teacher.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({ assignments: expect.objectContaining({ where: undefined }) }),
+      }),
+    );
+  });
+
+  it("update's returned teacher has assignments filtered to this school for a School Admin", async () => {
+    await service.update(SCHOOL_ADMIN, "school-1", "teacher-1", { firstName: "Amina" });
+    expect(prisma.teacher.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({ assignments: expect.objectContaining({ where: { schoolId: "school-1" } }) }),
+      }),
+    );
+  });
+
+  it("update's returned teacher is not assignment-filtered for a Super Admin", async () => {
+    await service.update(SUPER_ADMIN, "school-1", "teacher-1", { firstName: "Amina" });
+    expect(prisma.teacher.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({ assignments: expect.objectContaining({ where: undefined }) }),
+      }),
+    );
+  });
+});
+
 describe("TeachersService.update", () => {
   let prisma: MockPrisma;
   let service: TeachersService;

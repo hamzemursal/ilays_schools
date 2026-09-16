@@ -159,9 +159,6 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
                   {teacher.teacherCode}
                 </span>
               )}
-              <span className="font-mono text-xs text-foreground-muted" title="Employee number at this school">
-                #{teacher.employeeNumber}
-              </span>
               {teacher.phone && (
                 <span className="inline-flex items-center gap-1.5">
                   <Phone className="size-3.5" /> {teacher.phone}

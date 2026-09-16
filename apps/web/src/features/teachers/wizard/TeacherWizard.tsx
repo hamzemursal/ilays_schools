@@ -109,8 +109,8 @@ export function TeacherWizard({ schoolId }: { schoolId: string }) {
           {created.firstName} {created.lastName} has been added.
         </p>
         <div className="mx-auto mt-5 max-w-xs rounded-lg border border-border bg-surface-soft px-3 py-2 text-left">
-          <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">Staff code</p>
-          <p className="mt-0.5 font-mono text-sm text-foreground">{created.employeeNumber}</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">Teacher ID</p>
+          <p className="mt-0.5 font-mono text-sm font-medium text-accent">{created.teacherCode}</p>
         </div>
         <div className="mt-6 flex justify-center gap-2">
           <Button variant="outline" onClick={() => router.push(`/schools/${schoolId}/teachers`)}>

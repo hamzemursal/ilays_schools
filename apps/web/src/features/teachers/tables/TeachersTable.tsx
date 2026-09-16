@@ -39,7 +39,7 @@ export function TeachersTable({
             <p className="truncate font-medium text-foreground">
               {t.firstName} {t.lastName}
             </p>
-            <p className="truncate font-mono text-xs text-foreground-muted">{t.employeeNumber}</p>
+            {t.teacherCode && <p className="truncate font-mono text-xs text-accent">{t.teacherCode}</p>}
           </div>
         </div>
       ),
@@ -82,8 +82,8 @@ export function TeachersTable({
       columns={columns}
       rowKey={(t) => t.id}
       onRowClick={(t) => router.push(`/schools/${schoolId}/teachers/${t.id}`)}
-      searchPlaceholder="Search teachers by name or number…"
-      searchFilter={(t, q) => `${t.firstName} ${t.lastName} ${t.employeeNumber}`.toLowerCase().includes(q)}
+      searchPlaceholder="Search teachers by name or ID…"
+      searchFilter={(t, q) => `${t.firstName} ${t.lastName} ${t.teacherCode ?? ""} ${t.employeeNumber}`.toLowerCase().includes(q)}
       emptyTitle="No teachers yet"
       emptyDescription="Add your first teacher to get started."
       selection={selection}

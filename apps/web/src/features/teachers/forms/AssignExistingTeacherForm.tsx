@@ -105,9 +105,7 @@ export function AssignExistingTeacherForm({
                     )}
                     <SchoolTypeBadge type={r.school.type} />
                   </div>
-                  <p className="truncate text-sm text-foreground-soft">
-                    #{r.employeeNumber} · {r.school.name}
-                  </p>
+                  <p className="truncate text-sm text-foreground-soft">{r.school.name}</p>
                 </div>
                 <Button size="sm" variant="outline" icon={<UserPlus className="size-4" />} onClick={() => setSelected(r)}>
                   Select

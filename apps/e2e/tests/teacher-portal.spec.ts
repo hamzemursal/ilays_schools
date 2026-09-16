@@ -39,7 +39,9 @@ test("Teacher views their real classes/exams, edits their own profile, and is de
   // (alongside the PageHeader's own "My classes" <h1>) — same
   // announcer-duplication risk as the dashboard's title above, so .first().
   await expect(page.getByText("Amran Hassan").first()).toBeVisible();
-  await expect(page.getByText("#EMP-0001")).toBeVisible();
+  // The per-school EMP- number is intentionally no longer shown here — only
+  // the permanent, organization-wide TCH- code is (see seed.ts).
+  await expect(page.getByText("TCH-00001")).toBeVisible();
 
   // --- Real self-service mutation: edit contact details, done here on the
   // top-level /my-classes page since that's where the profile card (and

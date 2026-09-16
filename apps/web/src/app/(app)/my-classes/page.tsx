@@ -96,7 +96,11 @@ export default function MyClassesPage() {
                     <Badge tone={STATUS_TONE[teacher.status]}>{teacher.status.replace("_", " ")}</Badge>
                   </div>
                   <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-foreground-soft">
-                    <span className="font-mono text-xs text-foreground-muted">#{teacher.employeeNumber}</span>
+                    {teacher.teacherCode && (
+                      <span className="font-mono text-xs font-medium text-accent" title="Your permanent Teacher ID">
+                        {teacher.teacherCode}
+                      </span>
+                    )}
                     {teacher.phone && (
                       <span className="inline-flex items-center gap-1.5">
                         <Phone className="size-3.5" /> {teacher.phone}

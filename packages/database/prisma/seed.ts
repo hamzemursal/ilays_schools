@@ -489,6 +489,7 @@ async function seedDevAuthFixtures() {
       userId: teacherUser.id,
       schoolId: school.id,
       employeeNumber: "EMP-0001",
+      teacherCode: "TCH-00001",
       firstName: "Amran",
       lastName: "Hassan",
     },

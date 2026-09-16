@@ -4,6 +4,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import { AuditService } from "../audit/audit.service";
 import { AuditAction, AuditModuleName } from "../audit/audit-actions";
+import { createWithSequentialCode } from "../common/sequential-code.util";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateStaffDto } from "./dto/create-staff.dto";
 import { UpdateStaffDto } from "./dto/update-staff.dto";
@@ -47,35 +48,43 @@ export class StaffService {
     const staffNumber = dto.staffNumber ?? (await this.generateStaffNumber(schoolId));
 
     try {
-      const staff = await this.prisma.staff.create({
-        data: {
-          schoolId,
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          staffNumber,
-          departmentId: dto.departmentId,
-          jobTitle: dto.jobTitle,
-          phone: dto.phone,
-          email: dto.email,
-          address: dto.address,
-          employmentDate: dto.employmentDate ? new Date(dto.employmentDate) : undefined,
+      return await createWithSequentialCode(
+        () => this.prisma.staff.count(),
+        "STF",
+        "staffCode",
+        async (staffCode) => {
+          const staff = await this.prisma.staff.create({
+            data: {
+              schoolId,
+              firstName: dto.firstName,
+              lastName: dto.lastName,
+              staffNumber,
+              staffCode,
+              departmentId: dto.departmentId,
+              jobTitle: dto.jobTitle,
+              phone: dto.phone,
+              email: dto.email,
+              address: dto.address,
+              employmentDate: dto.employmentDate ? new Date(dto.employmentDate) : undefined,
+            },
+            include: STAFF_INCLUDE,
+          });
+
+          await this.audit.record({
+            actor,
+            organizationId: actor.organizationId,
+            schoolId,
+            action: AuditAction.STAFF_CREATED,
+            module: AuditModuleName.STAFF,
+            resourceType: "Staff",
+            resourceId: staff.id,
+            resourceName: `${staff.firstName} ${staff.lastName}`,
+            after: { firstName: staff.firstName, lastName: staff.lastName, staffNumber: staff.staffNumber, staffCode: staff.staffCode },
+          });
+
+          return staff;
         },
-        include: STAFF_INCLUDE,
-      });
-
-      await this.audit.record({
-        actor,
-        organizationId: actor.organizationId,
-        schoolId,
-        action: AuditAction.STAFF_CREATED,
-        module: AuditModuleName.STAFF,
-        resourceType: "Staff",
-        resourceId: staff.id,
-        resourceName: `${staff.firstName} ${staff.lastName}`,
-        after: { firstName: staff.firstName, lastName: staff.lastName, staffNumber: staff.staffNumber },
-      });
-
-      return staff;
+      );
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("A staff member with this staff number already exists in this school");

@@ -8,6 +8,7 @@ import { DocumentsService } from "../documents/documents.service";
 import { StorageService } from "../storage/storage.service";
 import { AuditService } from "../audit/audit.service";
 import { AuditAction, AuditModuleName } from "../audit/audit-actions";
+import { createWithSequentialCode } from "../common/sequential-code.util";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateTeacherDto } from "./dto/create-teacher.dto";
 import { CreateTeacherAssignmentInputDto } from "./dto/create-teacher-assignment-input.dto";
@@ -314,51 +315,63 @@ export class TeachersService {
     const employeeNumber = dto.employeeNumber ?? (await this.generateEmployeeNumber(schoolId));
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        const teacher = await tx.teacher.create({
-          data: {
-            schoolId,
-            firstName: dto.firstName,
-            lastName: dto.lastName,
-            employeeNumber,
-            phone: dto.phone,
-            email: dto.email,
-            qualification: dto.qualification,
-          },
-        });
+      return await createWithSequentialCode(
+        () => this.prisma.teacher.count(),
+        "TCH",
+        "teacherCode",
+        (teacherCode) =>
+          this.prisma.$transaction(async (tx) => {
+            const teacher = await tx.teacher.create({
+              data: {
+                schoolId,
+                firstName: dto.firstName,
+                lastName: dto.lastName,
+                employeeNumber,
+                teacherCode,
+                phone: dto.phone,
+                email: dto.email,
+                qualification: dto.qualification,
+              },
+            });
 
-        for (const a of dto.assignments ?? []) {
-          await tx.teacherAssignment.create({
-            data: {
-              teacherId: teacher.id,
-              schoolId,
-              academicYearId: a.academicYearId,
-              sectionId: a.sectionId,
-              subjectId: a.subjectId,
-            },
-          });
-        }
+            for (const a of dto.assignments ?? []) {
+              await tx.teacherAssignment.create({
+                data: {
+                  teacherId: teacher.id,
+                  schoolId,
+                  academicYearId: a.academicYearId,
+                  sectionId: a.sectionId,
+                  subjectId: a.subjectId,
+                },
+              });
+            }
 
-        await this.audit.record(
-          {
-            actor,
-            organizationId: actor.organizationId,
-            schoolId,
-            action: AuditAction.TEACHER_CREATED,
-            module: AuditModuleName.TEACHERS,
-            resourceType: "Teacher",
-            resourceId: teacher.id,
-            resourceName: `${teacher.firstName} ${teacher.lastName}`,
-            after: { firstName: teacher.firstName, lastName: teacher.lastName, employeeNumber: teacher.employeeNumber },
-          },
-          tx,
-        );
+            await this.audit.record(
+              {
+                actor,
+                organizationId: actor.organizationId,
+                schoolId,
+                action: AuditAction.TEACHER_CREATED,
+                module: AuditModuleName.TEACHERS,
+                resourceType: "Teacher",
+                resourceId: teacher.id,
+                resourceName: `${teacher.firstName} ${teacher.lastName}`,
+                after: {
+                  firstName: teacher.firstName,
+                  lastName: teacher.lastName,
+                  employeeNumber: teacher.employeeNumber,
+                  teacherCode: teacher.teacherCode,
+                },
+              },
+              tx,
+            );
 
-        return tx.teacher.findUniqueOrThrow({
-          where: { id: teacher.id },
-          include: TEACHER_INCLUDE,
-        });
-      }, { timeout: 30_000 });
+            return tx.teacher.findUniqueOrThrow({
+              where: { id: teacher.id },
+              include: TEACHER_INCLUDE,
+            });
+          }, { timeout: 30_000 }),
+      );
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("A teacher with this employee number already exists in this school");

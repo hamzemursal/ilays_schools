@@ -73,6 +73,10 @@ model School {
   // Workforce / HR / Payroll / Finance foundation (Phase 1)
   departments        Department[]
   staff              Staff[]
+  // A staff member's own Staff row lives at exactly one "home" school
+  // (above), but a StaffAssignment may point at other schools too — same
+  // split as `teachers`/`teacherAssignments` above.
+  staffAssignments   StaffAssignment[]
   billingPeriods     BillingPeriod[]
   charges            Charge[]
   feeAdjustments     FeeAdjustment[]
@@ -478,6 +482,17 @@ model Teacher {
   schoolId String
   school   School  @relation(fields: [schoolId], references: [id], onDelete: Restrict)
 
+  // Permanent, organization-wide identity — never scoped by school, never
+  // reused, never renumbered on transfer/reassignment. Deliberately a
+  // second, separate field from employeeNumber (which stays exactly as it
+  // was: a per-school payroll/HR number, `@@unique([schoolId,
+  // employeeNumber])` below) rather than repurposing it, so no existing
+  // data, export, or payslip reference needs to change. Nullable only
+  // because it's backfilled by migration for teachers that already existed
+  // when this field was introduced; every teacher created from here on
+  // gets one immediately (see TeachersService.create).
+  teacherCode String? @unique
+
   employeeNumber String
   firstName      String
   lastName       String
@@ -570,7 +585,8 @@ model Department {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  staff Staff[]
+  staff       Staff[]
+  assignments StaffAssignment[]
 
   @@unique([schoolId, name])
   @@map("departments")
@@ -590,6 +606,11 @@ model Staff {
   school       School      @relation(fields: [schoolId], references: [id], onDelete: Restrict)
   departmentId String?
   department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  // Permanent, organization-wide identity — same rationale as
+  // Teacher.teacherCode: a second field alongside staffNumber (which stays
+  // exactly as it was, per-school), not a replacement for it.
+  staffCode String? @unique
 
   staffNumber    String
   firstName      String
@@ -614,9 +635,43 @@ model Staff {
   advances         StaffAdvance[]
   leaveRequests    LeaveRequest[]
   staffAttendances StaffAttendance[]
+  assignments      StaffAssignment[]
 
   @@unique([schoolId, staffNumber])
   @@map("staff")
+}
+
+enum StaffAssignmentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+// The multi-school counterpart to TeacherAssignment — deliberately
+// independent of Staff.schoolId (the person's home/employing school),
+// same split for the same reason: a staff member's home school controls
+// their personal profile and login, but StaffAssignment is what actually
+// determines every school they work at and in what role there. status is
+// per assignment, not per person — deactivating someone at one school
+// (status: INACTIVE here) must never affect their standing at another
+// school; Staff.status is a separate, home-school-only HR field.
+model StaffAssignment {
+  id           String                @id @default(uuid())
+  staffId      String
+  staff        Staff                 @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  schoolId     String
+  school       School                @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  departmentId String?
+  department   Department?           @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  role         String?
+  status       StaffAssignmentStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([staffId, schoolId])
+  @@index([staffId])
+  @@index([schoolId])
+  @@map("staff_assignments")
 }
 
 enum LeaveType {

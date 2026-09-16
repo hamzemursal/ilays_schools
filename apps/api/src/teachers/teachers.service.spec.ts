@@ -390,6 +390,34 @@ describe("TeachersService.create", () => {
     );
   });
 
+  it("generates a permanent, organization-wide teacherCode from a fresh org-wide count", async () => {
+    await service.create(ACTOR, "school-1", dto());
+    expect(prisma.teacher.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ teacherCode: "TCH-00006" }) }),
+    );
+  });
+
+  it("retries with a fresh teacherCode when it collides under a concurrent create, without giving up on the first try", async () => {
+    // count() is called three times total: once by generateEmployeeNumber
+    // (school-scoped, value irrelevant here), then twice by
+    // createWithSequentialCode's org-wide teacherCode generation/retry.
+    prisma.teacher.count.mockResolvedValueOnce(0).mockResolvedValueOnce(5).mockResolvedValueOnce(6);
+    prisma.teacher.create
+      .mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+          code: "P2002",
+          clientVersion: "test",
+          meta: { target: ["teacherCode"] },
+        }),
+      )
+      .mockResolvedValueOnce({ id: "teacher-1", firstName: "Amina", lastName: "Hassan", employeeNumber: "EMP-00006" });
+
+    await service.create(ACTOR, "school-1", dto());
+
+    expect(prisma.teacher.create).toHaveBeenNthCalledWith(1, expect.objectContaining({ data: expect.objectContaining({ teacherCode: "TCH-00006" }) }));
+    expect(prisma.teacher.create).toHaveBeenNthCalledWith(2, expect.objectContaining({ data: expect.objectContaining({ teacherCode: "TCH-00007" }) }));
+  });
+
   it("rejects the same subject assigned to the same class/section/year twice, before touching the database", async () => {
     const assignment: CreateTeacherAssignmentInputDto = { academicYearId: "year-1", sectionId: "sec-1", subjectId: "subj-1" };
     await expect(service.create(ACTOR, "school-1", dto({ assignments: [assignment, { ...assignment }] }))).rejects.toThrow(

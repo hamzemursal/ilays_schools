@@ -62,6 +62,38 @@ describe("StaffService", () => {
     );
   });
 
+  it("generates a permanent, organization-wide staffCode from a fresh org-wide count", async () => {
+    prisma.staff.create.mockResolvedValue({ id: "staff-1", firstName: "Amal", lastName: "Nur", staffNumber: "STF-00005" });
+
+    await service.create(ACTOR, "school-1", { firstName: "Amal", lastName: "Nur" });
+
+    expect(prisma.staff.count).toHaveBeenCalledWith();
+    expect(prisma.staff.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ staffCode: "STF-00005" }) }),
+    );
+  });
+
+  it("retries with a fresh staffCode when it collides under a concurrent create, without giving up on the first try", async () => {
+    prisma.staff.count
+      .mockResolvedValueOnce(4) // generateStaffNumber's school-scoped count
+      .mockResolvedValueOnce(9)
+      .mockResolvedValueOnce(10);
+    prisma.staff.create
+      .mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+          code: "P2002",
+          clientVersion: "test",
+          meta: { target: ["staffCode"] },
+        }),
+      )
+      .mockResolvedValueOnce({ id: "staff-1", firstName: "Amal", lastName: "Nur", staffNumber: "STF-00005" });
+
+    await service.create(ACTOR, "school-1", { firstName: "Amal", lastName: "Nur" });
+
+    expect(prisma.staff.create).toHaveBeenNthCalledWith(1, expect.objectContaining({ data: expect.objectContaining({ staffCode: "STF-00010" }) }));
+    expect(prisma.staff.create).toHaveBeenNthCalledWith(2, expect.objectContaining({ data: expect.objectContaining({ staffCode: "STF-00011" }) }));
+  });
+
   it("rejects a department that does not belong to this school", async () => {
     prisma.department.findFirst.mockResolvedValue(null);
 

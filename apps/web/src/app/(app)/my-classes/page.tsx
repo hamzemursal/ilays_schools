@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type Teacher, type TeacherAssignmentRecord } from "@/lib/api";
 import { MyPhotoUpload } from "@/features/my-classes/components/MyPhotoUpload";
@@ -16,7 +16,19 @@ import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
-import { Cake, GraduationCap, MapPin, Pencil, Phone, School as SchoolIcon, ShieldAlert, User } from "lucide-react";
+import {
+  Award,
+  Briefcase,
+  Cake,
+  GraduationCap,
+  MapPin,
+  Pencil,
+  Phone,
+  RefreshCcw,
+  School as SchoolIcon,
+  ShieldAlert,
+  User,
+} from "lucide-react";
 
 const STATUS_TONE: Record<Teacher["status"], "success" | "warning" | "neutral"> = {
   ACTIVE: "success",
@@ -33,8 +45,9 @@ export default function MyClassesPage() {
   const [error, setError] = useState<string | null>(null);
   const [totalStudents, setTotalStudents] = useState<number | null>(null);
 
-  useEffect(() => {
+  const loadProfile = useCallback(() => {
     if (!accessToken) return;
+    setError(null);
     api
       .getMyTeacherProfile(accessToken)
       .then(setTeacher)
@@ -44,6 +57,8 @@ export default function MyClassesPage() {
       .then((res) => setPhotoUrl(res.url))
       .catch(() => setPhotoUrl(null));
   }, [accessToken]);
+
+  useEffect(loadProfile, [loadProfile]);
 
   // Total students is "how many distinct students am I responsible for",
   // not a per-assignment count — a student in two of my sections (or two
@@ -77,9 +92,15 @@ export default function MyClassesPage() {
 
       <div className="space-y-5 p-4 sm:p-6">
         {error ? (
-          <Alert tone="danger">{error}</Alert>
+          <Alert tone="danger">
+            <p className="font-medium">Unable to load your schools</p>
+            <p className="mt-0.5">Please try again. If the problem continues, contact your school administrator.</p>
+            <Button size="sm" variant="outline" icon={<RefreshCcw className="size-3.5" />} className="mt-3" onClick={loadProfile}>
+              Try again
+            </Button>
+          </Alert>
         ) : teacher === undefined || !accessToken ? (
-          <SkeletonCards count={3} />
+          <SkeletonCards count={5} />
         ) : teacher === null ? (
           <EmptyState icon={GraduationCap} title="No teacher profile" description="This account isn't linked to a teacher profile." />
         ) : (
@@ -96,9 +117,9 @@ export default function MyClassesPage() {
                     </h1>
                     <Badge tone={STATUS_TONE[teacher.status]}>{teacher.status.replace("_", " ")}</Badge>
                   </div>
-                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-foreground-soft">
+                  <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-foreground-soft">
                     {teacher.teacherCode && (
-                      <span className="font-mono text-xs font-medium text-accent" title="Your permanent Teacher ID">
+                      <span className="font-mono text-xs font-semibold text-accent" title="Your permanent Teacher ID">
                         {teacher.teacherCode}
                       </span>
                     )}
@@ -121,9 +142,10 @@ export default function MyClassesPage() {
                 <Field icon={User} label="Gender" value={teacher.sex === "MALE" ? "Male" : teacher.sex === "FEMALE" ? "Female" : "—"} />
                 <Field icon={Cake} label="Date of birth" value={teacher.dateOfBirth ? new Date(teacher.dateOfBirth).toLocaleDateString() : "—"} />
                 <Field icon={MapPin} label="Address" value={teacher.address ?? "—"} />
-                <Field label="Qualification" value={teacher.qualification ?? "—"} />
-                <Field label="Specialization" value={teacher.specialization ?? "—"} />
+                <Field icon={GraduationCap} label="Qualification" value={teacher.qualification ?? "—"} />
+                <Field icon={Award} label="Specialization" value={teacher.specialization ?? "—"} />
                 <Field
+                  icon={Briefcase}
                   label="Employment date"
                   value={teacher.employmentDate ? new Date(teacher.employmentDate).toLocaleDateString() : "—"}
                 />
@@ -158,18 +180,30 @@ export default function MyClassesPage() {
               <CardHeader
                 title="My schools"
                 description={
-                  schools.length === 0
-                    ? "No assignments yet."
-                    : schools.length === 1
-                      ? "You teach at 1 school. View your classes, subjects, and students."
-                      : `You teach at ${schools.length} schools. Open one to see its classes and subjects.`
+                  schools.length === 1
+                    ? "You teach at 1 school. View your classes, subjects, and students."
+                    : schools.length > 1
+                      ? `You teach at ${schools.length} schools. Select a school to view your classes, subjects, and students.`
+                      : undefined
+                }
+                actions={
+                  schools.length > 0 && (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
+                      <GraduationCap className="size-3.5" />
+                      {schools.length} {schools.length === 1 ? "School" : "Schools"}
+                    </span>
+                  )
                 }
               />
               <div className="space-y-2 p-5">
                 {schools.length === 0 ? (
-                  <EmptyState icon={GraduationCap} title="No assignments yet" description="Ask your School Admin to assign you to a class and subject." />
+                  <EmptyState
+                    icon={GraduationCap}
+                    title="No school assignments found."
+                    description="Ask your School Admin to assign you to a class and subject."
+                  />
                 ) : (
-                  schools.map((school) => <SchoolCard key={school.id} school={school} />)
+                  schools.map((school) => <SchoolCard key={school.id} school={school} selected={schools.length === 1} />)
                 )}
               </div>
             </Card>
@@ -191,6 +225,11 @@ export default function MyClassesPage() {
               list={() => api.listMyDocuments(accessToken)}
               upload={(file, label) => api.uploadMyDocument(accessToken, file, label)}
             />
+
+            <Alert tone="info">
+              <p className="font-medium">Keep your profile up to date</p>
+              <p className="mt-0.5">Your profile information helps the school administration manage assignments, timetables, and communication.</p>
+            </Alert>
           </>
         )}
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type Teacher } from "@/lib/api";
 import { groupAssignmentsBySchool } from "@/features/my-classes/schoolGrouping";
@@ -10,9 +10,10 @@ import { SchoolClassesAndSubjects } from "@/features/my-classes/components/Schoo
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
+import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
-import { GraduationCap } from "lucide-react";
+import { BookOpen, GraduationCap, Layers, RefreshCcw, Rows3 } from "lucide-react";
 
 export default function MySchoolPage({ params }: { params: Promise<{ schoolId: string }> }) {
   const { schoolId } = use(params);
@@ -21,20 +22,29 @@ export default function MySchoolPage({ params }: { params: Promise<{ schoolId: s
   const [teacher, setTeacher] = useState<Teacher | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadProfile = useCallback(() => {
     if (!accessToken) return;
+    setError(null);
     api
       .getMyTeacherProfile(accessToken)
       .then(setTeacher)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load your profile"));
   }, [accessToken]);
 
+  useEffect(loadProfile, [loadProfile]);
+
   const canMarkAttendance = user?.permissions.includes("attendance.mark") ?? false;
 
   if (error) {
     return (
       <div className="p-4 sm:p-6">
-        <Alert tone="danger">{error}</Alert>
+        <Alert tone="danger">
+          <p className="font-medium">Unable to load your school</p>
+          <p className="mt-0.5">Please try again. If the problem continues, contact your school administrator.</p>
+          <Button size="sm" variant="outline" icon={<RefreshCcw className="size-3.5" />} className="mt-3" onClick={loadProfile}>
+            Try again
+          </Button>
+        </Alert>
       </div>
     );
   }
@@ -85,18 +95,19 @@ export default function MySchoolPage({ params }: { params: Promise<{ schoolId: s
 
       <div className="space-y-5 p-4 sm:p-6">
         <div className="grid grid-cols-3 gap-3">
-          <Card padding="sm" className="text-center">
-            <p className="text-2xl font-semibold text-foreground">{school.classCount}</p>
-            <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">Classes</p>
-          </Card>
-          <Card padding="sm" className="text-center">
-            <p className="text-2xl font-semibold text-foreground">{school.sectionCount}</p>
-            <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">Sections</p>
-          </Card>
-          <Card padding="sm" className="text-center">
-            <p className="text-2xl font-semibold text-foreground">{school.subjectCount}</p>
-            <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">Subjects</p>
-          </Card>
+          {[
+            { label: "Classes", value: school.classCount, icon: Layers },
+            { label: "Sections", value: school.sectionCount, icon: Rows3 },
+            { label: "Subjects", value: school.subjectCount, icon: BookOpen },
+          ].map((stat) => (
+            <Card key={stat.label} padding="sm" className="text-center">
+              <div className="mx-auto flex size-9 items-center justify-center rounded-lg bg-accent-soft text-accent">
+                <stat.icon className="size-4.5" />
+              </div>
+              <p className="mt-2 text-2xl font-semibold text-foreground">{stat.value}</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">{stat.label}</p>
+            </Card>
+          ))}
         </div>
 
         <SchoolClassesAndSubjects school={school} schoolId={schoolId} canMarkAttendance={canMarkAttendance} />

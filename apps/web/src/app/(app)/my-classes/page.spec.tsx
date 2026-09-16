@@ -106,6 +106,20 @@ describe("MyClassesPage — exactly one school", () => {
 
     expect(await screen.findByText("Ilays Primary School")).toBeInTheDocument();
   });
+
+  it("marks the single school card as Selected — it's automatically the active one", async () => {
+    apiMock.getMyTeacherProfile.mockResolvedValue(teacher({ assignments: [assignment({ id: "a1" })] }));
+    renderPage();
+
+    expect(await screen.findByText("Selected")).toBeInTheDocument();
+  });
+
+  it("shows the real school count pill (1 School, singular)", async () => {
+    apiMock.getMyTeacherProfile.mockResolvedValue(teacher({ assignments: [assignment({ id: "a1" })] }));
+    renderPage();
+
+    expect(await screen.findByText("1 School")).toBeInTheDocument();
+  });
 });
 
 describe("MyClassesPage — multiple schools", () => {
@@ -126,7 +140,9 @@ describe("MyClassesPage — multiple schools", () => {
     );
     renderPage();
 
-    expect(await screen.findByText("You teach at 2 schools. Open one to see its classes and subjects.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("You teach at 2 schools. Select a school to view your classes, subjects, and students."),
+    ).toBeInTheDocument();
     expect(screen.getByText("Ilays Primary School")).toBeInTheDocument();
     expect(screen.getByText("Ilays Secondary School")).toBeInTheDocument();
     // Never mix two schools' data into one flat list on this page — the
@@ -135,6 +151,21 @@ describe("MyClassesPage — multiple schools", () => {
     expect(screen.queryByText("Class 5 · 5A")).not.toBeInTheDocument();
     expect(screen.queryByText("Form 2 · 2A")).not.toBeInTheDocument();
   });
+
+  it("shows the real school count pill (N Schools, plural), and no card is marked Selected", async () => {
+    apiMock.getMyTeacherProfile.mockResolvedValue(
+      teacher({
+        assignments: [
+          assignment({ id: "a1" }),
+          assignment({ id: "a2", schoolId: "school-b", school: { id: "school-b", name: "Ilays Secondary School", type: "SECONDARY" } }),
+        ],
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText("2 Schools")).toBeInTheDocument();
+    expect(screen.queryByText("Selected")).not.toBeInTheDocument();
+  });
 });
 
 describe("MyClassesPage — no schools", () => {
@@ -142,7 +173,43 @@ describe("MyClassesPage — no schools", () => {
     apiMock.getMyTeacherProfile.mockResolvedValue(teacher({ assignments: [] }));
     renderPage();
 
-    expect(await screen.findByText("No assignments yet.")).toBeInTheDocument();
+    expect(await screen.findByText("No school assignments found.")).toBeInTheDocument();
     expect(screen.queryByText(/You teach at/)).not.toBeInTheDocument();
+  });
+});
+
+describe("MyClassesPage — loading state", () => {
+  it("shows a skeleton, not an empty page, while the profile is still loading", () => {
+    apiMock.getMyTeacherProfile.mockReturnValue(new Promise(() => {})); // never resolves
+    const { container } = renderPage();
+
+    expect(container.querySelector(".animate-pulse")).not.toBeNull();
+    expect(screen.queryByText(/You teach at/)).not.toBeInTheDocument();
+  });
+});
+
+describe("MyClassesPage — error state", () => {
+  it("shows a professional error message, not the raw backend error, with a way to retry", async () => {
+    apiMock.getMyTeacherProfile.mockRejectedValue(new ApiError("relation \"teachers\" does not exist"));
+    renderPage();
+
+    expect(await screen.findByText("Unable to load your schools")).toBeInTheDocument();
+    expect(
+      screen.getByText("Please try again. If the problem continues, contact your school administrator."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("relation \"teachers\" does not exist")).not.toBeInTheDocument();
+  });
+
+  it("retrying re-fetches the profile and shows it once the retry succeeds", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    apiMock.getMyTeacherProfile.mockRejectedValueOnce(new ApiError("Network error"));
+    renderPage();
+
+    await screen.findByText("Unable to load your schools");
+    apiMock.getMyTeacherProfile.mockResolvedValueOnce(teacher({ assignments: [] }));
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText("No school assignments found.")).toBeInTheDocument();
+    expect(screen.queryByText("Unable to load your schools")).not.toBeInTheDocument();
   });
 });

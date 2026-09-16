@@ -7,6 +7,7 @@ import { ApiError, useAuth } from "@/lib/auth-context";
 import type { Staff } from "@/lib/api";
 import { staffApi } from "../api";
 import { EditStaffForm } from "./EditStaffForm";
+import { StaffAssignmentManager } from "./StaffAssignmentManager";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -198,6 +199,8 @@ export function StaffProfile({ schoolId, staffId }: { schoolId: string; staffId:
           }}
         />
       )}
+
+      <StaffAssignmentManager accessToken={accessToken} schoolId={schoolId} staff={staff} canManage={canUpdate} onChange={setStaff} />
     </div>
   );
 }

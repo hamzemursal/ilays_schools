@@ -59,14 +59,13 @@ test("Teacher views their real classes/exams, edits their own profile, and is de
   await expect(page.getByText("Profile updated.")).toBeVisible();
   await expect(page.getByText("0699999999")).toBeVisible();
 
-  // /my-classes lists schools, not classes directly — Amran has exactly one,
-  // so drill into it before the class/subject text becomes visible. The
-  // school page renders the same assignment in both "My classes" (by year)
-  // and "My subjects" (by subject) sections, so "Class 1 · A" and
-  // "Mathematics" each appear twice — .first() targets the "My classes"
-  // section, which renders first in DOM order.
-  await page.getByRole("link", { name: "Saamalay Primary School" }).click();
-  await expect(page).toHaveURL(/\/my-classes\/[^/]+$/);
+  // Amran has exactly one school, so /my-classes shows its classes/subjects
+  // right here — no click into a school "choice" that isn't actually a
+  // choice. The same assignment renders in both "My classes" (by year) and
+  // "My subjects" (by subject) sections, so "Class 1 · A" and "Mathematics"
+  // each appear twice — .first() targets "My classes", which renders first
+  // in DOM order.
+  await expect(page.getByText("You teach at 1 school. View your classes, subjects, and students.")).toBeVisible();
   await expect(page.getByText("Class 1 · A", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Mathematics", { exact: true }).first()).toBeVisible();
 

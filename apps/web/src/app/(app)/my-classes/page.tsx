@@ -7,6 +7,7 @@ import { MyPhotoUpload } from "@/features/my-classes/components/MyPhotoUpload";
 import { EditMyProfileForm } from "@/features/my-classes/EditMyProfileForm";
 import { groupAssignmentsBySchool } from "@/features/my-classes/schoolGrouping";
 import { SchoolCard } from "@/features/my-classes/components/SchoolCard";
+import { SchoolClassesAndSubjects } from "@/features/my-classes/components/SchoolClassesAndSubjects";
 import { DocumentsCard } from "@/features/teachers/components/DocumentsCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -24,7 +25,7 @@ const STATUS_TONE: Record<Teacher["status"], "success" | "warning" | "neutral"> 
 };
 
 export default function MyClassesPage() {
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
 
   const [teacher, setTeacher] = useState<Teacher | null | undefined>(undefined);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -157,9 +158,11 @@ export default function MyClassesPage() {
               <CardHeader
                 title="My schools"
                 description={
-                  schools.length <= 1
-                    ? "The school you teach at."
-                    : `You teach at ${schools.length} schools. Open one to see its classes and subjects.`
+                  schools.length === 0
+                    ? "No assignments yet."
+                    : schools.length === 1
+                      ? "You teach at 1 school. View your classes, subjects, and students."
+                      : `You teach at ${schools.length} schools. Open one to see its classes and subjects.`
                 }
               />
               <div className="space-y-2 p-5">
@@ -170,6 +173,18 @@ export default function MyClassesPage() {
                 )}
               </div>
             </Card>
+
+            {/* Exactly one school: show its classes/subjects right here — no
+                extra click required to select a school that isn't actually a
+                choice. Two or more: the cards above are the real selection
+                UI, and content only ever appears once one is opened. */}
+            {schools.length === 1 && (
+              <SchoolClassesAndSubjects
+                school={schools[0]}
+                schoolId={schools[0].id}
+                canMarkAttendance={user?.permissions.includes("attendance.mark") ?? false}
+              />
+            )}
 
             <DocumentsCard
               canUpload

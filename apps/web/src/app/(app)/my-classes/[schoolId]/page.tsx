@@ -1,29 +1,22 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type Teacher, type TeacherAssignmentRecord } from "@/lib/api";
-import {
-  groupAssignmentsBySchool,
-  groupAssignmentsBySubject,
-  groupAssignmentsByYear,
-} from "@/features/my-classes/schoolGrouping";
+import { api, type Teacher } from "@/lib/api";
+import { groupAssignmentsBySchool } from "@/features/my-classes/schoolGrouping";
 import { SchoolTypeBadge } from "@/features/my-classes/components/SchoolTypeBadge";
 import { SchoolSwitcher } from "@/features/my-classes/components/SchoolSwitcher";
+import { SchoolClassesAndSubjects } from "@/features/my-classes/components/SchoolClassesAndSubjects";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { Card, CardHeader } from "@/components/ui/Card";
-import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
-import { ClipboardCheck, GraduationCap } from "lucide-react";
+import { GraduationCap } from "lucide-react";
 
 export default function MySchoolPage({ params }: { params: Promise<{ schoolId: string }> }) {
   const { schoolId } = use(params);
   const { accessToken, user } = useAuth();
-  const router = useRouter();
 
   const [teacher, setTeacher] = useState<Teacher | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -76,21 +69,6 @@ export default function MySchoolPage({ params }: { params: Promise<{ schoolId: s
     );
   }
 
-  const byYear = groupAssignmentsByYear(school.assignments);
-  const bySubject = groupAssignmentsBySubject(school.assignments);
-  const today = new Date().toISOString().slice(0, 10);
-
-  function attendanceUrl(a: TeacherAssignmentRecord) {
-    const p = new URLSearchParams({
-      date: today,
-      year: a.academicYear.name,
-      class: a.section.class.name,
-      section: a.section.name,
-      subject: a.subject.name,
-    });
-    return `/schools/${a.schoolId}/sections/${a.section.id}/attendance?${p.toString()}`;
-  }
-
   return (
     <div>
       <PageHeader
@@ -121,64 +99,7 @@ export default function MySchoolPage({ params }: { params: Promise<{ schoolId: s
           </Card>
         </div>
 
-        <Card padding="none">
-          <CardHeader title="My classes" description={`Every class and section you teach at ${school.name}, by academic year.`} />
-          <div className="space-y-4 p-5">
-            {byYear.map((yearGroup) => (
-              <div key={yearGroup.academicYearId}>
-                <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">{yearGroup.academicYearName}</p>
-                <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {yearGroup.assignments.map((a) => (
-                    <Card
-                      key={a.id}
-                      padding="sm"
-                      className="cursor-pointer transition-colors hover:border-accent"
-                      onClick={() => router.push(`/my-classes/${schoolId}/${a.id}`)}
-                    >
-                      <p className="font-medium text-foreground">
-                        {a.section.class.name} · {a.section.name}
-                      </p>
-                      <p className="text-sm text-foreground-soft">{a.subject.name}</p>
-                      {canMarkAttendance && (
-                        <Link href={attendanceUrl(a)} onClick={(e) => e.stopPropagation()} className="mt-2 inline-flex">
-                          <Button size="sm" variant="outline" icon={<ClipboardCheck className="size-4" />}>
-                            Mark attendance
-                          </Button>
-                        </Link>
-                      )}
-                    </Card>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card padding="none">
-          <CardHeader title="My subjects" description={`Every subject you teach at ${school.name}, across your classes.`} />
-          <div className="space-y-4 p-5">
-            {bySubject.map((subjectGroup) => (
-              <div key={subjectGroup.subjectId}>
-                <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">{subjectGroup.subjectName}</p>
-                <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {subjectGroup.assignments.map((a) => (
-                    <Card
-                      key={a.id}
-                      padding="sm"
-                      className="cursor-pointer transition-colors hover:border-accent"
-                      onClick={() => router.push(`/my-classes/${schoolId}/${a.id}`)}
-                    >
-                      <p className="font-medium text-foreground">
-                        {a.section.class.name} · {a.section.name}
-                      </p>
-                      <p className="text-sm text-foreground-soft">{a.academicYear.name}</p>
-                    </Card>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
+        <SchoolClassesAndSubjects school={school} schoolId={schoolId} canMarkAttendance={canMarkAttendance} />
       </div>
     </div>
   );

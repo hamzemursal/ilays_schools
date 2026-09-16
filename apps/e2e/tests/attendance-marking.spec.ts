@@ -16,11 +16,9 @@ test("Teacher marks daily attendance for their section", async ({ page }) => {
   await page.getByRole("navigation").getByRole("link", { name: "My classes" }).click();
   await expect(page).toHaveURL(/\/my-classes$/);
 
-  // /my-classes now lists schools, not classes directly — Amran has exactly
-  // one, so drill into it to reach the school-scoped "Mark attendance" button.
-  await page.getByRole("link", { name: "Saamalay Primary School" }).click();
-  await expect(page).toHaveURL(/\/my-classes\/.+/);
-
+  // Amran has exactly one school, so its classes (and the "Mark attendance"
+  // button) are shown right on /my-classes itself — no click into a school
+  // "choice" that isn't actually a choice for a single-school teacher.
   await page.getByRole("button", { name: "Mark attendance" }).click();
   await expect(page).toHaveURL(/\/schools\/.+\/sections\/.+\/attendance/);
 

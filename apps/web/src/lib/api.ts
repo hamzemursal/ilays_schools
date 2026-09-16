@@ -716,7 +716,10 @@ export interface MyAssignment {
   school: { id: string; name: string; type: SchoolType };
   section: { id: string; name: string; class: { id: string; name: string } };
   subject: { id: string; name: string };
-  academicYear: { id: string; name: string };
+  // isCurrent marks whether this assignment's year is the school's current
+  // one — a teacher may still view (read-only) history for a past-year
+  // assignment, but never mark/edit it. See the workspace page.
+  academicYear: { id: string; name: string; isCurrent: boolean };
 }
 
 export interface AttendanceRow {
@@ -1385,7 +1388,7 @@ export interface TeacherAssignmentRecord {
   academicYearId: string;
   subject: { id: string; name: string };
   section: { id: string; name: string; class: { id: string; name: string } };
-  academicYear: { id: string; name: string };
+  academicYear: { id: string; name: string; isCurrent: boolean };
 }
 
 export interface TeacherSearchResult {

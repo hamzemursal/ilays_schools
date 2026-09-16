@@ -53,7 +53,7 @@ export default function MyAssignmentPage({ params }: { params: Promise<{ schoolI
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load this class"));
   }, [accessToken, assignmentId]);
 
-  const canMarkAttendance = user?.permissions.includes("attendance.mark") ?? false;
+  const hasMarkPermission = user?.permissions.includes("attendance.mark") ?? false;
   const canEnterMarks = user?.permissions.includes("results.enter") ?? false;
 
   if (error) {
@@ -66,6 +66,10 @@ export default function MyAssignmentPage({ params }: { params: Promise<{ schoolI
   if (!data) return <SkeletonCards count={3} />;
 
   const { assignment, students } = data;
+  // Editing is only ever available for the school's CURRENT academic
+  // year — an assignment from a past year is browsable (this whole page
+  // still loads) but strictly read-only, backend-enforced the same way.
+  const canMarkAttendance = hasMarkPermission && assignment.academicYear.isCurrent;
   const filteredStudents = (() => {
     const q = rosterSearch.trim().toLowerCase();
     if (!q) return students;
@@ -107,6 +111,13 @@ export default function MyAssignmentPage({ params }: { params: Promise<{ schoolI
       />
 
       <div className="space-y-5 p-4 sm:p-6">
+        {!assignment.academicYear.isCurrent && (
+          <Alert tone="warning">
+            This assignment is from {assignment.academicYear.name}, not the current academic year — you can view its
+            history below, but marking and editing attendance here is no longer available.
+          </Alert>
+        )}
+
         <Card padding="none">
           <CardHeader
             title="Students"

@@ -261,7 +261,12 @@ describe("AttendanceService.getTodayStatusForEnrollments — Advanced Student Li
 });
 
 describe("AttendanceService — teacher authorization (school/section isolation)", () => {
-  let prisma: { teacher: { findFirst: jest.Mock }; teacherAssignment: { findFirst: jest.Mock }; section: { findFirst: jest.Mock } };
+  let prisma: {
+    teacher: { findFirst: jest.Mock };
+    teacherAssignment: { findFirst: jest.Mock };
+    academicYear: { findFirst: jest.Mock };
+    section: { findFirst: jest.Mock };
+  };
   let schools: { findOneAccessibleOrThrow: jest.Mock };
   let service: AttendanceService;
 
@@ -269,6 +274,9 @@ describe("AttendanceService — teacher authorization (school/section isolation)
     prisma = {
       teacher: { findFirst: jest.fn().mockResolvedValue({ id: "teacher-profile-1" }) },
       teacherAssignment: { findFirst: jest.fn() },
+      // A current academic year exists by default in every test here — the
+      // handful of tests specifically about staleness override this.
+      academicYear: { findFirst: jest.fn().mockResolvedValue({ id: "year-current" }) },
       section: { findFirst: jest.fn().mockResolvedValue({ id: "section-1" }) },
     };
     schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
@@ -288,7 +296,7 @@ describe("AttendanceService — teacher authorization (school/section isolation)
     ).rejects.toThrow(ForbiddenException);
     await expect(
       service.getSessionStatusForSectionAndDate(TEACHER_ACTOR, "school-1", "other-teachers-section", today()),
-    ).rejects.toThrow("You are not assigned to this section");
+    ).rejects.toThrow("You are not currently assigned to this section");
   });
 
   it("allows a teacher who does hold a TeacherAssignment for this section", async () => {
@@ -313,8 +321,113 @@ describe("AttendanceService — teacher authorization (school/section isolation)
     prisma.teacherAssignment.findFirst.mockResolvedValue(null);
     await expect(
       service.getSessionStatusForSectionAndDate(TEACHER_ACTOR, "a-different-school", "some-section", today()),
-    ).rejects.toThrow("You are not assigned to this section");
+    ).rejects.toThrow("You are not currently assigned to this section");
     expect(prisma.teacher.findFirst).toHaveBeenCalledWith({ where: { userId: TEACHER_ACTOR.id } });
+  });
+
+  // A TeacherAssignment for this section exists, but not for the school's
+  // CURRENT academic year — e.g. the teacher taught this section last year
+  // and has since moved on. Editing must be refused even though a
+  // matching row is technically found by a bare {teacherId, sectionId}
+  // lookup; only historyForSection/summaryForSection (below) may still be
+  // reached, and only in their own read-only, own-records-only form.
+  it("rejects editing when the only TeacherAssignment for this section is for a past academic year, not the current one", async () => {
+    // Simulates the real query shape: filtering by academicYearId: "year-current"
+    // finds nothing, because the teacher's real row is for "year-2026".
+    prisma.teacherAssignment.findFirst.mockImplementation(({ where }) =>
+      where.academicYearId === "year-current" ? Promise.resolve(null) : Promise.resolve({ id: "stale-assignment" }),
+    );
+    await expect(
+      service.getSessionStatusForSectionAndDate(TEACHER_ACTOR, "school-1", "section-1", today()),
+    ).rejects.toThrow("You are not currently assigned to this section");
+  });
+
+  it("rejects editing outright when no academic year is marked current for this school", async () => {
+    prisma.academicYear.findFirst.mockResolvedValue(null);
+    prisma.teacherAssignment.findFirst.mockResolvedValue({ id: "assignment-1" });
+    await expect(
+      service.getSessionStatusForSectionAndDate(TEACHER_ACTOR, "school-1", "section-1", today()),
+    ).rejects.toThrow("You are not currently assigned to this section");
+  });
+});
+
+describe("AttendanceService — historical view vs. current editing (Phase 5)", () => {
+  let prisma: {
+    teacher: { findFirst: jest.Mock };
+    teacherAssignment: { findFirst: jest.Mock };
+    academicYear: { findFirst: jest.Mock };
+    section: { findFirst: jest.Mock };
+    studentEnrollment: { findMany: jest.Mock };
+    attendance: { findMany: jest.Mock; groupBy: jest.Mock };
+  };
+  let schools: { findOneAccessibleOrThrow: jest.Mock };
+  let service: AttendanceService;
+
+  beforeEach(() => {
+    prisma = {
+      teacher: { findFirst: jest.fn().mockResolvedValue({ id: "teacher-profile-1" }) },
+      teacherAssignment: { findFirst: jest.fn() },
+      academicYear: { findFirst: jest.fn().mockResolvedValue({ id: "year-current" }) },
+      section: { findFirst: jest.fn().mockResolvedValue({ id: "section-1" }) },
+      studentEnrollment: { findMany: jest.fn().mockResolvedValue([]) },
+      attendance: { findMany: jest.fn().mockResolvedValue([]), groupBy: jest.fn().mockResolvedValue([]) },
+    };
+    schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
+    service = new AttendanceService(
+      prisma as unknown as PrismaService,
+      schools as unknown as SchoolsService,
+      {} as unknown as StudentsService,
+      { record: jest.fn() } as unknown as AuditService,
+      {} as unknown as DocumentsService,
+    );
+  });
+
+  it("historyForSection throws ForbiddenException for a teacher with no TeacherAssignment for this section at all, ever", async () => {
+    prisma.teacherAssignment.findFirst.mockResolvedValue(null);
+    await expect(service.historyForSection(TEACHER_ACTOR, "school-1", "section-1")).rejects.toThrow(ForbiddenException);
+    await expect(service.historyForSection(TEACHER_ACTOR, "school-1", "section-1")).rejects.toThrow(
+      "You are not assigned to this section",
+    );
+  });
+
+  it("historyForSection returns the section's full history, unrestricted, for a teacher with a CURRENT assignment", async () => {
+    prisma.teacherAssignment.findFirst.mockResolvedValue({ id: "current-assignment" }); // matches every where-shape
+    await service.historyForSection(TEACHER_ACTOR, "school-1", "section-1");
+    const where = prisma.attendance.findMany.mock.calls[0][0].where;
+    expect(where.markedByUserId).toBeUndefined();
+  });
+
+  it("historyForSection restricts to the teacher's own markedByUserId records when their only assignment here is a past one", async () => {
+    prisma.teacherAssignment.findFirst.mockImplementation(({ where }) =>
+      where.academicYearId === "year-current" ? Promise.resolve(null) : Promise.resolve({ id: "stale-assignment" }),
+    );
+    await service.historyForSection(TEACHER_ACTOR, "school-1", "section-1");
+    const where = prisma.attendance.findMany.mock.calls[0][0].where;
+    expect(where.markedByUserId).toBe(TEACHER_ACTOR.id);
+  });
+
+  it("historyForSection is never restricted for an Admin (no Teacher profile)", async () => {
+    prisma.teacher.findFirst.mockResolvedValue(null);
+    await service.historyForSection(ADMIN_ACTOR, "school-1", "section-1");
+    const where = prisma.attendance.findMany.mock.calls[0][0].where;
+    expect(where.markedByUserId).toBeUndefined();
+    expect(prisma.teacherAssignment.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("summaryForSection restricts its groupBy counts to the teacher's own records when their only assignment here is a past one", async () => {
+    prisma.teacherAssignment.findFirst.mockImplementation(({ where }) =>
+      where.academicYearId === "year-current" ? Promise.resolve(null) : Promise.resolve({ id: "stale-assignment" }),
+    );
+    await service.summaryForSection(TEACHER_ACTOR, "school-1", "section-1");
+    const where = prisma.attendance.groupBy.mock.calls[0][0].where;
+    expect(where.markedByUserId).toBe(TEACHER_ACTOR.id);
+  });
+
+  it("summaryForSection is unrestricted for a teacher with a current assignment", async () => {
+    prisma.teacherAssignment.findFirst.mockResolvedValue({ id: "current-assignment" });
+    await service.summaryForSection(TEACHER_ACTOR, "school-1", "section-1");
+    const where = prisma.attendance.groupBy.mock.calls[0][0].where;
+    expect(where.markedByUserId).toBeUndefined();
   });
 });
 

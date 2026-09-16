@@ -25,10 +25,22 @@ export class AttendanceService {
     private readonly documents: DocumentsService,
   ) {}
 
-  // A teacher (identified by a Teacher profile linked to this actor) may
-  // only touch a section they hold a TeacherAssignment for. A School/Super
-  // Admin has no Teacher profile, so this check is a no-op for them beyond
-  // the ordinary school-access check — this is the Phase 6 gate.
+  // Sections are long-lived and reused across academic years (a Section
+  // itself carries no yearId), so "current" has to be resolved via the
+  // school's own AcademicYear.isCurrent flag rather than inferred from the
+  // section. Returns null if no year is marked current for this school —
+  // callers must treat that as "no current assignment can exist," never as
+  // "skip the check."
+  private async resolveCurrentAcademicYearId(schoolId: string): Promise<string | null> {
+    const year = await this.prisma.academicYear.findFirst({ where: { schoolId, isCurrent: true } });
+    return year?.id ?? null;
+  }
+
+  // Editing/marking access — a teacher may mark or manage attendance only
+  // for a section they hold a TeacherAssignment for IN THE CURRENT
+  // academic year. A past assignment (from a year they've since moved on
+  // from) grants read-only history access (see
+  // assertCanViewSectionHistory below), never this.
   //
   // The teacher lookup is by userId ALONE — never {userId, schoolId}. A
   // Teacher row's own schoolId is just its home/employment school; a
@@ -40,25 +52,68 @@ export class AttendanceService {
   // their assignment at all. Always resolve the teacher profile first, then
   // let the TeacherAssignment check below be the only thing that decides
   // access — sectionId alone already pins the check to one specific school.
-  private async assertCanAccessSection(actor: AuthenticatedUser, schoolId: string, sectionId: string) {
+  private async assertCanEditSection(actor: AuthenticatedUser, schoolId: string, sectionId: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
 
     const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id } });
-    if (teacher) {
-      const hasAssignment = await this.prisma.teacherAssignment.findFirst({
-        where: { teacherId: teacher.id, sectionId },
-      });
-      if (!hasAssignment) {
-        throw new ForbiddenException("You are not assigned to this section");
-      }
+    if (!teacher) return;
+
+    const currentYearId = await this.resolveCurrentAcademicYearId(schoolId);
+    const hasCurrentAssignment =
+      currentYearId &&
+      (await this.prisma.teacherAssignment.findFirst({
+        where: { teacherId: teacher.id, sectionId, academicYearId: currentYearId },
+      }));
+    if (!hasCurrentAssignment) {
+      throw new ForbiddenException("You are not currently assigned to this section");
     }
   }
 
-  // Mirrors assertCanAccessSection, but for "one student, all their
+  // History-viewing access — broader than assertCanEditSection: a teacher
+  // who once held (but no longer holds, this academic year) an assignment
+  // for this section may still view its history, but only the records
+  // they personally recorded (markedByUserId), never a colleague's. A
+  // teacher with a CURRENT assignment sees the section's full history
+  // unrestricted, same as always. Admins (no Teacher profile) are always
+  // unrestricted.
+  private async assertCanViewSectionHistory(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    sectionId: string,
+  ): Promise<{ restrictToOwnRecords: boolean }> {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+
+    const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id } });
+    if (!teacher) return { restrictToOwnRecords: false };
+
+    const hasAnyAssignment = await this.prisma.teacherAssignment.findFirst({
+      where: { teacherId: teacher.id, sectionId },
+    });
+    if (!hasAnyAssignment) {
+      throw new ForbiddenException("You are not assigned to this section");
+    }
+
+    const currentYearId = await this.resolveCurrentAcademicYearId(schoolId);
+    const hasCurrentAssignment =
+      currentYearId &&
+      (await this.prisma.teacherAssignment.findFirst({
+        where: { teacherId: teacher.id, sectionId, academicYearId: currentYearId },
+      }));
+
+    return { restrictToOwnRecords: !hasCurrentAssignment };
+  }
+
+  // Mirrors assertCanEditSection's shape, but for "one student, all their
   // attendance" rather than "one section" — a teacher may only see a
   // student's history if that student is currently enrolled in a section
   // the teacher holds any TeacherAssignment for. Admins (no Teacher
-  // profile) are unrestricted here too, same as the section-level check.
+  // profile) are unrestricted here too, same as the section-level checks.
+  // Deliberately not narrowed to markedByUserId the way
+  // assertCanViewSectionHistory narrows historyForSection/summaryForSection
+  // — historyForStudent spans a student's whole enrollment history across
+  // however many sections/years they've moved through, so "current vs
+  // stale" would have to be evaluated per past enrollment, not once for the
+  // whole call. Out of scope for this pass; flagged, not silently dropped.
   private async assertTeacherCanAccessStudent(actor: AuthenticatedUser, studentId: string) {
     const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id } });
     if (!teacher) return;
@@ -101,7 +156,7 @@ export class AttendanceService {
     date: string,
     session: AttendanceSession = DEFAULT_SESSION,
   ) {
-    await this.assertCanAccessSection(actor, schoolId, sectionId);
+    await this.assertCanEditSection(actor, schoolId, sectionId);
     await this.getSectionInSchoolOrThrow(schoolId, sectionId);
 
     const enrollments = await this.prisma.studentEnrollment.findMany({
@@ -150,7 +205,7 @@ export class AttendanceService {
   // date — never inferred from absence, so an un-recorded session is never
   // shown or treated as if every student were marked Absent.
   async getSessionStatusForSectionAndDate(actor: AuthenticatedUser, schoolId: string, sectionId: string, date: string) {
-    await this.assertCanAccessSection(actor, schoolId, sectionId);
+    await this.assertCanEditSection(actor, schoolId, sectionId);
     await this.getSectionInSchoolOrThrow(schoolId, sectionId);
 
     const recorded = await this.prisma.attendance.findMany({
@@ -173,7 +228,7 @@ export class AttendanceService {
   // Attendance directly (dashboard, reports, parent/student portals) can
   // ever see an unfinished day as if it were real attendance.
   async saveDraft(actor: AuthenticatedUser, schoolId: string, sectionId: string, dto: MarkAttendanceDto) {
-    await this.assertCanAccessSection(actor, schoolId, sectionId);
+    await this.assertCanEditSection(actor, schoolId, sectionId);
     await this.getSectionInSchoolOrThrow(schoolId, sectionId);
     this.assertNotFutureDate(dto.date);
 
@@ -223,7 +278,7 @@ export class AttendanceService {
   }
 
   async mark(actor: AuthenticatedUser, schoolId: string, sectionId: string, dto: MarkAttendanceDto) {
-    await this.assertCanAccessSection(actor, schoolId, sectionId);
+    await this.assertCanEditSection(actor, schoolId, sectionId);
     await this.getSectionInSchoolOrThrow(schoolId, sectionId);
     this.assertNotFutureDate(dto.date);
 
@@ -284,12 +339,13 @@ export class AttendanceService {
   }
 
   async historyForSection(actor: AuthenticatedUser, schoolId: string, sectionId: string, from?: string, to?: string) {
-    await this.assertCanAccessSection(actor, schoolId, sectionId);
+    const { restrictToOwnRecords } = await this.assertCanViewSectionHistory(actor, schoolId, sectionId);
     await this.getSectionInSchoolOrThrow(schoolId, sectionId);
 
     return this.prisma.attendance.findMany({
       where: {
         enrollment: { sectionId },
+        ...(restrictToOwnRecords ? { markedByUserId: actor.id } : {}),
         ...(from || to
           ? { date: { ...(from ? { gte: new Date(from) } : {}), ...(to ? { lte: new Date(to) } : {}) } }
           : {}),
@@ -300,7 +356,7 @@ export class AttendanceService {
   }
 
   async summaryForSection(actor: AuthenticatedUser, schoolId: string, sectionId: string, from?: string, to?: string) {
-    await this.assertCanAccessSection(actor, schoolId, sectionId);
+    const { restrictToOwnRecords } = await this.assertCanViewSectionHistory(actor, schoolId, sectionId);
     await this.getSectionInSchoolOrThrow(schoolId, sectionId);
 
     const enrollments = await this.prisma.studentEnrollment.findMany({
@@ -314,7 +370,11 @@ export class AttendanceService {
 
     const counts = await this.prisma.attendance.groupBy({
       by: ["enrollmentId", "status"],
-      where: { enrollment: { sectionId }, ...dateFilter },
+      where: {
+        enrollment: { sectionId },
+        ...(restrictToOwnRecords ? { markedByUserId: actor.id } : {}),
+        ...dateFilter,
+      },
       _count: true,
     });
 
@@ -340,8 +400,8 @@ export class AttendanceService {
   // Whole-school, per-section "has today been marked yet" — powers the
   // School Admin's Attendance overview cards, where opening every section
   // individually just to check would defeat the point of the overview.
-  // Deliberately not run through assertCanAccessSection: unlike every other
-  // method here, this spans every section in the school at once, which is
+  // Deliberately not run through assertCanEditSection/assertCanViewSectionHistory:
+  // unlike every other method here, this spans every section in the school at once, which is
   // exactly the School Admin use case (the same admin-only reports.view
   // gate as the enrollment report this page already loads), not a
   // teacher's own-section view.

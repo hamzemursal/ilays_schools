@@ -11,7 +11,7 @@ function assignment(overrides: Partial<TeacherAssignmentRecord> & { id: string }
     schoolId: overrides.school?.id ?? "school-primary-1",
     school: { id: "school-primary-1", name: "Ilays Primary School", type: "PRIMARY" },
     academicYearId: "year-2027",
-    academicYear: { id: "year-2027", name: "2027" },
+    academicYear: { id: "year-2027", name: "2027", isCurrent: true },
     subject: { id: "subject-math", name: "Mathematics" },
     section: { id: "section-5a", name: "5A", class: { id: "class-5", name: "Class 5" } },
     ...overrides,
@@ -96,7 +96,7 @@ describe("groupAssignmentsBySubject", () => {
 
 describe("groupAssignmentsByYear", () => {
   it("groups by academic year and sorts most recent first", () => {
-    const olderYear = assignment({ id: "a6", academicYearId: "year-2026", academicYear: { id: "year-2026", name: "2026" } });
+    const olderYear = assignment({ id: "a6", academicYearId: "year-2026", academicYear: { id: "year-2026", name: "2026", isCurrent: false } });
     const years = groupAssignmentsByYear([PRIMARY_1_5A_MATH, olderYear]);
     expect(years.map((y) => y.academicYearName)).toEqual(["2027", "2026"]);
   });

@@ -171,6 +171,7 @@ export interface School {
   createdAt: string;
   studentCount: number;
   teacherCount: number;
+  staffCount: number;
   hasActiveAdmin: boolean;
 }
 

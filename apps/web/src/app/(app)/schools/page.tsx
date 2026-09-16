@@ -14,7 +14,7 @@ import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Building2, GraduationCap, MapPin, Plus, Search, ShieldCheck, ShieldX, Trash2, Users } from "lucide-react";
+import { Briefcase, Building2, GraduationCap, MapPin, Plus, Search, ShieldCheck, ShieldX, Trash2, Users } from "lucide-react";
 
 const SCHOOL_TYPES: { value: SchoolType; label: string }[] = [
   { value: "PRIMARY", label: "Primary" },
@@ -275,7 +275,7 @@ export default function SchoolsPage() {
                       <MapPin className="size-3.5 shrink-0" /> {school.address}
                     </p>
                   )}
-                  <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div className="mt-3 grid grid-cols-3 gap-3">
                     <div>
                       <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
                         <Users className="size-3.5 text-foreground-muted" /> {school.studentCount}
@@ -287,6 +287,12 @@ export default function SchoolsPage() {
                         <GraduationCap className="size-3.5 text-foreground-muted" /> {school.teacherCount}
                       </p>
                       <p className="text-xs text-foreground-muted">Teachers</p>
+                    </div>
+                    <div>
+                      <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+                        <Briefcase className="size-3.5 text-foreground-muted" /> {school.staffCount}
+                      </p>
+                      <p className="text-xs text-foreground-muted">Staff</p>
                     </div>
                   </div>
                   <div className="mt-3">

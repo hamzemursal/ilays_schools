@@ -110,6 +110,13 @@ export function schoolNavItems(user: Profile, schoolId: string): NavItem[] {
 
 export function orgNavItems(user: Profile): NavItem[] {
   const items: NavItem[] = [];
+  // A Super Admin/Organization Admin (or any other schools.view holder)
+  // otherwise has no way back to their own landing dashboard once they
+  // navigate into Schools or any other org item — schoolNavItems' own
+  // "Dashboard" entry only appears while a school is actually in context.
+  if (user.permissions.includes("schools.view")) {
+    items.push({ label: "Dashboard", href: "/dashboard", icon: LayoutDashboard });
+  }
   if (user.permissions.includes("schools.view")) {
     items.push({ label: "Schools", href: "/schools", icon: Building2 });
   }

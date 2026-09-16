@@ -44,18 +44,22 @@ export class SchoolsService {
     return this.withCounts(schools);
   }
 
-  // Enrolled-student and teacher counts, plus whether an active School Admin
-  // exists yet — computed once here (via groupBy, not N+1 per-school
-  // queries) so both the schools list/card-grid and the system-wide summary
-  // below can share the exact same numbers instead of two separate
-  // aggregations drifting apart.
+  // Enrolled-student, teacher, and staff counts, plus whether an active
+  // School Admin exists yet — computed once here (via groupBy, not N+1
+  // per-school queries) so both the schools list/card-grid and the
+  // system-wide summary below can share the exact same numbers instead of
+  // two separate aggregations drifting apart. Counts a staff/teacher
+  // member at their home school only (Staff.schoolId / Teacher.schoolId),
+  // same as every other count here — a cross-school TeacherAssignment or
+  // StaffAssignment doesn't make someone a second student/teacher/staff
+  // member of the school they're merely assigned to teach/work at.
   private async withCounts<T extends { id: string }>(schools: T[]) {
     const schoolIds = schools.map((s) => s.id);
     if (schoolIds.length === 0) {
-      return schools.map((s) => ({ ...s, studentCount: 0, teacherCount: 0, hasActiveAdmin: false }));
+      return schools.map((s) => ({ ...s, studentCount: 0, teacherCount: 0, staffCount: 0, hasActiveAdmin: false }));
     }
 
-    const [studentGroups, teacherGroups, schoolAdminRole] = await Promise.all([
+    const [studentGroups, teacherGroups, staffGroups, schoolAdminRole] = await Promise.all([
       this.prisma.studentEnrollment.groupBy({
         by: ["schoolId"],
         where: { schoolId: { in: schoolIds }, status: "ACTIVE" },
@@ -66,11 +70,17 @@ export class SchoolsService {
         where: { schoolId: { in: schoolIds } },
         _count: { _all: true },
       }),
+      this.prisma.staff.groupBy({
+        by: ["schoolId"],
+        where: { schoolId: { in: schoolIds } },
+        _count: { _all: true },
+      }),
       this.prisma.role.findUnique({ where: { name: "SCHOOL_ADMIN" } }),
     ]);
 
     const studentCountBySchool = new Map(studentGroups.map((g) => [g.schoolId, g._count._all]));
     const teacherCountBySchool = new Map(teacherGroups.map((g) => [g.schoolId, g._count._all]));
+    const staffCountBySchool = new Map(staffGroups.map((g) => [g.schoolId, g._count._all]));
 
     let schoolsWithActiveAdmin = new Set<string>();
     if (schoolAdminRole) {
@@ -85,18 +95,16 @@ export class SchoolsService {
       ...s,
       studentCount: studentCountBySchool.get(s.id) ?? 0,
       teacherCount: teacherCountBySchool.get(s.id) ?? 0,
+      staffCount: staffCountBySchool.get(s.id) ?? 0,
       hasActiveAdmin: schoolsWithActiveAdmin.has(s.id),
     }));
   }
 
   // The Super Admin's system-wide overview — every figure is derived from
-  // the same School/StudentEnrollment/Teacher/Guardian/AuditLog relationships
-  // used everywhere else (accessibleWhere() still applies, so a School Admin
-  // calling this would only ever see totals for their own school(s), never
-  // another school's data). There is no dedicated "Staff" model in this
-  // schema — Teacher is the only staff type with real profile records, so
-  // `staff` is reported as the teacher count rather than inventing a number
-  // for roles (finance/HR/etc.) that have no underlying records at all.
+  // the same School/StudentEnrollment/Teacher/Staff/Guardian/AuditLog
+  // relationships used everywhere else (accessibleWhere() still applies, so
+  // a School Admin calling this would only ever see totals for their own
+  // school(s), never another school's data).
   async getSystemSummary(actor: AuthenticatedUser) {
     const schools = await this.findAccessible(actor);
     const schoolIds = schools.map((s) => s.id);
@@ -107,6 +115,7 @@ export class SchoolsService {
     const inactiveSchools = schools.filter((s) => s.status === "INACTIVE").length;
     const totalStudents = schools.reduce((sum, s) => sum + s.studentCount, 0);
     const totalTeachers = schools.reduce((sum, s) => sum + s.teacherCount, 0);
+    const totalStaff = schools.reduce((sum, s) => sum + s.staffCount, 0);
 
     const [maleStudents, femaleStudents, totalGuardians, recentActivityRaw] = await Promise.all([
       schoolIds.length > 0
@@ -164,7 +173,7 @@ export class SchoolsService {
         femaleStudents,
         teachers: totalTeachers,
         guardians: totalGuardians,
-        staff: totalTeachers,
+        staff: totalStaff,
       },
       schools,
       recentActivity,

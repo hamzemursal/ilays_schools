@@ -3,11 +3,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Bell, Camera, GraduationCap, KeyRound, Loader2, LogOut, Menu, Search, Settings, Trash2, UserCircle, X } from "lucide-react";
+import {
+  Bell,
+  Camera,
+  Check,
+  ChevronDown,
+  GraduationCap,
+  KeyRound,
+  Loader2,
+  LogOut,
+  Menu,
+  Search,
+  Settings,
+  Trash2,
+  UserCircle,
+  X,
+} from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { Avatar } from "@/components/ui/Avatar";
 import { useToast } from "@/components/ui/Toast";
-import { api, type AppNotification } from "@/lib/api";
+import { api, type AppNotification, type School } from "@/lib/api";
 import { useCurrentSchool } from "./Sidebar";
 import { orgNavItems, schoolNavItems, type NavItem } from "./nav-config";
 
@@ -16,6 +31,11 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   const { user, accessToken, logout, refreshProfile } = useAuth();
   const currentSchool = useCurrentSchool(user);
   const canManageBranding = !!user?.permissions.includes("settings.manage") && !!currentSchool;
+  // Same permission the "Schools" org nav item already gates on — a plain
+  // School Admin (no cross-school reach) never gets a switcher at all,
+  // since they have nothing to switch to; Super Admin, Organization Admin,
+  // and the Central Finance/HR roles do.
+  const canSwitchSchools = !!user?.permissions.includes("schools.view");
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -112,9 +132,17 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
             <GraduationCap className="size-4.5" />
           </div>
         )}
-        <span className="max-w-[110px] truncate font-semibold text-foreground sm:max-w-[220px]">
-          {currentSchool?.name ?? "Ilays Schools"}
-        </span>
+        {canSwitchSchools && accessToken ? (
+          <SchoolContextSwitcher
+            accessToken={accessToken}
+            currentSchoolId={currentSchool?.id ?? null}
+            currentSchoolName={currentSchool?.name ?? "Ilays Schools"}
+          />
+        ) : (
+          <span className="max-w-[110px] truncate font-semibold text-foreground sm:max-w-[220px]">
+            {currentSchool?.name ?? "Ilays Schools"}
+          </span>
+        )}
       </div>
 
       <div className="relative flex-1 max-w-md">
@@ -280,6 +308,106 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
         </div>
       </div>
     </header>
+  );
+}
+
+// The header's "which school am I looking at" control. Lazily fetches the
+// real, actor-scoped school list (the same endpoint the Schools page uses —
+// already correctly scoped server-side via accessibleWhere, so a School
+// Admin with schools.view still only ever sees their own authorized
+// schools here, never another organization's or another admin's) only once
+// the dropdown is actually opened, rather than on every page load. Reuses
+// the URL-is-the-context model everywhere else in this app already relies
+// on (see Sidebar's useCurrentSchool) — picking a school just navigates
+// there, no separate stored "selected school" state.
+function SchoolContextSwitcher({
+  accessToken,
+  currentSchoolId,
+  currentSchoolName,
+}: {
+  accessToken: string;
+  currentSchoolId: string | null;
+  currentSchoolName: string;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [schools, setSchools] = useState<School[] | null>(null);
+  const [error, setError] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open || schools || error) return;
+    api
+      .listSchools(accessToken)
+      .then(setSchools)
+      .catch(() => setError(true));
+  }, [open, schools, error, accessToken]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-left hover:bg-surface-hover"
+      >
+        <span className="max-w-[110px] truncate font-semibold text-foreground sm:max-w-[220px]">{currentSchoolName}</span>
+        <ChevronDown className="size-4 shrink-0 text-foreground-soft" />
+      </button>
+      {open && (
+        <div role="menu" className="absolute left-0 z-50 mt-2 w-72 rounded-xl border border-border bg-background py-1 shadow-lg">
+          <p className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-foreground-muted">Switch school</p>
+          {error ? (
+            <p className="px-3 py-2 text-sm text-danger">Couldn&apos;t load your schools.</p>
+          ) : !schools ? (
+            <p className="flex items-center gap-2 px-3 py-2 text-sm text-foreground-muted">
+              <Loader2 className="size-4 animate-spin" /> Loading…
+            </p>
+          ) : schools.length === 0 ? (
+            <p className="px-3 py-2 text-sm text-foreground-muted">No authorized schools yet.</p>
+          ) : (
+            schools.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  if (s.id !== currentSchoolId) router.push(`/schools/${s.id}/dashboard`);
+                }}
+                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-surface-hover"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium text-foreground">{s.name}</span>
+                  <span className="block text-xs text-foreground-muted">
+                    {s.studentCount} students · {s.teacherCount} teachers
+                  </span>
+                </span>
+                {s.id === currentSchoolId && <Check className="size-4 shrink-0 text-accent" />}
+              </button>
+            ))
+          )}
+          <div className="my-1 h-px bg-border" />
+          <Link
+            href="/schools"
+            onClick={() => setOpen(false)}
+            className="block px-3 py-2 text-sm font-medium text-accent hover:bg-surface-hover"
+          >
+            View All Schools
+          </Link>
+        </div>
+      )}
+    </div>
   );
 }
 

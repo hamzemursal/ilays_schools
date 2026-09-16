@@ -2,25 +2,30 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   BookUser,
+  Briefcase,
   Building2,
   CheckCircle2,
   History,
   Info,
   School as SchoolIcon,
-  ShieldAlert,
   UserSquare2,
   Users,
 } from "lucide-react";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type SystemSummary } from "@/lib/api";
+import { api, type School, type SystemSummary } from "@/lib/api";
 import { StatCard } from "@/components/ui/StatCard";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { SchoolTypeBadge } from "@/features/my-classes/components/SchoolTypeBadge";
 
 // The Super Admin's landing view — a system-wide overview across every
 // school in the organization, computed entirely from the same
@@ -66,8 +71,13 @@ export function SuperAdminDashboard() {
         <StatCard icon={Users} label="Female students" value={totals.femaleStudents} tone="violet" />
         <StatCard icon={BookUser} label="Total teachers" value={totals.teachers} tone="amber" />
         <StatCard icon={UserSquare2} label="Parents / guardians" value={totals.guardians} tone="violet" />
-        <StatCard icon={ShieldAlert} label="Total staff" value={totals.staff} hint="Teachers — no separate staff records yet" />
+        <StatCard icon={Briefcase} label="Total staff" value={totals.staff} />
       </div>
+
+      <Card padding="none">
+        <CardHeader title="Schools" description="Every school you're authorized to see, with its own real counts." />
+        <SchoolsOverviewTable schools={summary.schools} />
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
@@ -149,6 +159,58 @@ export function SuperAdminDashboard() {
         </Card>
       </div>
     </div>
+  );
+}
+
+// Real per-school rows for the Super Admin's landing dashboard — the same
+// `School[]` (with real studentCount/teacherCount/staffCount) already
+// returned by getSystemSummary, just presented as a scannable table instead
+// of only feeding the aggregate stat cards above. Reuses DataTable, exactly
+// like Teachers/Staff/Students tables elsewhere in the app.
+function SchoolsOverviewTable({ schools }: { schools: School[] }) {
+  const router = useRouter();
+
+  const columns: Column<School>[] = [
+    {
+      key: "name",
+      header: "School",
+      sortValue: (s) => s.name,
+      render: (s) => <span className="font-medium text-foreground">{s.name}</span>,
+    },
+    { key: "level", header: "Level", render: (s) => <SchoolTypeBadge type={s.type} /> },
+    { key: "students", header: "Students", sortValue: (s) => s.studentCount, render: (s) => s.studentCount },
+    { key: "teachers", header: "Teachers", sortValue: (s) => s.teacherCount, render: (s) => s.teacherCount },
+    { key: "staff", header: "Staff", sortValue: (s) => s.staffCount, render: (s) => s.staffCount },
+    {
+      key: "status",
+      header: "Status",
+      sortValue: (s) => s.status,
+      render: (s) => <Badge tone={s.status === "ACTIVE" ? "success" : "neutral"}>{s.status}</Badge>,
+    },
+    {
+      key: "action",
+      header: "",
+      render: (s) => (
+        <Link href={`/schools/${s.id}`} onClick={(e) => e.stopPropagation()}>
+          <Button size="sm" variant="outline">
+            View School
+          </Button>
+        </Link>
+      ),
+    },
+  ];
+
+  return (
+    <DataTable
+      data={schools}
+      columns={columns}
+      rowKey={(s) => s.id}
+      onRowClick={(s) => router.push(`/schools/${s.id}`)}
+      searchPlaceholder="Search schools by name…"
+      searchFilter={(s, q) => s.name.toLowerCase().includes(q)}
+      emptyTitle="No schools yet"
+      emptyDescription="Create a school to see it here."
+    />
   );
 }
 

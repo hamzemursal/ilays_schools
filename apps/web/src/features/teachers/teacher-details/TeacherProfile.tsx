@@ -130,6 +130,11 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
   if (!teacher || !accessToken) return <SkeletonCards count={3} />;
 
   const canUpdate = user?.permissions.includes("teachers.update") ?? false;
+  // Org-wide reach, not a specific permission grant — the same standard the
+  // backend itself uses to decide "sees every school" (see
+  // AuthenticatedUser.schoolIds / SchoolsService.accessibleWhere). A School
+  // Admin's roles never include either of these.
+  const canSeeAllSchools = user?.roles.some((r) => r === "SUPER_ADMIN" || r === "ORGANIZATION_ADMIN") ?? false;
 
   return (
     <div className="space-y-5">
@@ -301,6 +306,7 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
         schoolId={schoolId}
         teacher={teacher}
         canManage={canUpdate}
+        canSeeAllSchools={canSeeAllSchools}
         onChange={setTeacher}
       />
 

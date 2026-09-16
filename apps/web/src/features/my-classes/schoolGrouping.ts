@@ -79,3 +79,55 @@ export function groupAssignmentsByYear(assignments: TeacherAssignmentRecord[]): 
     .map(([academicYearId, list]) => ({ academicYearId, academicYearName: list[0].academicYear.name, assignments: list }))
     .sort((a, b) => b.academicYearName.localeCompare(a.academicYearName));
 }
+
+export interface ClassSectionSubject {
+  subjectId: string;
+  subjectName: string;
+}
+
+export interface ClassSection {
+  sectionId: string;
+  sectionName: string;
+  subjects: ClassSectionSubject[];
+}
+
+export interface ClassGroup {
+  classId: string;
+  className: string;
+  sections: ClassSection[];
+}
+
+// Class -> Section -> Subject nesting, for the Super Admin's "Classes,
+// Sections & Subjects" hierarchy view. Scoped to whatever the caller
+// already narrowed to one school and one academic year — a class here is
+// never assembled from two different schools' or years' assignments.
+export function groupAssignmentsByClass(assignments: TeacherAssignmentRecord[]): ClassGroup[] {
+  const byClass = new Map<string, { className: string; assignments: TeacherAssignmentRecord[] }>();
+  for (const a of assignments) {
+    const classId = a.section.class.id;
+    const entry = byClass.get(classId) ?? { className: a.section.class.name, assignments: [] };
+    entry.assignments.push(a);
+    byClass.set(classId, entry);
+  }
+
+  return Array.from(byClass.entries())
+    .map(([classId, { className, assignments: classAssignments }]) => {
+      const bySection = new Map<string, TeacherAssignmentRecord[]>();
+      for (const a of classAssignments) {
+        const list = bySection.get(a.section.id) ?? [];
+        list.push(a);
+        bySection.set(a.section.id, list);
+      }
+      const sections: ClassSection[] = Array.from(bySection.entries())
+        .map(([sectionId, list]) => ({
+          sectionId,
+          sectionName: list[0].section.name,
+          subjects: Array.from(new Map(list.map((a) => [a.subject.id, a.subject])).values())
+            .map((s) => ({ subjectId: s.id, subjectName: s.name }))
+            .sort((x, y) => x.subjectName.localeCompare(y.subjectName)),
+        }))
+        .sort((a, b) => a.sectionName.localeCompare(b.sectionName));
+      return { classId, className, sections };
+    })
+    .sort((a, b) => a.className.localeCompare(b.className));
+}

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { TeacherAssignmentRecord } from "@/lib/api";
-import { groupAssignmentsBySchool, groupAssignmentsBySubject, groupAssignmentsByYear } from "./schoolGrouping";
+import { groupAssignmentsByClass, groupAssignmentsBySchool, groupAssignmentsBySubject, groupAssignmentsByYear } from "./schoolGrouping";
 
 // Ahmed Mohamed's own 3-school example from the approved Teacher Portal
 // spec: two Primary schools plus one Secondary school, several classes and
@@ -99,5 +99,42 @@ describe("groupAssignmentsByYear", () => {
     const olderYear = assignment({ id: "a6", academicYearId: "year-2026", academicYear: { id: "year-2026", name: "2026", isCurrent: false } });
     const years = groupAssignmentsByYear([PRIMARY_1_5A_MATH, olderYear]);
     expect(years.map((y) => y.academicYearName)).toEqual(["2027", "2026"]);
+  });
+});
+
+describe("groupAssignmentsByClass", () => {
+  it("nests sections under their class and subjects under their section, scoped to what it's given", () => {
+    // Primary 1's own assignments: Class 5/5A/Mathematics, Class 6/6A/Mathematics, Class 6/6B/Science.
+    const classes = groupAssignmentsByClass([PRIMARY_1_5A_MATH, PRIMARY_1_6A_MATH, PRIMARY_1_6B_SCIENCE]);
+
+    expect(classes.map((c) => c.className)).toEqual(["Class 5", "Class 6"]);
+
+    const class6 = classes.find((c) => c.className === "Class 6")!;
+    expect(class6.sections.map((s) => s.sectionName)).toEqual(["6A", "6B"]);
+    expect(class6.sections.find((s) => s.sectionName === "6A")!.subjects).toEqual([
+      { subjectId: "subject-math", subjectName: "Mathematics" },
+    ]);
+    expect(class6.sections.find((s) => s.sectionName === "6B")!.subjects).toEqual([
+      { subjectId: "subject-science", subjectName: "Science" },
+    ]);
+  });
+
+  it("lists every subject held in one section, sorted alphabetically, never collapsed into one string", () => {
+    const bothSubjectsIn5A = assignment({ id: "a7", subject: { id: "subject-english", name: "English" } });
+    const classes = groupAssignmentsByClass([PRIMARY_1_5A_MATH, bothSubjectsIn5A]);
+
+    expect(classes[0].sections[0].subjects.map((s) => s.subjectName)).toEqual(["English", "Mathematics"]);
+  });
+
+  it("never mixes two schools' classes together when given assignments from more than one school", () => {
+    // Callers are expected to pass one school's (and one year's) worth of
+    // assignments at a time — but even if they don't, a same-named class in
+    // two schools has different real class IDs and must stay two groups.
+    const classes = groupAssignmentsByClass([PRIMARY_1_5A_MATH, PRIMARY_2_7A_MATH]);
+    expect(classes.map((c) => c.className)).toEqual(["Class 5", "Class 7"]);
+  });
+
+  it("returns an empty list when given no assignments", () => {
+    expect(groupAssignmentsByClass([])).toEqual([]);
   });
 });

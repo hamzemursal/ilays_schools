@@ -154,7 +154,14 @@ export function TeacherProfile({ schoolId, teacherId }: { schoolId: string; teac
               {teacher.userId && <Badge tone="accent">Has login</Badge>}
             </div>
             <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-foreground-soft">
-              <span className="font-mono text-xs text-foreground-muted">#{teacher.employeeNumber}</span>
+              {teacher.teacherCode && (
+                <span className="font-mono text-xs font-medium text-accent" title="Permanent, organization-wide Teacher ID">
+                  {teacher.teacherCode}
+                </span>
+              )}
+              <span className="font-mono text-xs text-foreground-muted" title="Employee number at this school">
+                #{teacher.employeeNumber}
+              </span>
               {teacher.phone && (
                 <span className="inline-flex items-center gap-1.5">
                   <Phone className="size-3.5" /> {teacher.phone}

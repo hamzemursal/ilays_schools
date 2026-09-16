@@ -1393,6 +1393,9 @@ export interface TeacherSearchResult {
   firstName: string;
   lastName: string;
   employeeNumber: string;
+  // Permanent, organization-wide identity — the thing to check when two
+  // search results look like the same name but aren't (or are).
+  teacherCode: string | null;
   email: string | null;
   phone: string | null;
   // Where this teacher already has their Teacher profile — shown so an
@@ -1406,6 +1409,11 @@ export interface Teacher {
   id: string;
   userId: string | null;
   employeeNumber: string;
+  // Permanent, organization-wide identity — never school-scoped, never
+  // reused. Null only for a teacher created before this field existed and
+  // not yet covered by the backfill; every teacher created from here on
+  // has one immediately.
+  teacherCode: string | null;
   firstName: string;
   lastName: string;
   sex: Sex | null;

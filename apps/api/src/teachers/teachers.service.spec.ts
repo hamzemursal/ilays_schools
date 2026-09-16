@@ -571,14 +571,22 @@ describe("TeachersService.searchAcrossOrg", () => {
     expect(prisma.teacher.findMany).not.toHaveBeenCalled();
   });
 
-  it("searches by first/last name, employee number, and email", async () => {
+  it("searches by first/last name, employee number, teacherCode, and email", async () => {
     prisma.teacher.findMany.mockResolvedValue([]);
     await service.searchAcrossOrg(ACTOR, "school-1", "Ahmed");
     const where = prisma.teacher.findMany.mock.calls[0][0].where;
     expect(where.OR).toContainEqual({ firstName: { contains: "Ahmed", mode: "insensitive" } });
     expect(where.OR).toContainEqual({ lastName: { contains: "Ahmed", mode: "insensitive" } });
     expect(where.OR).toContainEqual({ employeeNumber: { contains: "Ahmed", mode: "insensitive" } });
+    expect(where.OR).toContainEqual({ teacherCode: { contains: "Ahmed", mode: "insensitive" } });
     expect(where.OR).toContainEqual({ email: { contains: "Ahmed", mode: "insensitive" } });
+  });
+
+  it("lets an admin who knows the permanent Teacher ID search by it directly, e.g. after two similarly-named results", async () => {
+    prisma.teacher.findMany.mockResolvedValue([]);
+    await service.searchAcrossOrg(ACTOR, "school-1", "TCH-00042");
+    const where = prisma.teacher.findMany.mock.calls[0][0].where;
+    expect(where.OR).toContainEqual({ teacherCode: { contains: "TCH-00042", mode: "insensitive" } });
   });
 
   // The whole point: results span every school in the organization, not
@@ -594,10 +602,18 @@ describe("TeachersService.searchAcrossOrg", () => {
 
   it("includes each result's home school, so the admin can see where they already teach", async () => {
     prisma.teacher.findMany.mockResolvedValue([
-      { id: "teacher-1", firstName: "Ahmed", lastName: "Mohamed", employeeNumber: "EMP-0002", email: null, phone: "0611111111", school: { id: "school-2", name: "Ilays Secondary School", type: "SECONDARY" } },
+      { id: "teacher-1", firstName: "Ahmed", lastName: "Mohamed", employeeNumber: "EMP-0002", teacherCode: "TCH-00042", email: null, phone: "0611111111", school: { id: "school-2", name: "Ilays Secondary School", type: "SECONDARY" } },
     ]);
     const result = await service.searchAcrossOrg(ACTOR, "school-1", "Ahmed");
     expect(result[0].school).toEqual({ id: "school-2", name: "Ilays Secondary School", type: "SECONDARY" });
+  });
+
+  it("includes each result's permanent teacherCode, so two similarly-named results can be told apart", async () => {
+    prisma.teacher.findMany.mockResolvedValue([
+      { id: "teacher-1", firstName: "Ahmed", lastName: "Mohamed", employeeNumber: "EMP-0002", teacherCode: "TCH-00042", email: null, phone: null, school: { id: "school-2", name: "Ilays Secondary School", type: "SECONDARY" } },
+    ]);
+    const result = await service.searchAcrossOrg(ACTOR, "school-1", "Ahmed");
+    expect(result[0].teacherCode).toBe("TCH-00042");
   });
 });
 

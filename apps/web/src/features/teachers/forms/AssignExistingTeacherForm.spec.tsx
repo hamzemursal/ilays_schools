@@ -33,6 +33,7 @@ function searchResult(overrides: Partial<TeacherSearchResult> = {}): TeacherSear
     firstName: "Ahmed",
     lastName: "Mohamed",
     employeeNumber: "EMP-0042",
+    teacherCode: "TCH-00042",
     email: "ahmed@example.com",
     phone: null,
     school: { id: "school-a", name: "Ilays Primary School", type: "PRIMARY" },
@@ -94,6 +95,21 @@ describe("AssignExistingTeacherForm — search across the org", () => {
     expect(apiMock.searchTeachers).toHaveBeenCalledWith("token-1", "school-b", "Ahmed");
     expect(await screen.findByText("Ahmed Mohamed")).toBeInTheDocument();
     expect(screen.getByText(/Ilays Primary School/)).toBeInTheDocument();
+  });
+
+  it("shows each result's permanent Teacher ID, so two similarly-named people can be told apart", async () => {
+    vi.useFakeTimers();
+    apiMock.searchTeachers.mockResolvedValue([
+      searchResult({ id: "teacher-1", teacherCode: "TCH-00042" }),
+      searchResult({ id: "teacher-2", teacherCode: "TCH-00099" }),
+    ]);
+    renderForm();
+    fireEvent.change(screen.getByPlaceholderText("Search by name, employee number, or email…"), { target: { value: "Ahmed" } });
+    await vi.advanceTimersByTimeAsync(500);
+    vi.useRealTimers();
+
+    expect(await screen.findByText("TCH-00042")).toBeInTheDocument();
+    expect(screen.getByText("TCH-00099")).toBeInTheDocument();
   });
 
   it("shows a 'no match' message pointing at Add teacher when nothing is found", async () => {

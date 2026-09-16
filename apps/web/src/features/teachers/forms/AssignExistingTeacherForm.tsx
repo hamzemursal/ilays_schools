@@ -100,6 +100,9 @@ export function AssignExistingTeacherForm({
                     <p className="font-medium text-foreground">
                       {r.firstName} {r.lastName}
                     </p>
+                    {r.teacherCode && (
+                      <span className="font-mono text-xs font-medium text-accent">{r.teacherCode}</span>
+                    )}
                     <SchoolTypeBadge type={r.school.type} />
                   </div>
                   <p className="truncate text-sm text-foreground-soft">
@@ -226,6 +229,7 @@ function AssignPicker({
         <p className="text-sm font-medium text-foreground">
           {teacher.firstName} {teacher.lastName}
         </p>
+        {teacher.teacherCode && <span className="font-mono text-xs font-medium text-accent">{teacher.teacherCode}</span>}
         <SchoolTypeBadge type={teacher.school.type} />
         <p className="text-xs text-foreground-soft">home school: {teacher.school.name}</p>
       </div>

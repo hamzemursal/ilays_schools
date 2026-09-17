@@ -4,7 +4,7 @@ import type { AcademicYear, ClassWithSections } from "@/lib/api";
 import { emptyWizardState, type WizardGuardian, type WizardState } from "../types";
 import { ReviewStep } from "./ReviewStep";
 
-const YEARS: AcademicYear[] = [{ id: "year-1", name: "2027", startDate: "2027-01-01", endDate: "2027-12-31", isCurrent: true }];
+const YEARS: AcademicYear[] = [{ id: "year-1", name: "2027", startDate: "2027-01-01", endDate: "2027-12-31", isCurrent: true, terms: [] }];
 const CLASSES: ClassWithSections[] = [
   {
     id: "class-1",

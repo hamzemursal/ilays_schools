@@ -24,7 +24,7 @@ function school(overrides: Partial<School> = {}): School {
 }
 
 function year(overrides: Partial<AcademicYear> = {}): AcademicYear {
-  return { id: "year-1", name: "2027", startDate: "2027-01-01", endDate: "2027-12-31", isCurrent: true, ...overrides };
+  return { id: "year-1", name: "2027", startDate: "2027-01-01", endDate: "2027-12-31", isCurrent: true, terms: [], ...overrides };
 }
 
 function klass(overrides: Partial<ClassWithSections> = {}): ClassWithSections {

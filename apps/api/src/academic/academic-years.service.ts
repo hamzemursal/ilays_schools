@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
@@ -7,6 +7,7 @@ import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateAcademicYearDto } from "./dto/create-academic-year.dto";
 import { UpdateAcademicYearDto } from "./dto/update-academic-year.dto";
+import { UpdateTermWeightsDto } from "./dto/update-term-weights.dto";
 
 @Injectable()
 export class AcademicYearsService {
@@ -18,7 +19,11 @@ export class AcademicYearsService {
 
   async list(actor: AuthenticatedUser, schoolId: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    return this.prisma.academicYear.findMany({ where: { schoolId }, orderBy: { startDate: "desc" } });
+    return this.prisma.academicYear.findMany({
+      where: { schoolId },
+      orderBy: { startDate: "desc" },
+      include: { terms: { orderBy: { name: "asc" } } },
+    });
   }
 
   // Backs the clean-URL "?year=" query param. AcademicYear.name (e.g.
@@ -44,7 +49,7 @@ export class AcademicYearsService {
         if (dto.isCurrent) {
           await tx.academicYear.updateMany({ where: { schoolId, isCurrent: true }, data: { isCurrent: false } });
         }
-        return tx.academicYear.create({
+        const year = await tx.academicYear.create({
           data: {
             schoolId,
             name: dto.name,
@@ -53,6 +58,20 @@ export class AcademicYearsService {
             isCurrent: dto.isCurrent ?? false,
           },
         });
+
+        // Every Academic Year has exactly Term 1 and Term 2, always — there
+        // is deliberately no separate "create term" endpoint (see Term's
+        // schema comment), so this is the only place terms ever come into
+        // existence. Default 50/50; the Admin can rebalance afterward via
+        // updateTermWeights, but never add a third term.
+        await tx.term.createMany({
+          data: [
+            { academicYearId: year.id, name: "Term 1", weight: 50 },
+            { academicYearId: year.id, name: "Term 2", weight: 50 },
+          ],
+        });
+
+        return tx.academicYear.findUniqueOrThrow({ where: { id: year.id }, include: { terms: { orderBy: { name: "asc" } } } });
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -60,6 +79,30 @@ export class AcademicYearsService {
       }
       throw error;
     }
+  }
+
+  // The only way a Term's weight ever changes — both values are required
+  // together and must sum to exactly 100, so there's never a moment where
+  // the two terms on a year disagree about how much of it they cover.
+  async updateTermWeights(actor: AuthenticatedUser, schoolId: string, id: string, dto: UpdateTermWeightsDto) {
+    await this.getOwnedYearOrThrow(actor, schoolId, id);
+
+    if (dto.term1Weight + dto.term2Weight !== 100) {
+      throw new BadRequestException("Term 1 and Term 2 weights must sum to exactly 100");
+    }
+
+    const terms = await this.prisma.term.findMany({ where: { academicYearId: id } });
+    const term1 = terms.find((t) => t.name === "Term 1");
+    const term2 = terms.find((t) => t.name === "Term 2");
+    if (!term1 || !term2) {
+      throw new NotFoundException("This academic year is missing one of its two terms");
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.term.update({ where: { id: term1.id }, data: { weight: dto.term1Weight } });
+      await tx.term.update({ where: { id: term2.id }, data: { weight: dto.term2Weight } });
+      return tx.academicYear.findUniqueOrThrow({ where: { id }, include: { terms: { orderBy: { name: "asc" } } } });
+    });
   }
 
   async update(actor: AuthenticatedUser, schoolId: string, id: string, dto: UpdateAcademicYearDto) {
@@ -75,6 +118,7 @@ export class AcademicYearsService {
       return tx.academicYear.update({
         where: { id },
         data: { isCurrent: dto.isCurrent },
+        include: { terms: { orderBy: { name: "asc" } } },
       });
     });
   }

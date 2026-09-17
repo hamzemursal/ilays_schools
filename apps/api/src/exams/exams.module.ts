@@ -13,5 +13,6 @@ import { ExamsService } from "./exams.service";
   imports: [SchoolsModule, AuditModule, DocumentsModule, NotificationsModule],
   controllers: [ExamsController, MyExamsController, ExamPapersController, ResultsReviewController],
   providers: [ExamsService],
+  exports: [ExamsService],
 })
 export class ExamsModule {}

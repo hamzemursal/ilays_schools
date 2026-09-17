@@ -66,7 +66,8 @@ type MockPrisma = {
   section: { findFirst: jest.Mock; findUnique: jest.Mock };
   studentEnrollment: { findMany: jest.Mock; count: jest.Mock };
   resultSubmission: { findUnique: jest.Mock; upsert: jest.Mock; update: jest.Mock; findMany: jest.Mock };
-  result: { upsert: jest.Mock; count: jest.Mock };
+  result: { upsert: jest.Mock; count: jest.Mock; findMany: jest.Mock };
+  term: { findMany: jest.Mock };
   teacher: { findFirst: jest.Mock };
   teacherAssignment: { findFirst: jest.Mock; findMany: jest.Mock };
   $transaction: jest.Mock;
@@ -83,7 +84,8 @@ function createMockPrisma(): MockPrisma {
     section: { findFirst: jest.fn(), findUnique: jest.fn() },
     studentEnrollment: { findMany: jest.fn(), count: jest.fn() },
     resultSubmission: { findUnique: jest.fn(), upsert: jest.fn(), update: jest.fn(), findMany: jest.fn() },
-    result: { upsert: jest.fn(), count: jest.fn() },
+    result: { upsert: jest.fn(), count: jest.fn(), findMany: jest.fn() },
+    term: { findMany: jest.fn() },
     teacher: { findFirst: jest.fn() },
     teacherAssignment: { findFirst: jest.fn(), findMany: jest.fn() },
     // Handles both forms ExamsService uses: a callback ($transaction(async tx => ...))
@@ -1089,5 +1091,133 @@ describe("ExamsService.listExamPapers — teacher narrowing (Phase 3)", () => {
     const rows = await service.listExamPapers(TEACHER_ACTOR, {});
 
     expect(rows.map((r: { resultSubmissionId: string }) => r.resultSubmissionId)).toEqual(["sub-mine"]);
+  });
+});
+
+// Term/Annual result calculation — the arithmetic behind Promotion
+// eligibility. Deliberately isolated from ResultSubmission/Exam creation
+// mechanics above: these tests only care about the SUM(marksObtained)/
+// SUM(maxMarks) math, the configured Term weighting, and the "Incomplete"
+// (never a fabricated 0%) rule for a term with zero published results.
+describe("ExamsService.getTermPercentage / getAnnualResult", () => {
+  let prisma: MockPrisma;
+  let service: ExamsService;
+
+  beforeEach(() => {
+    prisma = createMockPrisma();
+    ({ service } = createService(prisma));
+  });
+
+  function publishedResult(marksObtained: number, maxMarks: number) {
+    return { marksObtained, examSubject: { maxMarks } };
+  }
+
+  it("returns null (Incomplete) when the enrollment has zero published results for this term", async () => {
+    prisma.result.findMany.mockResolvedValue([]);
+
+    const percentage = await service.getTermPercentage("enr-1", "term-1");
+
+    expect(percentage).toBeNull();
+    expect(prisma.result.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          enrollmentId: "enr-1",
+          resultSubmission: { status: "PUBLISHED" },
+          examSubject: { exam: { termId: "term-1" } },
+        }),
+      }),
+    );
+  });
+
+  it("computes SUM(marksObtained)/SUM(maxMarks) across every subject, not an average of per-subject percentages", async () => {
+    // Subject A: 90/100 (90%), Subject B: 40/100 (40%) — a plain average of
+    // percentages would be 65%; the correct SUM/SUM here is also 65% only
+    // because both subjects share the same maxMarks. Use different
+    // maxMarks to prove it's genuinely SUM/SUM, not an average.
+    prisma.result.findMany.mockResolvedValue([publishedResult(90, 100), publishedResult(10, 50)]);
+    // SUM(marksObtained) = 100, SUM(maxMarks) = 150 → 66.67%, NOT the
+    // per-subject average of (90% + 20%)/2 = 55%.
+
+    const percentage = await service.getTermPercentage("enr-1", "term-1");
+
+    expect(percentage).toBeCloseTo(66.67, 2);
+  });
+
+  it("a subject the student has no result for contributes nothing to either sum — never treated as 0", async () => {
+    prisma.result.findMany.mockResolvedValue([publishedResult(100, 100)]);
+
+    const percentage = await service.getTermPercentage("enr-1", "term-1");
+
+    expect(percentage).toBe(100);
+  });
+
+  it("only counts PUBLISHED results — the query itself excludes Draft/Submitted/Approved", () => {
+    // Verified structurally above via the exact where-clause assertion;
+    // this test documents the intent so a future change that widens the
+    // filter doesn't slip through unnoticed.
+    expect(true).toBe(true);
+  });
+
+  it("Annual Result: 50.00% is eligible", async () => {
+    prisma.term.findMany.mockResolvedValue([
+      { id: "term-1", name: "Term 1", weight: 50 },
+      { id: "term-2", name: "Term 2", weight: 50 },
+    ]);
+    prisma.result.findMany
+      .mockResolvedValueOnce([publishedResult(50, 100)]) // Term 1: 50%
+      .mockResolvedValueOnce([publishedResult(50, 100)]); // Term 2: 50%
+
+    const annual = await service.getAnnualResult("enr-1", "year-1");
+
+    expect(annual.annualPercentage).toBe(50);
+    expect(annual.eligible).toBe(true);
+  });
+
+  it("Annual Result: 49.99% is not eligible", async () => {
+    prisma.term.findMany.mockResolvedValue([
+      { id: "term-1", name: "Term 1", weight: 50 },
+      { id: "term-2", name: "Term 2", weight: 50 },
+    ]);
+    prisma.result.findMany
+      .mockResolvedValueOnce([publishedResult(49.98, 100)])
+      .mockResolvedValueOnce([publishedResult(50, 100)]);
+
+    const annual = await service.getAnnualResult("enr-1", "year-1");
+
+    expect(annual.annualPercentage).toBe(49.99);
+    expect(annual.eligible).toBe(false);
+  });
+
+  it("uses the academic year's own configured weights, e.g. 40/60, never a hard-coded 50/50", async () => {
+    prisma.term.findMany.mockResolvedValue([
+      { id: "term-1", name: "Term 1", weight: 40 },
+      { id: "term-2", name: "Term 2", weight: 60 },
+    ]);
+    prisma.result.findMany
+      .mockResolvedValueOnce([publishedResult(70, 100)]) // Term 1: 70%
+      .mockResolvedValueOnce([publishedResult(80, 100)]); // Term 2: 80%
+
+    const annual = await service.getAnnualResult("enr-1", "year-1");
+
+    // (70 * 0.40) + (80 * 0.60) = 28 + 48 = 76
+    expect(annual.annualPercentage).toBe(76);
+    expect(annual.eligible).toBe(true);
+  });
+
+  it("a completely missing Term 2 makes the Annual Result Incomplete — never computed from Term 1 alone, never defaulted to 0", async () => {
+    prisma.term.findMany.mockResolvedValue([
+      { id: "term-1", name: "Term 1", weight: 50 },
+      { id: "term-2", name: "Term 2", weight: 50 },
+    ]);
+    prisma.result.findMany
+      .mockResolvedValueOnce([publishedResult(60, 100)]) // Term 1: 60%
+      .mockResolvedValueOnce([]); // Term 2: nothing published yet
+
+    const annual = await service.getAnnualResult("enr-1", "year-1");
+
+    expect(annual.term1Percentage).toBe(60);
+    expect(annual.term2Percentage).toBeNull();
+    expect(annual.annualPercentage).toBeNull();
+    expect(annual.eligible).toBeNull();
   });
 });

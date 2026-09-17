@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/commo
 import { AcademicYearsService } from "./academic-years.service";
 import { CreateAcademicYearDto } from "./dto/create-academic-year.dto";
 import { UpdateAcademicYearDto } from "./dto/update-academic-year.dto";
+import { UpdateTermWeightsDto } from "./dto/update-term-weights.dto";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { RequirePermissions } from "../auth/decorators/require-permissions.decorator";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
@@ -48,6 +49,21 @@ export class AcademicYearsController {
     @Body() dto: UpdateAcademicYearDto,
   ) {
     return this.academicYears.update(user, schoolId, id, dto);
+  }
+
+  // The only write path for a Term — there is deliberately no create/delete
+  // endpoint for terms, since a year always has exactly two (see Term's
+  // schema comment). Both weights are required together and validated to
+  // sum to 100 in the service.
+  @RequirePermissions("academic.manage")
+  @Patch(":id/term-weights")
+  updateTermWeights(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("id") id: string,
+    @Body() dto: UpdateTermWeightsDto,
+  ) {
+    return this.academicYears.updateTermWeights(user, schoolId, id, dto);
   }
 
   // Real counts of everything this year owns, shown to the admin before

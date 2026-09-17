@@ -6,7 +6,7 @@ import { emptyWizardState, type WizardState } from "../types";
 import { EnrollmentStep, isEnrollmentValid } from "./EnrollmentStep";
 
 function year(overrides: Partial<AcademicYear> = {}): AcademicYear {
-  return { id: "year-1", name: "2027", startDate: "2027-01-01", endDate: "2027-12-31", isCurrent: false, ...overrides };
+  return { id: "year-1", name: "2027", startDate: "2027-01-01", endDate: "2027-12-31", isCurrent: false, terms: [], ...overrides };
 }
 
 function klass(overrides: Partial<ClassWithSections> = {}): ClassWithSections {

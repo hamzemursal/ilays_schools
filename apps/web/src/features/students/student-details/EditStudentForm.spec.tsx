@@ -24,8 +24,8 @@ const apiMock = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api", () => ({ api: apiMock }));
 
-const YEAR: AcademicYear = { id: "year-1", name: "2027", startDate: "2027-01-01", endDate: "2027-12-31", isCurrent: true };
-const OTHER_YEAR: AcademicYear = { id: "year-2", name: "2028", startDate: "2028-01-01", endDate: "2028-12-31", isCurrent: false };
+const YEAR: AcademicYear = { id: "year-1", name: "2027", startDate: "2027-01-01", endDate: "2027-12-31", isCurrent: true, terms: [] };
+const OTHER_YEAR: AcademicYear = { id: "year-2", name: "2028", startDate: "2028-01-01", endDate: "2028-12-31", isCurrent: false, terms: [] };
 const CLASS: ClassWithSections = {
   id: "class-1",
   name: "Class 1",

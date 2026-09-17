@@ -53,22 +53,22 @@ model School {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  academicYears AcademicYear[]
-  users         UserSchool[]
-  divisions     Division[]
-  subjects      Subject[]
-  enrollments   StudentEnrollment[]
-  teachers      Teacher[]
+  academicYears      AcademicYear[]
+  users              UserSchool[]
+  divisions          Division[]
+  subjects           Subject[]
+  enrollments        StudentEnrollment[]
+  teachers           Teacher[]
   // A teacher's own Teacher row lives at exactly one "home" school (above),
   // but a TeacherAssignment may point at a *different* school's section —
   // this is the multi-school teaching relation, kept separate from
   // `teachers` above on purpose.
   teacherAssignments TeacherAssignment[]
-  invitations   Invitation[]
-  exams         Exam[]
-  feeStructures FeeStructure[]
-  importBatches ImportBatch[]
-  announcements Announcement[]
+  invitations        Invitation[]
+  exams              Exam[]
+  feeStructures      FeeStructure[]
+  importBatches      ImportBatch[]
+  announcements      Announcement[]
 
   // Workforce / HR / Payroll / Finance foundation (Phase 1)
   departments        Department[]
@@ -115,8 +115,35 @@ model AcademicYear {
   billingPeriods BillingPeriod[]
   charges        Charge[]
 
+  terms Term[]
+
   @@unique([schoolId, name])
   @@map("academic_years")
+}
+
+// Exactly two rows per AcademicYear, always "Term 1" and "Term 2" — created
+// together when the year itself is created (see AcademicYearsService), never
+// individually. There is deliberately no "create term" endpoint: allowing
+// arbitrary term creation would let a Mid-Term or Term 3 slip in, which the
+// product explicitly rules out. `weight` is a whole-number percentage
+// (0-100); the two terms on one year must always sum to exactly 100 —
+// enforced in the service layer, not by a CHECK constraint, since Prisma
+// migrations can't express "sum across sibling rows" declaratively.
+model Term {
+  id             String       @id @default(uuid())
+  academicYearId String
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+
+  name   String // "Term 1" | "Term 2"
+  weight Int // whole-number percentage; both terms on a year sum to 100
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  exams Exam[]
+
+  @@unique([academicYearId, name])
+  @@map("terms")
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +297,12 @@ model Student {
 enum EnrollmentStatus {
   ACTIVE
   PROMOTED
+  // A closed enrollment whose annual result was below the eligibility
+  // threshold — the student gets a NEW enrollment in the SAME class for
+  // the next academic year (see PromotionsService.confirm), never PROMOTED,
+  // so their history correctly shows "Retained" rather than implying they
+  // advanced a class.
+  RETAINED
   TRANSFERRED_OUT
   COMPLETED
   GRADUATED
@@ -847,6 +880,13 @@ model Exam {
   school         School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   academicYearId String
   academicYear   AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  // Nullable so existing exams (created before Term existed) keep working
+  // unassigned — never silently backfilled to Term 1 or Term 2, since that
+  // would be guessing at historical data. New exams should always set this;
+  // an unassigned exam's results are excluded from term/annual calculations
+  // (see TermResultsService), not counted toward either term.
+  termId         String?
+  term           Term?        @relation(fields: [termId], references: [id], onDelete: SetNull)
 
   name String
   type ExamType
@@ -1655,16 +1695,16 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  schools            UserSchool[]
-  roles              UserRole[]
-  refreshTokens      RefreshToken[]
-  invitations        Invitation[]
-  guardian           Guardian?
-  teacher            Teacher?
-  student            Student?
-  staff              Staff?
-  notifications      Notification[]
-  totpRecoveryCodes  TotpRecoveryCode[]
+  schools           UserSchool[]
+  roles             UserRole[]
+  refreshTokens     RefreshToken[]
+  invitations       Invitation[]
+  guardian          Guardian?
+  teacher           Teacher?
+  student           Student?
+  staff             Staff?
+  notifications     Notification[]
+  totpRecoveryCodes TotpRecoveryCode[]
 
   @@map("users")
 }

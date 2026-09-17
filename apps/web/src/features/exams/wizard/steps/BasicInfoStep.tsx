@@ -41,7 +41,12 @@ export function dateRangeError(state: ExamWizardState, years: AcademicYear[]): s
 }
 
 export function isBasicInfoValid(state: ExamWizardState, years: AcademicYear[]): boolean {
-  return state.name.trim().length > 0 && state.academicYearId.length > 0 && dateRangeError(state, years) === null;
+  return (
+    state.name.trim().length > 0 &&
+    state.academicYearId.length > 0 &&
+    state.termId.length > 0 &&
+    dateRangeError(state, years) === null
+  );
 }
 
 export function BasicInfoStep({
@@ -54,6 +59,18 @@ export function BasicInfoStep({
   onChange: (patch: Partial<ExamWizardState>) => void;
 }) {
   const error = dateRangeError(state, years);
+  const selectedYear = years.find((y) => y.id === state.academicYearId);
+  const terms = selectedYear?.terms ?? [];
+
+  function onAcademicYearChange(id: string) {
+    // Term choices belong to whichever year is selected — a Term 1 id from
+    // the previous year isn't even a valid option for the new one (each
+    // year's terms have their own ids), so switching years re-defaults to
+    // the new year's own Term 1, same as Exam Type/Academic Year already
+    // default to a usable value the Admin can still change.
+    const year = years.find((y) => y.id === id);
+    onChange({ academicYearId: id, termId: year?.terms.find((t) => t.name === "Term 1")?.id ?? "" });
+  }
 
   function onStartDateChange(value: string) {
     // Exam Date (set in the Settings step) auto-follows Start Date until the
@@ -91,13 +108,29 @@ export function BasicInfoStep({
           </Select>
         </FormField>
 
-        <FormField label="Academic Year" required>
-          <Select value={state.academicYearId} onChange={(e) => onChange({ academicYearId: e.target.value })}>
+        <FormField label="Academic Year" htmlFor="examAcademicYearId" required>
+          <Select id="examAcademicYearId" value={state.academicYearId} onChange={(e) => onAcademicYearChange(e.target.value)}>
             {years.length === 0 && <option value="">No academic years yet</option>}
             {years.map((y) => (
               <option key={y.id} value={y.id}>
                 {y.name}
                 {y.isCurrent ? " (current)" : ""}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+
+        <FormField label="Term" htmlFor="examTermId" required hint="Every exam counts toward one of the year's two terms.">
+          <Select
+            id="examTermId"
+            value={state.termId}
+            onChange={(e) => onChange({ termId: e.target.value })}
+            disabled={terms.length === 0}
+          >
+            <option value="">{terms.length === 0 ? "Select an academic year first" : "Select…"}</option>
+            {terms.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name} ({t.weight}%)
               </option>
             ))}
           </Select>

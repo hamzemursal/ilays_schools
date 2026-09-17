@@ -4,6 +4,10 @@ export interface ExamWizardState {
   name: string;
   type: ExamType;
   academicYearId: string;
+  // Which of the selected year's exactly two terms this exam counts toward
+  // — required so every new exam contributes to a real Term/Annual result;
+  // there is no "no term" or third-term option to pick.
+  termId: string;
   startDate: string;
   endDate: string;
   description: string;
@@ -24,6 +28,7 @@ export function emptyExamWizardState(defaultAcademicYearId: string): ExamWizardS
     name: "",
     type: "MIDTERM",
     academicYearId: defaultAcademicYearId,
+    termId: "",
     startDate: "",
     endDate: "",
     description: "",

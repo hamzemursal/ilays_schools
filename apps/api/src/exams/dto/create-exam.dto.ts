@@ -27,6 +27,15 @@ export class CreateExamDto {
   @IsUUID()
   academicYearId!: string;
 
+  // Optional at the API level to match Exam.termId's nullable schema column
+  // (an exam genuinely can exist without one — see the schema comment), but
+  // the exam-creation UI requires picking one of the academic year's own
+  // two terms going forward; an exam with no term is simply excluded from
+  // term/annual result calculations rather than guessed at.
+  @IsOptional()
+  @IsUUID()
+  termId?: string;
+
   @IsString()
   @MinLength(1)
   name!: string;

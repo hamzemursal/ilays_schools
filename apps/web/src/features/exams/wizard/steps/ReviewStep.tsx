@@ -31,6 +31,7 @@ export function ReviewStep({
   availableSubjects: Subject[];
 }) {
   const year = years.find((y) => y.id === state.academicYearId);
+  const term = year?.terms.find((t) => t.id === state.termId);
   const selectedClasses = classes.filter((c) => state.selectedClassIds.has(c.id));
   const selectedSubjects = availableSubjects.filter((s) => state.selectedSubjectIds.has(s.id));
 
@@ -50,6 +51,7 @@ export function ReviewStep({
           <Field label="Name" value={state.name} />
           <Field label="Type" value={EXAM_TYPE_LABELS[state.type] ?? state.type} />
           <Field label="Academic Year" value={year?.name ?? "—"} />
+          <Field label="Term" value={term?.name ?? "—"} />
           <Field label="Start Date" value={formatDate(state.startDate)} />
           <Field label="End Date" value={formatDate(state.endDate)} />
           {state.description && (

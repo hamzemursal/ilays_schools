@@ -247,6 +247,13 @@ function AcademicYearsSection({
                   )}
                 </div>
               </div>
+              <TermWeightsEditor
+                schoolId={schoolId}
+                accessToken={accessToken}
+                year={y}
+                canManage={canManage}
+                onSaved={(updated) => setYears((prev) => prev.map((yr) => (yr.id === updated.id ? updated : yr)))}
+              />
             </Card>
           ))}
         </div>
@@ -287,6 +294,112 @@ function AcademicYearsSection({
             {formError && <Alert tone="danger" className="sm:col-span-4">{formError}</Alert>}
           </form>
         </Card>
+      )}
+    </div>
+  );
+}
+
+// Every Academic Year has exactly Term 1 and Term 2 — this is the only
+// place their weighting can change (there's deliberately no way to add a
+// third term or remove one). Both weights are edited together and must sum
+// to exactly 100 before Save is even enabled, so it's never possible to
+// submit a year where the two terms disagree about how much of it they cover.
+export function TermWeightsEditor({
+  schoolId,
+  accessToken,
+  year,
+  canManage,
+  onSaved,
+}: {
+  schoolId: string;
+  accessToken: string;
+  year: AcademicYear;
+  canManage: boolean;
+  onSaved: (updated: AcademicYear) => void;
+}) {
+  const term1 = year.terms.find((t) => t.name === "Term 1");
+  const term2 = year.terms.find((t) => t.name === "Term 2");
+  const [editing, setEditing] = useState(false);
+  const [term1Weight, setTerm1Weight] = useState(String(term1?.weight ?? 50));
+  const [term2Weight, setTerm2Weight] = useState(String(term2?.weight ?? 50));
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const { show } = useToast();
+
+  if (!term1 || !term2) return null;
+
+  const sum = (Number(term1Weight) || 0) + (Number(term2Weight) || 0);
+  const validSum = sum === 100;
+
+  function startEditing() {
+    setTerm1Weight(String(term1!.weight));
+    setTerm2Weight(String(term2!.weight));
+    setSaveError(null);
+    setEditing(true);
+  }
+
+  async function onSave() {
+    if (!validSum) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const updated = await api.updateTermWeights(accessToken, schoolId, year.id, {
+        term1Weight: Number(term1Weight),
+        term2Weight: Number(term2Weight),
+      });
+      onSaved(updated);
+      setEditing(false);
+      show(`${year.name}'s term weights updated.`);
+    } catch (err) {
+      setSaveError(err instanceof ApiError ? err.message : "Failed to update term weights");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-border p-2 pt-3">
+      {!editing ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone="accent">Term 1 — {term1.weight}%</Badge>
+          <Badge tone="accent">Term 2 — {term2.weight}%</Badge>
+          {canManage && (
+            <Button size="sm" variant="ghost" icon={<Pencil className="size-3.5" />} onClick={startEditing}>
+              Edit weights
+            </Button>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-end gap-3">
+          <FormField label="Term 1 weight" htmlFor={`term1Weight-${year.id}`} className="w-32">
+            <Input
+              id={`term1Weight-${year.id}`}
+              type="number"
+              min={0}
+              max={100}
+              value={term1Weight}
+              onChange={(e) => setTerm1Weight(e.target.value)}
+            />
+          </FormField>
+          <FormField label="Term 2 weight" htmlFor={`term2Weight-${year.id}`} className="w-32">
+            <Input
+              id={`term2Weight-${year.id}`}
+              type="number"
+              min={0}
+              max={100}
+              value={term2Weight}
+              onChange={(e) => setTerm2Weight(e.target.value)}
+            />
+          </FormField>
+          <Button size="sm" loading={saving} disabled={!validSum} onClick={onSave}>
+            Save
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+            Cancel
+          </Button>
+          {!validSum && <p className="w-full text-sm text-danger">Term 1 and Term 2 weights must sum to exactly 100 (currently {sum}).</p>}
+          {saveError && <p className="w-full text-sm text-danger">{saveError}</p>}
+        </div>
       )}
     </div>
   );

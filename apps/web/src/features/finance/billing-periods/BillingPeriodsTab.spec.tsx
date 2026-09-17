@@ -24,7 +24,7 @@ const apiMock = vi.hoisted(() => ({
 vi.mock("@/lib/api", () => ({ api: apiMock }));
 
 const YEARS: AcademicYear[] = [
-  { id: "year-1", name: "2028", startDate: "2028-01-01", endDate: "2028-12-31", isCurrent: true },
+  { id: "year-1", name: "2028", startDate: "2028-01-01", endDate: "2028-12-31", isCurrent: true, terms: [] },
 ];
 
 function period(overrides: Partial<BillingPeriod> = {}): BillingPeriod {
@@ -157,8 +157,8 @@ describe("BillingPeriodsTab — create billing period (mutation)", () => {
     apiMock.createBillingPeriod.mockResolvedValue(period());
     const { container } = renderTab({
       years: [
-        { id: "year-1", name: "2027", startDate: "2027-01-01", endDate: "2027-12-31", isCurrent: false },
-        { id: "year-2", name: "2028", startDate: "2028-01-01", endDate: "2028-12-31", isCurrent: true },
+        { id: "year-1", name: "2027", startDate: "2027-01-01", endDate: "2027-12-31", isCurrent: false, terms: [] },
+        { id: "year-2", name: "2028", startDate: "2028-01-01", endDate: "2028-12-31", isCurrent: true, terms: [] },
       ],
     });
     await screen.findByRole("heading", { name: "Add billing period" });

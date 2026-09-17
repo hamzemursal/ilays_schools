@@ -265,12 +265,19 @@ export interface ClassBulkTransferImpact {
   studentCount: number;
 }
 
+export interface Term {
+  id: string;
+  name: string;
+  weight: number;
+}
+
 export interface AcademicYear {
   id: string;
   name: string;
   startDate: string;
   endDate: string;
   isCurrent: boolean;
+  terms: Term[];
 }
 
 export interface AcademicYearDeletionImpact {
@@ -838,6 +845,11 @@ export interface Exam {
   name: string;
   type: ExamType;
   academicYearId: string;
+  // Nullable — exams created before Terms existed stay unassigned rather
+  // than being guessed into one; the Exam creation form requires picking
+  // one of the year's exactly two terms for every new exam going forward.
+  termId: string | null;
+  term: { id: string; name: string } | null;
   startDate: string | null;
   endDate: string | null;
   description: string | null;
@@ -1692,19 +1704,54 @@ export interface MyAssignmentStudents {
   students: MyAssignmentStudent[];
 }
 
-export type PromotionOutcome = "PROMOTED" | "COMPLETED" | "GRADUATED";
+export type PromotionOutcome = "PROMOTED" | "RETAINED" | "COMPLETED" | "GRADUATED";
+// The section's own natural outcome, before any per-student override — a
+// student can always be RETAINED instead, but never assigned an outcome
+// other than this or RETAINED (see PromotionsService.resolvePlan).
+export type NaturalPromotionOutcome = "PROMOTED" | "COMPLETED" | "GRADUATED";
+
+export interface PromotionSectionOption {
+  id: string;
+  name: string;
+  capacity: number | null;
+  currentActive: number;
+  available: number | null;
+}
+
+export interface PromotionStudentRow {
+  studentId: string;
+  enrollmentId: string;
+  firstName: string;
+  lastName: string;
+  rollNumber: number;
+  studentNumber: string;
+  // null on every field below means the annual result is genuinely
+  // Incomplete (a term with zero results) — never fabricated as 0%, and
+  // suggestedOutcome is then null too, forcing the Admin to decide.
+  term1Percentage: number | null;
+  term2Percentage: number | null;
+  annualPercentage: number | null;
+  eligible: boolean | null;
+  suggestedOutcome: PromotionOutcome | null;
+}
 
 export interface PromotionPreview {
-  outcome: PromotionOutcome;
+  naturalOutcome: NaturalPromotionOutcome;
   currentClass: { id: string; name: string };
   nextClass: { id: string; name: string } | null;
-  targetSections: { id: string; name: string; capacity: number | null; currentActive: number; available: number | null }[];
-  students: { studentId: string; enrollmentId: string; firstName: string; lastName: string; rollNumber: number; studentNumber: string }[];
+  currentClassSections: PromotionSectionOption[];
+  nextClassSections: PromotionSectionOption[];
+  students: PromotionStudentRow[];
+}
+
+export interface PromotionAssignment {
+  enrollmentId: string;
+  outcome: PromotionOutcome;
+  targetSectionId?: string;
 }
 
 export interface PromotionBatchResult {
   id: string;
-  outcome: PromotionOutcome;
   items: { id: string; studentId: string; outcome: PromotionOutcome }[];
 }
 
@@ -2044,6 +2091,20 @@ export const api = {
     request<AcademicYear>(`/schools/${schoolId}/academic-years/${id}`, {
       method: "PATCH",
       body: { isCurrent: true },
+      accessToken,
+    }),
+  // Term 1 and Term 2 always exist together — there is no create/delete
+  // endpoint for a Term, only this weight adjustment (see the Term schema
+  // comment). Both weights are required and must sum to exactly 100.
+  updateTermWeights: (
+    accessToken: string,
+    schoolId: string,
+    id: string,
+    body: { term1Weight: number; term2Weight: number },
+  ) =>
+    request<AcademicYear>(`/schools/${schoolId}/academic-years/${id}/term-weights`, {
+      method: "PATCH",
+      body,
       accessToken,
     }),
   getAcademicYearDeletionImpact: (accessToken: string, schoolId: string, id: string) =>
@@ -2479,7 +2540,7 @@ export const api = {
     accessToken: string,
     schoolId: string,
     sectionId: string,
-    body: { fromAcademicYearId: string; toAcademicYearId: string; targetSectionId?: string },
+    body: { fromAcademicYearId: string; toAcademicYearId: string; assignments: PromotionAssignment[] },
   ) =>
     request<PromotionBatchResult>(`/schools/${schoolId}/sections/${sectionId}/promotion/confirm`, {
       method: "POST",
@@ -2641,6 +2702,7 @@ export const api = {
     schoolId: string,
     body: {
       academicYearId: string;
+      termId?: string;
       name: string;
       type: ExamType;
       startDate?: string;

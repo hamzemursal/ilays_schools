@@ -3,7 +3,16 @@
 import { useEffect, useState } from "react";
 import { ArrowUpCircle, CheckCircle2 } from "lucide-react";
 import { ApiError, useAuth } from "@/lib/auth-context";
-import { api, type AcademicYear, type ClassWithSections, type PromotionPreview } from "@/lib/api";
+import {
+  api,
+  type AcademicYear,
+  type ClassWithSections,
+  type PromotionAssignment,
+  type PromotionOutcome,
+  type PromotionPreview,
+  type PromotionSectionOption,
+  type PromotionStudentRow,
+} from "@/lib/api";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
@@ -11,11 +20,20 @@ import { FormField, Select } from "@/components/ui/FormControls";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 
-const OUTCOME_LABEL: Record<PromotionPreview["outcome"], string> = {
-  PROMOTED: "Will be promoted",
-  COMPLETED: "Will complete this division",
-  GRADUATED: "Will graduate",
+const NATURAL_OUTCOME_LABEL: Record<PromotionPreview["naturalOutcome"], string> = {
+  PROMOTED: "Promote",
+  COMPLETED: "Complete this division",
+  GRADUATED: "Graduate",
 };
+
+function formatPercent(value: number | null): string {
+  return value === null ? "—" : `${value.toFixed(2)}%`;
+}
+
+function EligibilityBadge({ eligible }: { eligible: boolean | null }) {
+  if (eligible === null) return <Badge tone="warning">Incomplete</Badge>;
+  return eligible ? <Badge tone="success">Eligible</Badge> : <Badge tone="danger">Not Eligible</Badge>;
+}
 
 export function PromotionWizard({ schoolId }: { schoolId: string }) {
   const { accessToken } = useAuth();
@@ -28,13 +46,17 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
   const [sectionId, setSectionId] = useState("");
   const [fromYearId, setFromYearId] = useState("");
   const [toYearId, setToYearId] = useState("");
-  const [targetSectionId, setTargetSectionId] = useState("");
 
   const [preview, setPreview] = useState<PromotionPreview | null>(null);
+  // Every enrollmentId in preview.students has an entry here once loaded —
+  // "" means the Admin hasn't decided yet (including every Incomplete
+  // student, who starts here since suggestedOutcome is null for them).
+  const [outcomes, setOutcomes] = useState<Map<string, PromotionOutcome | "">>(new Map());
+  const [destinations, setDestinations] = useState<Map<string, string>>(new Map());
   const [previewing, setPreviewing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<number | null>(null);
+  const [confirmedCount, setConfirmedCount] = useState<number | null>(null);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -54,16 +76,51 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
 
   const selectedClass = classes.find((c) => c.id === classId);
 
+  // Auto-fills a starting destination for every student already assigned an
+  // outcome, respecting real capacity — the Admin reviews and can override
+  // any single one afterward, but starts from a sensible default instead of
+  // an empty grid of selects for every row.
+  function autoFillDestinations(students: PromotionStudentRow[], outcomeFor: Map<string, PromotionOutcome | "">, sections: {
+    PROMOTED_OR_NATURAL: PromotionSectionOption[];
+    RETAINED: PromotionSectionOption[];
+  }): Map<string, string> {
+    const consumed = new Map<string, number>();
+    const result = new Map<string, string>();
+    for (const student of students) {
+      const outcome = outcomeFor.get(student.enrollmentId);
+      if (outcome !== "PROMOTED" && outcome !== "RETAINED") continue;
+      const pool = outcome === "PROMOTED" ? sections.PROMOTED_OR_NATURAL : sections.RETAINED;
+      const target = pool.find((s) => {
+        const used = consumed.get(s.id) ?? s.currentActive;
+        return s.capacity === null || used < s.capacity;
+      });
+      if (target) {
+        result.set(student.enrollmentId, target.id);
+        consumed.set(target.id, Math.max(consumed.get(target.id) ?? target.currentActive, target.currentActive) + 1);
+      }
+    }
+    return result;
+  }
+
   async function onPreview() {
     if (!accessToken || !sectionId || !fromYearId) return;
     setError(null);
-    setDone(null);
+    setConfirmedCount(null);
     setPreview(null);
     setPreviewing(true);
     try {
       const result = await api.previewPromotion(accessToken, schoolId, sectionId, fromYearId);
       setPreview(result);
-      if (result.targetSections[0]) setTargetSectionId(result.targetSections[0].id);
+      const initialOutcomes = new Map<string, PromotionOutcome | "">(
+        result.students.map((s) => [s.enrollmentId, s.suggestedOutcome ?? ""]),
+      );
+      setOutcomes(initialOutcomes);
+      setDestinations(
+        autoFillDestinations(result.students, initialOutcomes, {
+          PROMOTED_OR_NATURAL: result.nextClassSections,
+          RETAINED: result.currentClassSections,
+        }),
+      );
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to preview promotion");
     } finally {
@@ -71,17 +128,45 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
     }
   }
 
+  function setOutcomeFor(enrollmentId: string, outcome: PromotionOutcome | "") {
+    setOutcomes((prev) => new Map(prev).set(enrollmentId, outcome));
+    // A destination picked for the previous outcome is almost never valid
+    // for the new one (PROMOTED targets the next class, RETAINED the
+    // current one) — clearing it forces a deliberate re-pick instead of
+    // silently submitting a stale section.
+    setDestinations((prev) => {
+      const next = new Map(prev);
+      next.delete(enrollmentId);
+      return next;
+    });
+  }
+
+  const needsDestination = (outcome: PromotionOutcome | "") => outcome === "PROMOTED" || outcome === "RETAINED";
+
+  const allDecided = preview
+    ? preview.students.every((s) => {
+        const outcome = outcomes.get(s.enrollmentId) ?? "";
+        if (!outcome) return false;
+        return !needsDestination(outcome) || !!destinations.get(s.enrollmentId);
+      })
+    : false;
+
   async function onConfirm() {
-    if (!accessToken || !preview || !toYearId) return;
+    if (!accessToken || !preview || !toYearId || !allDecided) return;
     setError(null);
     setConfirming(true);
     try {
+      const assignments: PromotionAssignment[] = preview.students.map((s) => {
+        const outcome = outcomes.get(s.enrollmentId) as PromotionOutcome;
+        const targetSectionId = needsDestination(outcome) ? destinations.get(s.enrollmentId) : undefined;
+        return { enrollmentId: s.enrollmentId, outcome, targetSectionId };
+      });
       const result = await api.confirmPromotion(accessToken, schoolId, sectionId, {
         fromAcademicYearId: fromYearId,
         toAcademicYearId: toYearId,
-        targetSectionId: preview.outcome === "PROMOTED" ? targetSectionId : undefined,
+        assignments,
       });
-      setDone(result.items.length);
+      setConfirmedCount(result.items.length);
       setPreview(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to confirm promotion");
@@ -152,34 +237,100 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
 
       {error && <Alert tone="danger">{error}</Alert>}
 
-      {done !== null && (
+      {confirmedCount !== null && (
         <Alert tone="success">
-          Promotion confirmed — {done} student{done === 1 ? "" : "s"} updated.
+          Promotion confirmed — {confirmedCount} student{confirmedCount === 1 ? "" : "s"} updated.
         </Alert>
       )}
 
       {preview && (
         <Card padding="none">
           <CardHeader
-            title={OUTCOME_LABEL[preview.outcome]}
-            description={`${preview.currentClass.name}${preview.nextClass ? ` → ${preview.nextClass.name}` : ""}`}
+            title={`This section's natural outcome: ${NATURAL_OUTCOME_LABEL[preview.naturalOutcome]}`}
+            description={`${preview.currentClass.name}${preview.nextClass ? ` → ${preview.nextClass.name}` : ""} — review every student below; Incomplete students need a manual decision.`}
           />
           <div className="p-5">
             {preview.students.length === 0 ? (
               <EmptyState title="No active students" description="Nothing to promote in this section for that year." />
             ) : (
               <>
-                <div className="flex flex-wrap gap-2">
-                  {preview.students.map((s) => (
-                    <Badge key={s.studentId}>
-                      #{s.rollNumber} {s.firstName} {s.lastName}
-                    </Badge>
-                  ))}
+                <div className="overflow-x-auto rounded-xl border border-border">
+                  <table className="w-full min-w-[1100px] text-left text-sm">
+                    <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+                      <tr>
+                        <th className="px-4 py-2.5">Student</th>
+                        <th className="px-4 py-2.5">Student ID</th>
+                        <th className="px-4 py-2.5">Current Class/Section</th>
+                        <th className="px-4 py-2.5">Term 1</th>
+                        <th className="px-4 py-2.5">Term 2</th>
+                        <th className="px-4 py-2.5">Annual Result</th>
+                        <th className="px-4 py-2.5">Eligibility</th>
+                        <th className="px-4 py-2.5">Outcome</th>
+                        <th className="px-4 py-2.5">Destination</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {preview.students.map((s) => {
+                        const outcome = outcomes.get(s.enrollmentId) ?? "";
+                        const destinationPool = outcome === "PROMOTED" ? preview.nextClassSections : preview.currentClassSections;
+                        return (
+                          <tr key={s.enrollmentId}>
+                            <td className="px-4 py-3 text-foreground">
+                              {s.firstName} {s.lastName}
+                            </td>
+                            <td className="px-4 py-3 text-foreground-soft">{s.studentNumber}</td>
+                            <td className="px-4 py-3 text-foreground-soft">
+                              {preview.currentClass.name} · #{s.rollNumber}
+                            </td>
+                            <td className="px-4 py-3 text-foreground-soft">{formatPercent(s.term1Percentage)}</td>
+                            <td className="px-4 py-3 text-foreground-soft">{formatPercent(s.term2Percentage)}</td>
+                            <td className="px-4 py-3 font-medium text-foreground">{formatPercent(s.annualPercentage)}</td>
+                            <td className="px-4 py-3">
+                              <EligibilityBadge eligible={s.eligible} />
+                            </td>
+                            <td className="px-4 py-3">
+                              <Select
+                                value={outcome}
+                                onChange={(e) => setOutcomeFor(s.enrollmentId, e.target.value as PromotionOutcome | "")}
+                                className="w-40"
+                                aria-label={`Outcome for ${s.firstName} ${s.lastName}`}
+                              >
+                                <option value="">Review…</option>
+                                <option value={preview.naturalOutcome}>{NATURAL_OUTCOME_LABEL[preview.naturalOutcome]}</option>
+                                <option value="RETAINED">Retain</option>
+                              </Select>
+                            </td>
+                            <td className="px-4 py-3">
+                              {needsDestination(outcome) ? (
+                                <Select
+                                  value={destinations.get(s.enrollmentId) ?? ""}
+                                  onChange={(e) =>
+                                    setDestinations((prev) => new Map(prev).set(s.enrollmentId, e.target.value))
+                                  }
+                                  className="w-44"
+                                  aria-label={`Destination section for ${s.firstName} ${s.lastName}`}
+                                >
+                                  <option value="">Select…</option>
+                                  {destinationPool.map((sec) => (
+                                    <option key={sec.id} value={sec.id}>
+                                      {sec.name} — {sec.available === null ? "Unlimited" : `${sec.available} available`}
+                                    </option>
+                                  ))}
+                                </Select>
+                              ) : (
+                                <span className="text-foreground-muted">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
 
                 <div className="mt-5 grid grid-cols-1 gap-4 border-t border-border pt-5 sm:grid-cols-2">
-                  <FormField label="To academic year" required>
-                    <Select required value={toYearId} onChange={(e) => setToYearId(e.target.value)}>
+                  <FormField label="To academic year" htmlFor="toAcademicYearId" required>
+                    <Select id="toAcademicYearId" required value={toYearId} onChange={(e) => setToYearId(e.target.value)}>
                       <option value="">Select…</option>
                       {years
                         .filter((y) => y.id !== fromYearId)
@@ -190,33 +341,22 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
                         ))}
                     </Select>
                   </FormField>
-
-                  {preview.outcome === "PROMOTED" && (
-                    <FormField label="Target section" required>
-                      <Select required value={targetSectionId} onChange={(e) => setTargetSectionId(e.target.value)}>
-                        {preview.targetSections.map((s) => (
-                          <option
-                            key={s.id}
-                            value={s.id}
-                            disabled={s.available !== null && s.available < preview.students.length}
-                          >
-                            {s.name} — {s.available === null ? "Unlimited" : `${s.available}/${s.capacity} available`}
-                          </option>
-                        ))}
-                      </Select>
-                    </FormField>
-                  )}
                 </div>
 
                 <Button
                   className="mt-4"
                   icon={<CheckCircle2 className="size-4" />}
                   loading={confirming}
-                  disabled={!toYearId || (preview.outcome === "PROMOTED" && !targetSectionId)}
+                  disabled={!toYearId || !allDecided}
                   onClick={onConfirm}
                 >
-                  Confirm {OUTCOME_LABEL[preview.outcome].toLowerCase()}
+                  Confirm promotion
                 </Button>
+                {!allDecided && (
+                  <p className="mt-2 text-sm text-foreground-muted">
+                    Every student needs an outcome — and a destination section for Promote/Retain — before you can confirm.
+                  </p>
+                )}
               </>
             )}
           </div>

@@ -439,6 +439,18 @@ async function seedDevAuthFixtures() {
     });
   }
 
+  // Every AcademicYear has exactly Term 1 and Term 2 — this seed predates
+  // that invariant (created directly via Prisma, not AcademicYearsService),
+  // so a fresh seed run has to catch it up too, same reasoning as the
+  // Division upsert above.
+  await prisma.term.createMany({
+    data: [
+      { academicYearId: academicYear.id, name: "Term 1", weight: 50 },
+      { academicYearId: academicYear.id, name: "Term 2", weight: 50 },
+    ],
+    skipDuplicates: true,
+  });
+
   const klass = await prisma.class.upsert({
     where: { divisionId_level: { divisionId: division.id, level: 1 } },
     update: {},

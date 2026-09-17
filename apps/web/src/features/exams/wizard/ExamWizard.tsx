@@ -44,7 +44,14 @@ export function ExamWizard({ schoolId }: { schoolId: string }) {
         setClasses(c);
         setSubjects(s);
         const current = y.find((year) => year.isCurrent) ?? y[0];
-        if (current) setState((prev) => ({ ...prev, academicYearId: prev.academicYearId || current.id }));
+        if (current) {
+          const term1 = current.terms.find((t) => t.name === "Term 1");
+          setState((prev) => ({
+            ...prev,
+            academicYearId: prev.academicYearId || current.id,
+            termId: prev.termId || term1?.id || "",
+          }));
+        }
       })
       .catch((err) => setLoadError(err instanceof ApiError ? err.message : "Failed to load form data"));
   }, [accessToken, schoolId]);
@@ -80,6 +87,7 @@ export function ExamWizard({ schoolId }: { schoolId: string }) {
       );
       const exam = await api.createExam(accessToken, schoolId, {
         academicYearId: state.academicYearId,
+        termId: state.termId,
         name: state.name,
         type: state.type,
         startDate: state.startDate || undefined,

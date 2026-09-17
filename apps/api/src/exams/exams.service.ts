@@ -81,7 +81,7 @@ export class ExamsService {
 
     const exams = await this.prisma.exam.findMany({
       where: { schoolId },
-      include: { examSubjects: { include: { class: true, subject: true } } },
+      include: { examSubjects: { include: { class: true, subject: true } }, term: true },
       orderBy: { createdAt: "desc" },
     });
 
@@ -107,6 +107,11 @@ export class ExamsService {
 
     const year = await this.prisma.academicYear.findFirst({ where: { id: dto.academicYearId, schoolId } });
     if (!year) throw new BadRequestException("That academic year does not belong to this school");
+
+    if (dto.termId) {
+      const term = await this.prisma.term.findFirst({ where: { id: dto.termId, academicYearId: dto.academicYearId } });
+      if (!term) throw new BadRequestException("That term does not belong to the selected academic year");
+    }
 
     // The wizard's bulk step: every pair must be a real ClassSubject
     // relationship, not just a class and a subject that each independently
@@ -138,6 +143,7 @@ export class ExamsService {
           data: {
             schoolId,
             academicYearId: dto.academicYearId,
+            termId: dto.termId,
             name: dto.name,
             type: dto.type,
             startDate: dto.startDate ? new Date(dto.startDate) : undefined,
@@ -167,7 +173,7 @@ export class ExamsService {
 
         return tx.exam.findUniqueOrThrow({
           where: { id: exam.id },
-          include: { examSubjects: { include: { class: true, subject: true } } },
+          include: { examSubjects: { include: { class: true, subject: true } }, term: true },
         });
         // Prisma's interactive-transaction default is 5s — comfortable now
         // that subject creation is one batched insert instead of one round
@@ -1033,5 +1039,67 @@ export class ExamsService {
         throw new ForbiddenException("You are not assigned to teach this subject in this section for this year");
       }
     }
+  }
+
+  // One student's percentage for one term, from raw marks — never a stored,
+  // separately-maintained number. SUM(marksObtained)/SUM(maxMarks) across
+  // every PUBLISHED result this enrollment has for an exam belonging to
+  // this term: a subject the student has no result for simply contributes
+  // nothing to either sum (never a fabricated 0), and only PUBLISHED counts
+  // as "finalized" — the exact same bar the Student/Parent Portal already
+  // uses (see StudentPortalService.getMyResults), not a new rule invented
+  // for promotion. Returns null ("Incomplete") when this enrollment has no
+  // published results at all for this term yet.
+  async getTermPercentage(enrollmentId: string, termId: string): Promise<number | null> {
+    const results = await this.prisma.result.findMany({
+      where: {
+        enrollmentId,
+        resultSubmission: { status: "PUBLISHED" },
+        examSubject: { exam: { termId } },
+      },
+      select: { marksObtained: true, examSubject: { select: { maxMarks: true } } },
+    });
+    if (results.length === 0) return null;
+
+    const totalMarks = results.reduce((sum, r) => sum + Number(r.marksObtained), 0);
+    const totalMax = results.reduce((sum, r) => sum + r.examSubject.maxMarks, 0);
+    if (totalMax === 0) return null;
+    return Math.round((totalMarks / totalMax) * 10000) / 100;
+  }
+
+  // Combines Term 1 + Term 2 using this academic year's own configured
+  // weights (see Term.weight) — never a hard-coded 50/50. If either term
+  // has zero published results, the annual result is genuinely
+  // undetermined ("Incomplete"), not computed from the one term that does
+  // exist and never defaulted to a failing 0 — a school with a real gap in
+  // its data must see that gap, not a fabricated outcome.
+  async getAnnualResult(
+    enrollmentId: string,
+    academicYearId: string,
+  ): Promise<{
+    term1Percentage: number | null;
+    term2Percentage: number | null;
+    annualPercentage: number | null;
+    eligible: boolean | null;
+  }> {
+    const terms = await this.prisma.term.findMany({ where: { academicYearId } });
+    const term1 = terms.find((t) => t.name === "Term 1");
+    const term2 = terms.find((t) => t.name === "Term 2");
+    if (!term1 || !term2) {
+      return { term1Percentage: null, term2Percentage: null, annualPercentage: null, eligible: null };
+    }
+
+    const [term1Percentage, term2Percentage] = await Promise.all([
+      this.getTermPercentage(enrollmentId, term1.id),
+      this.getTermPercentage(enrollmentId, term2.id),
+    ]);
+
+    if (term1Percentage === null || term2Percentage === null) {
+      return { term1Percentage, term2Percentage, annualPercentage: null, eligible: null };
+    }
+
+    const annualPercentage =
+      Math.round((term1Percentage * (term1.weight / 100) + term2Percentage * (term2.weight / 100)) * 100) / 100;
+    return { term1Percentage, term2Percentage, annualPercentage, eligible: annualPercentage >= 50 };
   }
 }

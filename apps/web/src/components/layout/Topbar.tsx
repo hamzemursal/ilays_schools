@@ -6,7 +6,6 @@ import Link from "next/link";
 import {
   ArrowRight,
   Bell,
-  Camera,
   Check,
   ChevronDown,
   GraduationCap,
@@ -16,40 +15,37 @@ import {
   Menu,
   Search,
   Settings,
-  Trash2,
   UserCircle,
   X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { Avatar } from "@/components/ui/Avatar";
-import { useToast } from "@/components/ui/Toast";
 import { api, type AppNotification, type School, type SchoolType } from "@/lib/api";
-import { useCurrentSchool } from "./Sidebar";
+import { contextRoleLabel } from "./Sidebar";
 import { orgNavItems, schoolNavItems, type NavItem } from "./nav-config";
 import { SchoolTypeBadge } from "@/features/my-classes/components/SchoolTypeBadge";
 import { DECORATIVE_TONE_PARTS } from "@/components/ui/decorativeTones";
 
-// The role label shown in the context block's "{LABEL} · CURRENT SCHOOL"
-// subtitle — Super Admin and Organization Admin get their own explicit
-// label; every other schools.view holder (Central Finance/HR viewers) gets
-// a generic one rather than a guess at which of their several roles is
-// "the" one worth naming.
-function contextRoleLabel(roles: string[]): string {
-  if (roles.includes("SUPER_ADMIN")) return "Super Admin";
-  if (roles.includes("ORGANIZATION_ADMIN")) return "Org Admin";
-  return "Admin";
-}
-
-export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
+export function Topbar({
+  onMenuClick,
+  canSwitchSchools,
+  resolvedCurrentSchool,
+  schools,
+}: {
+  onMenuClick: () => void;
+  canSwitchSchools: boolean;
+  resolvedCurrentSchool: { id: string; name: string; logoUrl: string | null } | null;
+  schools: School[] | null;
+}) {
   const router = useRouter();
-  const { user, accessToken, logout, refreshProfile } = useAuth();
-  const currentSchool = useCurrentSchool(user);
-  const canManageBranding = !!user?.permissions.includes("settings.manage") && !!currentSchool;
-  // Same permission the "Schools" org nav item already gates on — a plain
-  // School Admin (no cross-school reach) never gets a switcher at all,
-  // since they have nothing to switch to; Super Admin, Organization Admin,
-  // and the Central Finance/HR roles do.
-  const canSwitchSchools = !!user?.permissions.includes("schools.view");
+  const { user, accessToken, logout } = useAuth();
+  // The school-context switcher only ever makes sense once a Super Admin
+  // has actually entered a specific school's workspace — on the
+  // organization-level pages (Dashboard, Schools) there is no "current
+  // school" to show or switch from, so the header stays clean there
+  // (search + notifications only), exactly like a School Admin's header
+  // always does.
+  const showSwitcher = canSwitchSchools && !!resolvedCurrentSchool;
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -84,9 +80,9 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
 
   const navItems: NavItem[] = useMemo(() => {
     if (!user) return [];
-    const school = currentSchool ? schoolNavItems(user, currentSchool.id) : [];
+    const school = resolvedCurrentSchool ? schoolNavItems(user, resolvedCurrentSchool.id) : [];
     return [...school, ...orgNavItems(user)];
-  }, [user, currentSchool]);
+  }, [user, resolvedCurrentSchool]);
 
   const results = useMemo(() => {
     if (!query.trim()) return navItems;
@@ -132,33 +128,14 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
         <Menu className="size-5" />
       </button>
 
-      <div className="flex shrink-0 items-center gap-2.5">
-        {accessToken && currentSchool ? (
-          <SchoolBrandingEditor
-            accessToken={accessToken}
-            schoolId={currentSchool.id}
-            logoUrl={currentSchool.logoUrl}
-            editable={canManageBranding}
-            onChanged={refreshProfile}
-          />
-        ) : (
-          <div className="flex size-9 items-center justify-center rounded-full bg-accent text-white">
-            <GraduationCap className="size-4.5" />
-          </div>
-        )}
-        {canSwitchSchools && accessToken ? (
-          <SchoolContextSwitcher
-            accessToken={accessToken}
-            currentSchoolId={currentSchool?.id ?? null}
-            fallbackName={currentSchool?.name ?? "Ilays Schools"}
-            roleLabel={contextRoleLabel(user.roles)}
-          />
-        ) : (
-          <span className="max-w-[110px] truncate font-semibold text-foreground sm:max-w-[220px]">
-            {currentSchool?.name ?? "Ilays Schools"}
-          </span>
-        )}
-      </div>
+      {showSwitcher && resolvedCurrentSchool && (
+        <SchoolContextSwitcher
+          currentSchoolId={resolvedCurrentSchool.id}
+          fallbackName={resolvedCurrentSchool.name}
+          roleLabel={contextRoleLabel(user.roles)}
+          schools={schools}
+        />
+      )}
 
       <div className="relative flex-1 max-w-md">
         {searchOpen ? (
@@ -336,41 +313,30 @@ function schoolIconTone(type: SchoolType): { soft: string; text: string } {
   return { soft: "bg-accent-soft", text: "text-accent" };
 }
 
-// The header's "which school am I looking at" control. Fetches the real,
-// actor-scoped school list once on mount (the same endpoint the Schools
-// page uses — already correctly scoped server-side via accessibleWhere, so
-// a School Admin with schools.view still only ever sees their own
-// authorized schools here, never another organization's or another
-// admin's). Fetching on mount, not lazily on open, matters here: a Super
-// Admin never has a UserSchool row (that's what makes them org-wide), so
-// Sidebar's useCurrentSchool can't resolve their current school's real name
-// on its own — this list is what fills that in, the moment it loads.
+// The header's "which school am I looking at" control — only ever rendered
+// (see Topbar's showSwitcher) once Super Admin has actually entered a
+// specific school's workspace; the organization-level pages (Dashboard,
+// Schools) have no "current school" to show or switch from, so this never
+// mounts there. `schools` is the actor-scoped list AppShell already fetched
+// once for both Sidebar and Topbar to share — never fetched again here, so
+// opening this dropdown never issues a second request for the same data.
 // Reuses the URL-is-the-context model everywhere else in this app already
 // relies on (see Sidebar's useCurrentSchool) — picking a school just
 // navigates there, no separate stored "selected school" state.
 function SchoolContextSwitcher({
-  accessToken,
   currentSchoolId,
   fallbackName,
   roleLabel,
+  schools,
 }: {
-  accessToken: string;
-  currentSchoolId: string | null;
+  currentSchoolId: string;
   fallbackName: string;
   roleLabel: string;
+  schools: School[] | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [schools, setSchools] = useState<School[] | null>(null);
-  const [error, setError] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    api
-      .listSchools(accessToken)
-      .then(setSchools)
-      .catch(() => setError(true));
-  }, [accessToken]);
 
   useEffect(() => {
     if (!open) return;
@@ -388,9 +354,6 @@ function SchoolContextSwitcher({
     };
   }, [open]);
 
-  const current = schools?.find((s) => s.id === currentSchoolId);
-  const displayName = current?.name ?? fallbackName;
-
   return (
     <div ref={ref} className="relative">
       <button
@@ -402,7 +365,7 @@ function SchoolContextSwitcher({
         className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-left hover:bg-surface-hover"
       >
         <span className="flex min-w-0 flex-col leading-tight">
-          <span className="max-w-[140px] truncate font-semibold text-foreground sm:max-w-[220px]">{displayName}</span>
+          <span className="max-w-[140px] truncate font-semibold text-foreground sm:max-w-[220px]">{fallbackName}</span>
           <span className="text-[10px] font-semibold uppercase tracking-wide text-foreground-muted">
             {roleLabel} · Current school
           </span>
@@ -426,9 +389,7 @@ function SchoolContextSwitcher({
             </Link>
           </div>
           <div className="my-1 h-px bg-border" />
-          {error ? (
-            <p className="px-3 py-2 text-sm text-danger">Couldn&apos;t load your schools.</p>
-          ) : !schools ? (
+          {!schools ? (
             <p className="flex items-center gap-2 px-3 py-2 text-sm text-foreground-muted">
               <Loader2 className="size-4 animate-spin" /> Loading…
             </p>
@@ -475,116 +436,3 @@ function SchoolContextSwitcher({
   );
 }
 
-// A circular logo with an edit affordance overlaid — only rendered as
-// editable for a user with settings.manage (currently School Admin, Super
-// Admin, Organization Admin; see seed.ts). Change and remove both re-fetch
-// the profile via onChanged so every open tab's header reflects the new
-// logo without a full reload.
-function SchoolBrandingEditor({
-  accessToken,
-  schoolId,
-  logoUrl,
-  editable,
-  onChanged,
-}: {
-  accessToken: string;
-  schoolId: string;
-  logoUrl: string | null;
-  editable: boolean;
-  onChanged: () => Promise<void>;
-}) {
-  const { show } = useToast();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setMenuOpen(false);
-    setBusy(true);
-    try {
-      await api.uploadSchoolLogo(accessToken, schoolId, file);
-      await onChanged();
-      show("School logo updated.");
-    } catch (err) {
-      show(err instanceof Error ? err.message : "Couldn't upload the logo.", "danger");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleRemove() {
-    setMenuOpen(false);
-    setBusy(true);
-    try {
-      await api.removeSchoolLogo(accessToken, schoolId);
-      await onChanged();
-      show("School logo removed.");
-    } catch (err) {
-      show(err instanceof Error ? err.message : "Couldn't remove the logo.", "danger");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="relative">
-      <div className="flex size-9 items-center justify-center overflow-hidden rounded-full bg-accent text-white">
-        {busy ? (
-          <Loader2 className="size-4 animate-spin" />
-        ) : logoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- Cloudinary URL, not a local/static asset
-          <img src={logoUrl} alt="" className="size-full object-cover" />
-        ) : (
-          <GraduationCap className="size-4.5" />
-        )}
-      </div>
-
-      {editable && !busy && (
-        <>
-          <button
-            onClick={() => setMenuOpen((v) => !v)}
-            aria-label="Edit school logo"
-            className="absolute -right-1 -bottom-1 flex size-4.5 items-center justify-center rounded-full border-2 border-accent-soft bg-accent text-white hover:bg-accent-hover"
-          >
-            <Camera className="size-2.5" />
-          </button>
-
-          {menuOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
-              <div className="absolute left-0 z-50 mt-2 w-44 rounded-xl border border-border bg-background p-1 shadow-lg">
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-foreground-soft hover:bg-surface-hover hover:text-foreground"
-                >
-                  <Camera className="size-4" />
-                  {logoUrl ? "Change logo" : "Upload logo"}
-                </button>
-                {logoUrl && (
-                  <button
-                    onClick={handleRemove}
-                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-danger hover:bg-danger-soft"
-                  >
-                    <Trash2 className="size-4" />
-                    Remove logo
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-        </>
-      )}
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/jpeg,image/png,image/webp"
-        className="hidden"
-        onChange={handleFile}
-      />
-    </div>
-  );
-}

@@ -55,6 +55,29 @@ export function SuperAdminDashboard() {
 
   return (
     <div className="space-y-6">
+      {/* An organization-level hero, distinct from the School Admin
+          dashboard's per-school "Welcome back, {school}" header — this is
+          the one place the "SUPER ADMIN / all schools" identity is stated
+          in plain language, not just implied by the sidebar badge. The one
+          real figure here (schools.length) is the same total the stat
+          cards below already show — no separate fetch, no invented number. */}
+      <Card className="flex flex-wrap items-center justify-between gap-4 border-accent/20 bg-accent-soft/40">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-accent">Super Admin</p>
+          <h1 className="mt-1 text-xl font-semibold text-foreground">Welcome back!</h1>
+          <p className="mt-0.5 text-sm text-foreground-soft">Manage all Ilays Schools from one place.</p>
+        </div>
+        <div className="flex items-center gap-3 rounded-xl bg-background px-5 py-3 shadow-sm">
+          <div className="flex size-10 items-center justify-center rounded-lg bg-accent-soft text-accent">
+            <Building2 className="size-5" />
+          </div>
+          <div>
+            <p className="text-2xl font-semibold leading-none text-foreground">{totals.schools}</p>
+            <p className="mt-1 text-xs font-medium text-foreground-muted">{totals.schools === 1 ? "School" : "Schools"}</p>
+          </div>
+        </div>
+      </Card>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         <StatCard icon={Building2} label="Total schools" value={totals.schools} />
         <StatCard icon={SchoolIcon} label="Primary schools" value={totals.primarySchools} tone="teal" />

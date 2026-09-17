@@ -1,31 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { School } from "@/lib/api";
-import { ToastProvider } from "@/components/ui/Toast";
 import { Topbar } from "./Topbar";
 
-function renderTopbar() {
-  return render(
-    <ToastProvider>
-      <Topbar onMenuClick={vi.fn()} />
-    </ToastProvider>,
-  );
-}
-
-const apiMock = vi.hoisted(() => ({
-  listMyAppNotifications: vi.fn().mockResolvedValue([]),
-  listSchools: vi.fn(),
-}));
+const apiMock = vi.hoisted(() => ({ listMyAppNotifications: vi.fn().mockResolvedValue([]) }));
 vi.mock("@/lib/api", () => ({ api: apiMock }));
 
 const authMock = vi.hoisted(() => ({ useAuth: vi.fn() }));
 vi.mock("@/lib/auth-context", () => ({ useAuth: authMock.useAuth }));
 
-const navMock = vi.hoisted(() => ({ pathname: "/dashboard", push: vi.fn() }));
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: navMock.push }),
-  usePathname: () => navMock.pathname,
-}));
+const navMock = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: navMock.push }) }));
 
 function school(overrides: Partial<School> & { id: string; name: string }): School {
   return {
@@ -53,6 +38,18 @@ function superAdminUser() {
   };
 }
 
+function renderTopbar(props: Partial<React.ComponentProps<typeof Topbar>> = {}) {
+  return render(
+    <Topbar
+      onMenuClick={vi.fn()}
+      canSwitchSchools={false}
+      resolvedCurrentSchool={null}
+      schools={null}
+      {...props}
+    />,
+  );
+}
+
 function openSwitcher(user: ReturnType<typeof import("@testing-library/user-event").default.setup>) {
   return user.click(screen.getByRole("button", { name: "Switch school context" }));
 }
@@ -60,121 +57,115 @@ function openSwitcher(user: ReturnType<typeof import("@testing-library/user-even
 beforeEach(() => {
   vi.clearAllMocks();
   apiMock.listMyAppNotifications.mockResolvedValue([]);
-  navMock.pathname = "/dashboard";
 });
 
-describe("Topbar school context — Super Admin (organization-wide reach)", () => {
-  it("fetches the real school list on mount, not lazily on open — so the current school's real name can resolve immediately", () => {
-    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn(), refreshProfile: vi.fn() });
-    apiMock.listSchools.mockResolvedValue([]);
-    renderTopbar();
+describe("Topbar — school-context switcher visibility", () => {
+  it("shows the switcher only when Super Admin has actually entered a school's workspace", () => {
+    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn() });
+    renderTopbar({
+      canSwitchSchools: true,
+      resolvedCurrentSchool: { id: "school-a", name: "Xaafuun Secondary School", logoUrl: null },
+      schools: [school({ id: "school-a", name: "Xaafuun Secondary School" })],
+    });
 
-    expect(apiMock.listSchools).toHaveBeenCalledWith("token-1");
+    expect(screen.getByRole("button", { name: "Switch school context" })).toBeInTheDocument();
+    expect(screen.getByText("Xaafuun Secondary School")).toBeInTheDocument();
   });
 
-  it("replaces the generic placeholder with the real current school's name once the list loads", async () => {
-    navMock.pathname = "/schools/school-a/dashboard";
-    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn(), refreshProfile: vi.fn() });
-    apiMock.listSchools.mockResolvedValue([school({ id: "school-a", name: "Xaafuun Secondary School" })]);
-    renderTopbar();
+  it("hides the switcher entirely on organization-level pages, even for Super Admin — no current school to show or switch from", () => {
+    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn() });
+    renderTopbar({ canSwitchSchools: true, resolvedCurrentSchool: null, schools: [] });
 
-    expect(await screen.findByText("Xaafuun Secondary School")).toBeInTheDocument();
-    expect(screen.queryByText("This school")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Switch school context" })).not.toBeInTheDocument();
   });
 
-  it("shows the role label paired with CURRENT SCHOOL under the school name", async () => {
-    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn(), refreshProfile: vi.fn() });
-    apiMock.listSchools.mockResolvedValue([]);
-    renderTopbar();
+  it("never shows the switcher for a School Admin (no schools.view), even inside their own school's workspace", () => {
+    authMock.useAuth.mockReturnValue({
+      user: { id: "u2", email: "admin@school.example", permissions: ["academic.view"], roles: ["SCHOOL_ADMIN"], schools: [] },
+      accessToken: "token-1",
+      logout: vi.fn(),
+    });
+    renderTopbar({
+      canSwitchSchools: false,
+      resolvedCurrentSchool: { id: "school-a", name: "Xaafuun Secondary School", logoUrl: null },
+    });
 
-    expect(await screen.findByText("Super Admin · Current school")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Switch school context" })).not.toBeInTheDocument();
+  });
+
+  it("shows the role label paired with 'Current school' under the name", () => {
+    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn() });
+    renderTopbar({
+      canSwitchSchools: true,
+      resolvedCurrentSchool: { id: "school-a", name: "Xaafuun Secondary School", logoUrl: null },
+      schools: [],
+    });
+
+    expect(screen.getByText("Super Admin · Current school")).toBeInTheDocument();
   });
 });
 
-describe("Topbar school switcher — Super Admin dropdown", () => {
-  it("shows every authorized school with real student/teacher/staff counts and a type badge", async () => {
+describe("Topbar — school switcher dropdown", () => {
+  const currentSchool = { id: "school-a", name: "Xaafuun Secondary School", logoUrl: null };
+  const twoSchools = [
+    school({ id: "school-a", name: "Xaafuun Secondary School", type: "SECONDARY", studentCount: 680, teacherCount: 48, staffCount: 24 }),
+    school({ id: "school-b", name: "Masalla Primary School", type: "PRIMARY", studentCount: 420, teacherCount: 32, staffCount: 18 }),
+  ];
+
+  it("shows every authorized school (from the schools prop — never fetched by Topbar itself) with real counts and a type badge", async () => {
     const user = (await import("@testing-library/user-event")).default.setup();
-    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn(), refreshProfile: vi.fn() });
-    apiMock.listSchools.mockResolvedValue([
-      school({ id: "school-a", name: "Xaafuun Secondary School", type: "SECONDARY", studentCount: 680, teacherCount: 48, staffCount: 24 }),
-      school({ id: "school-b", name: "Masalla Primary School", type: "PRIMARY", studentCount: 420, teacherCount: 32, staffCount: 18 }),
-    ]);
-    renderTopbar();
+    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn() });
+    renderTopbar({ canSwitchSchools: true, resolvedCurrentSchool: currentSchool, schools: twoSchools });
     await openSwitcher(user);
 
-    expect(await screen.findByText("Xaafuun Secondary School")).toBeInTheDocument();
     expect(screen.getByText("680 students · 48 teachers · 24 staff")).toBeInTheDocument();
     expect(screen.getByText("Masalla Primary School")).toBeInTheDocument();
     expect(screen.getByText("Secondary")).toBeInTheDocument();
     expect(screen.getByText("Primary")).toBeInTheDocument();
   });
 
-  it("visually marks the current school as selected, with a checkmark, and no other row", async () => {
-    navMock.pathname = "/schools/school-a/dashboard";
+  it("visually marks only the current school as selected", async () => {
     const user = (await import("@testing-library/user-event")).default.setup();
-    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn(), refreshProfile: vi.fn() });
-    apiMock.listSchools.mockResolvedValue([
-      school({ id: "school-a", name: "Xaafuun Secondary School" }),
-      school({ id: "school-b", name: "Masalla Primary School" }),
-    ]);
-    renderTopbar();
+    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn() });
+    renderTopbar({ canSwitchSchools: true, resolvedCurrentSchool: currentSchool, schools: twoSchools });
     await openSwitcher(user);
 
-    const rows = await screen.findAllByRole("menuitem");
+    const rows = screen.getAllByRole("menuitem");
     const xaafuunRow = rows.find((r) => r.textContent?.includes("Xaafuun"))!;
     const masallaRow = rows.find((r) => r.textContent?.includes("Masalla"))!;
     expect(xaafuunRow).toHaveAttribute("aria-current", "true");
     expect(masallaRow).not.toHaveAttribute("aria-current");
   });
 
-  it("shows 'View All Schools' linking to the existing Schools page, at the top of the dropdown", async () => {
+  it("shows 'View All Schools' linking to the existing Schools page", async () => {
     const user = (await import("@testing-library/user-event")).default.setup();
-    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn(), refreshProfile: vi.fn() });
-    apiMock.listSchools.mockResolvedValue([school({ id: "school-a", name: "Xaafuun Secondary School" })]);
-    renderTopbar();
+    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn() });
+    renderTopbar({ canSwitchSchools: true, resolvedCurrentSchool: currentSchool, schools: twoSchools });
     await openSwitcher(user);
 
-    const link = await screen.findByRole("link", { name: /View All Schools/ });
+    const link = screen.getByRole("link", { name: /View All Schools/ });
     expect(link).toHaveAttribute("href", "/schools");
   });
 
   it("navigates to the chosen school's dashboard on click", async () => {
     const user = (await import("@testing-library/user-event")).default.setup();
-    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn(), refreshProfile: vi.fn() });
-    apiMock.listSchools.mockResolvedValue([school({ id: "school-a", name: "Xaafuun Secondary School" })]);
-    renderTopbar();
+    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn() });
+    renderTopbar({ canSwitchSchools: true, resolvedCurrentSchool: currentSchool, schools: twoSchools });
     await openSwitcher(user);
-    await user.click(await screen.findByText("Xaafuun Secondary School"));
+    await user.click(screen.getByText("Masalla Primary School"));
 
-    expect(navMock.push).toHaveBeenCalledWith("/schools/school-a/dashboard");
+    expect(navMock.push).toHaveBeenCalledWith("/schools/school-b/dashboard");
   });
 
   it("closes when Escape is pressed", async () => {
     const user = (await import("@testing-library/user-event")).default.setup();
-    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn(), refreshProfile: vi.fn() });
-    apiMock.listSchools.mockResolvedValue([school({ id: "school-a", name: "Xaafuun Secondary School" })]);
-    renderTopbar();
+    authMock.useAuth.mockReturnValue({ user: superAdminUser(), accessToken: "token-1", logout: vi.fn() });
+    renderTopbar({ canSwitchSchools: true, resolvedCurrentSchool: currentSchool, schools: twoSchools });
     await openSwitcher(user);
-    await screen.findByText("Xaafuun Secondary School");
+    expect(screen.getByText("Masalla Primary School")).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
 
-    expect(screen.queryByText("Xaafuun Secondary School")).not.toBeInTheDocument();
-  });
-});
-
-describe("Topbar school switcher — School Admin (no schools.view)", () => {
-  it("never shows a switcher trigger, and never fetches the schools list — a School Admin has nothing authorized to switch to", () => {
-    authMock.useAuth.mockReturnValue({
-      user: { id: "u2", email: "admin@school.example", permissions: ["academic.view"], roles: ["SCHOOL_ADMIN"], schools: [] },
-      accessToken: "token-1",
-      logout: vi.fn(),
-      refreshProfile: vi.fn(),
-    });
-    renderTopbar();
-
-    expect(screen.queryByRole("button", { name: "Switch school context" })).not.toBeInTheDocument();
-    expect(screen.queryByText("View All Schools")).not.toBeInTheDocument();
-    expect(apiMock.listSchools).not.toHaveBeenCalled();
+    expect(screen.queryByText("Masalla Primary School")).not.toBeInTheDocument();
   });
 });

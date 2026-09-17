@@ -62,6 +62,20 @@ function summary(overrides: Partial<SystemSummary> = {}): SystemSummary {
   };
 }
 
+describe("SuperAdminDashboard — organization-level hero", () => {
+  it("shows the Super Admin identity and the real school count, distinct from the School Admin's per-school welcome header", async () => {
+    apiMock.getSystemSummary.mockResolvedValue(summary());
+    render(<SuperAdminDashboard />);
+
+    expect(await screen.findByText("Super Admin")).toBeInTheDocument();
+    expect(screen.getByText("Manage all Ilays Schools from one place.")).toBeInTheDocument();
+    // The hero's own school count is the same real total the stat cards
+    // show — not a second, independently-fetched (and potentially
+    // divergent) number.
+    expect(screen.getAllByText("2").length).toBeGreaterThan(0);
+  });
+});
+
 describe("SuperAdminDashboard — real, non-hard-coded organization data", () => {
   it("shows a real total staff figure — summed from the Staff model, not the teacher count relabeled", async () => {
     apiMock.getSystemSummary.mockResolvedValue(summary());

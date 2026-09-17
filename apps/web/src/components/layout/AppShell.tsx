@@ -4,18 +4,50 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { api, type School } from "@/lib/api";
 import { SelectedChildProvider } from "@/features/parent-portal/SelectedChildContext";
 import { ChildSwitcher } from "@/features/parent-portal/ChildSwitcher";
 import { ChangePasswordForm } from "@/features/auth/ChangePasswordForm";
 import { TwoFactorSection } from "@/features/account/TwoFactorSection";
 import { GraduationCap, ShieldCheck } from "lucide-react";
-import { Sidebar } from "./Sidebar";
+import { Sidebar, useCurrentSchool } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { user, accessToken, loading, refreshProfile } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Same permission the "Schools" org nav item already gates on — an
+  // org-wide account (Super Admin, Organization Admin, or a Central
+  // Finance/HR viewer). Only they ever need the full authorized-schools
+  // list, so nobody else pays for this fetch.
+  const canSwitchSchools = !!user?.permissions.includes("schools.view");
+  const currentSchoolFromUrl = useCurrentSchool(user);
+  const [schools, setSchools] = useState<School[] | null>(null);
+
+  // Fetched once here, in the one common parent of Sidebar and Topbar, and
+  // passed down to both — not fetched separately by each, which would just
+  // be the same request twice. This is also what resolves a Super Admin's
+  // real current-school name/logo: they never have a UserSchool row (that's
+  // what makes them org-wide), so useCurrentSchool's own URL-only fallback
+  // can't know it on its own.
+  useEffect(() => {
+    if (!canSwitchSchools || !accessToken) return;
+    api
+      .listSchools(accessToken)
+      .then(setSchools)
+      .catch(() => setSchools([]));
+  }, [canSwitchSchools, accessToken]);
+
+  // `schools` (from listSchools) carries the real name but no logoUrl — that
+  // field only ever comes from the actor's own user.schools, which is also
+  // the only case a logo is ever shown (a Super Admin's sidebar always uses
+  // the organization mark, never a viewed school's logo — see Sidebar).
+  const fetchedCurrentSchool = schools?.find((s) => s.id === currentSchoolFromUrl?.id);
+  const resolvedCurrentSchool = currentSchoolFromUrl
+    ? { id: currentSchoolFromUrl.id, name: fetchedCurrentSchool?.name ?? currentSchoolFromUrl.name, logoUrl: currentSchoolFromUrl.logoUrl }
+    : null;
 
   useEffect(() => {
     if (!loading && !user) router.push("/portal");
@@ -78,7 +110,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-surface print:h-auto print:overflow-visible">
       <aside className="hidden w-64 shrink-0 border-r border-border lg:block print:hidden">
-        <Sidebar user={user} />
+        <Sidebar
+          user={user}
+          accessToken={accessToken}
+          canSwitchSchools={canSwitchSchools}
+          resolvedCurrentSchool={resolvedCurrentSchool}
+          onBrandingChanged={refreshProfile}
+        />
       </aside>
 
       {drawerOpen && (
@@ -92,14 +130,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <X className="size-5" />
             </button>
-            <Sidebar user={user} onNavigate={() => setDrawerOpen(false)} />
+            <Sidebar
+              user={user}
+              accessToken={accessToken}
+              canSwitchSchools={canSwitchSchools}
+              resolvedCurrentSchool={resolvedCurrentSchool}
+              onBrandingChanged={refreshProfile}
+              onNavigate={() => setDrawerOpen(false)}
+            />
           </div>
         </div>
       )}
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden print:overflow-visible">
         <div className="print:hidden">
-          <Topbar onMenuClick={() => setDrawerOpen(true)} />
+          <Topbar
+            onMenuClick={() => setDrawerOpen(true)}
+            canSwitchSchools={canSwitchSchools}
+            resolvedCurrentSchool={resolvedCurrentSchool}
+            schools={schools}
+          />
         </div>
         <SelectedChildProvider>
           <main className="flex-1 overflow-y-auto print:overflow-visible">

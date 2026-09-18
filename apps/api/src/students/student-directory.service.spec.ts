@@ -370,3 +370,110 @@ describe("StudentDirectoryService — derived filters", () => {
     expect(result.items).toHaveLength(5);
   });
 });
+
+// Regression coverage for the historical-enrollment-scoping bug: a query for
+// a past academic year used to also require status: "ACTIVE", which is never
+// true for a year the student has since been promoted/retained out of — this
+// simulates a real two-row dataset (one closed historical row, one current
+// row for the same student) and applies the actual `where` clause the
+// service builds against it, the same way Postgres would, so the test fails
+// against the old (buggy) query shape and passes against the fixed one.
+describe("StudentDirectoryService — historical Academic Year scoping (regression)", () => {
+  const HISTORICAL_ROW = {
+    id: "enr-2025",
+    studentId: "student-1",
+    studentNumber: "STU-1",
+    rollNumber: 5,
+    classId: "class-form1",
+    sectionId: "section-a",
+    academicYearId: "year-2025",
+    status: "PROMOTED", // closed once the student moved on to 2026-2027
+    startDate: new Date("2025-01-01"),
+    class: { name: "Form 1" },
+    section: { name: "A" },
+    student: {
+      id: "student-1",
+      firstName: "Hodan",
+      lastName: "Ali",
+      sex: "FEMALE",
+      currentStatus: "ACTIVE",
+      dateOfBirth: new Date("2015-05-01"),
+      userId: null,
+      guardians: [],
+    },
+  };
+  const CURRENT_ROW = {
+    ...HISTORICAL_ROW,
+    id: "enr-2026",
+    rollNumber: 12,
+    classId: "class-form2",
+    sectionId: "section-b",
+    academicYearId: "year-2026",
+    status: "ACTIVE",
+    startDate: new Date("2026-01-01"),
+    class: { name: "Form 2" },
+    section: { name: "B" },
+  };
+
+  function makeTwoYearService() {
+    const { service, prisma } = makeService();
+    const rows = [HISTORICAL_ROW, CURRENT_ROW];
+    prisma.studentEnrollment.findMany.mockImplementation((args: { where: { academicYearId?: string; status?: string; id?: { in: string[] } }; select?: unknown }) => {
+      if (args.select) {
+        // The "candidate ids" pass — replicate Prisma's real AND semantics:
+        // an explicit status filter must actually match, an absent one
+        // matches everything.
+        const matches = rows.filter(
+          (r) => r.academicYearId === args.where.academicYearId && (args.where.status === undefined || r.status === args.where.status),
+        );
+        return Promise.resolve(matches.map((r) => ({ id: r.id })));
+      }
+      // The "full row detail" pass, keyed by id.
+      const ids = args.where.id!.in;
+      return Promise.resolve(rows.filter((r) => ids.includes(r.id)));
+    });
+    return { service, prisma };
+  }
+
+  it("Test A: a student's 2025–2026 enrollment appears when querying Academic Year 2025–2026", async () => {
+    const { service } = makeTwoYearService();
+
+    const result = await service.search(ADMIN_STUDENTS_ONLY, "school-1", { academicYearId: "year-2025" });
+
+    expect(result.total).toBe(1);
+    expect(result.items[0]).toMatchObject({ enrollmentId: "enr-2025", className: "Form 1", sectionName: "A", rollNumber: 5 });
+  });
+
+  it("Test B: the same student's 2026–2027 enrollment appears when querying Academic Year 2026–2027", async () => {
+    const { service } = makeTwoYearService();
+
+    const result = await service.search(ADMIN_STUDENTS_ONLY, "school-1", { academicYearId: "year-2026" });
+
+    expect(result.total).toBe(1);
+    expect(result.items[0]).toMatchObject({ enrollmentId: "enr-2026", className: "Form 2", sectionName: "B", rollNumber: 12 });
+  });
+
+  it("Test C: the 2025–2026 query never uses the student's current (2026–2027) enrollment — no status filter narrows it to only-ACTIVE rows", async () => {
+    const { service, prisma } = makeTwoYearService();
+
+    const result = await service.search(ADMIN_STUDENTS_ONLY, "school-1", { academicYearId: "year-2025" });
+
+    expect(result.items[0].enrollmentId).not.toBe("enr-2026");
+    expect(result.items[0].classId).not.toBe("class-form2");
+    const candidateCall = prisma.studentEnrollment.findMany.mock.calls.find((c) => c[0].select);
+    expect(candidateCall![0].where).not.toHaveProperty("status");
+  });
+
+  it("Test F: ordinary current-year search behavior is unchanged — a single active enrollment still returns for its own year", async () => {
+    const { service, prisma } = makeService();
+    prisma.studentEnrollment.findMany.mockResolvedValueOnce([{ id: "enr-1" }]).mockResolvedValueOnce([enrollmentRow()]);
+
+    const result = await service.search(ADMIN_STUDENTS_ONLY, "school-1", { academicYearId: "year-1" });
+
+    expect(result.total).toBe(1);
+    expect(result.items[0].enrollmentId).toBe("enr-1");
+    const candidateWhere = prisma.studentEnrollment.findMany.mock.calls[0][0].where;
+    expect(candidateWhere.academicYearId).toBe("year-1");
+    expect(candidateWhere.schoolId).toBe("school-1");
+  });
+});

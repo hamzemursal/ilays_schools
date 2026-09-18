@@ -171,3 +171,99 @@ describe("ClassesService.resolveIdentifierOrThrow / resolveSectionIdentifierOrTh
     expect(result).toEqual({ id: "section-real-id", name: "A", classId: "class-real-id" });
   });
 });
+
+// Regression coverage for the historical-enrollment-scoping bug: requesting
+// a specific (possibly past) academic year used to also require
+// status: "ACTIVE", which is never true once a student has been
+// promoted/retained out of that year — so every one of these counts/rosters
+// silently read as empty for any year but the current one.
+describe("ClassesService — historical Academic Year scoping (regression)", () => {
+  let prisma: {
+    class: { findFirst: jest.Mock; findMany: jest.Mock };
+    section: { findFirst: jest.Mock; findMany: jest.Mock };
+    academicYear: { findFirst: jest.Mock };
+    studentEnrollment: { findMany: jest.Mock; count: jest.Mock };
+  };
+  let schools: { findOneAccessibleOrThrow: jest.Mock };
+  let service: ClassesService;
+
+  beforeEach(() => {
+    prisma = {
+      class: { findFirst: jest.fn(), findMany: jest.fn() },
+      section: { findFirst: jest.fn(), findMany: jest.fn() },
+      academicYear: { findFirst: jest.fn() },
+      studentEnrollment: { findMany: jest.fn(), count: jest.fn() },
+    };
+    schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
+    service = new ClassesService(
+      prisma as unknown as PrismaService,
+      schools as unknown as SchoolsService,
+      {} as unknown as AuditService,
+    );
+  });
+
+  it("list(): a specific academic year's section count is scoped by year alone, never combined with status: ACTIVE", async () => {
+    prisma.class.findMany.mockResolvedValue([]);
+
+    await service.list(ACTOR, "school-1", "year-2025");
+
+    const args = prisma.class.findMany.mock.calls[0][0];
+    expect(args.include.sections.include._count.select.enrollments.where).toEqual({ academicYearId: "year-2025" });
+  });
+
+  it("list(): with no academic year given at all, still falls back to status: ACTIVE (current-year default unchanged)", async () => {
+    prisma.class.findMany.mockResolvedValue([]);
+
+    await service.list(ACTOR, "school-1");
+
+    const args = prisma.class.findMany.mock.calls[0][0];
+    expect(args.include.sections.include._count.select.enrollments.where).toEqual({ status: "ACTIVE" });
+  });
+
+  it("listSections(): same fix applied to the per-class sections view", async () => {
+    prisma.class.findFirst.mockResolvedValue({ id: "class-1" });
+    prisma.section.findMany.mockResolvedValue([]);
+
+    await service.listSections(ACTOR, "school-1", "class-1", "year-2025");
+
+    const args = prisma.section.findMany.mock.calls[0][0];
+    expect(args.include._count.select.enrollments.where).toEqual({ academicYearId: "year-2025" });
+  });
+
+  it("listSectionStudents(): Test D-equivalent — returns a student's closed 2025–2026 roster row, not their current 2026–2027 one", async () => {
+    prisma.class.findFirst.mockResolvedValue({ id: "class-1" });
+    prisma.section.findFirst.mockResolvedValue({ id: "section-a", classId: "class-1" });
+    const rows = [
+      { id: "enr-2025", studentId: "student-1", sectionId: "section-a", academicYearId: "year-2025", status: "PROMOTED", rollNumber: 5, student: {} },
+      { id: "enr-2026", studentId: "student-1", sectionId: "section-a", academicYearId: "year-2026", status: "ACTIVE", rollNumber: 12, student: {} },
+    ];
+    prisma.studentEnrollment.findMany.mockImplementation((args: { where: { sectionId: string; academicYearId?: string; status?: string } }) =>
+      Promise.resolve(
+        rows.filter(
+          (r) =>
+            r.sectionId === args.where.sectionId &&
+            (args.where.academicYearId ? r.academicYearId === args.where.academicYearId : r.status === "ACTIVE"),
+        ),
+      ),
+    );
+
+    const historical = await service.listSectionStudents(ACTOR, "school-1", "class-1", "section-a", "year-2025");
+    const current = await service.listSectionStudents(ACTOR, "school-1", "class-1", "section-a", "year-2026");
+
+    expect(historical.map((s) => s.enrollmentId)).toEqual(["enr-2025"]);
+    expect(current.map((s) => s.enrollmentId)).toEqual(["enr-2026"]);
+  });
+
+  it("getBulkTransferImpact(): the Class Transfer picker's student count reflects a past year's real (closed) enrollments, not zero", async () => {
+    prisma.class.findFirst.mockResolvedValue({ id: "class-1", name: "Class 1" });
+    prisma.academicYear.findFirst.mockResolvedValue({ id: "year-2025", name: "2025" });
+    prisma.studentEnrollment.count.mockResolvedValue(1);
+
+    const result = await service.getBulkTransferImpact(ACTOR, "school-1", "class-1", "year-2025");
+
+    expect(result.studentCount).toBe(1);
+    const args = prisma.studentEnrollment.count.mock.calls[0][0];
+    expect(args.where).not.toHaveProperty("status");
+    expect(args.where.academicYearId).toBe("year-2025");
+  });
+});

@@ -276,8 +276,13 @@ export class ExamsService {
     await this.assertCanAccessSectionForSubject(actor, schoolId, sectionId, examSubject.subjectId, examSubject.exam.academicYearId);
     await this.assertSectionBelongsToClass(sectionId, examSubject.classId);
 
+    // The exam's own academicYearId already pins this to one specific year —
+    // status: "ACTIVE" would additionally require that year's enrollment to
+    // still be open, which is false for any exam from a year the student has
+    // since moved on from (promoted/retained/etc.), producing an empty
+    // roster and an impossible "0/0" for an otherwise-real historical exam.
     const enrollments = await this.prisma.studentEnrollment.findMany({
-      where: { sectionId, academicYearId: examSubject.exam.academicYearId, status: "ACTIVE" },
+      where: { sectionId, academicYearId: examSubject.exam.academicYearId },
       include: { student: true, results: { where: { examSubjectId } } },
       orderBy: { rollNumber: "asc" },
     });
@@ -727,9 +732,14 @@ export class ExamsService {
           where: { sectionId: s.sectionId, subjectId: s.examSubject.subjectId, academicYearId: s.examSubject.exam.academicYearId },
           include: { teacher: true },
         });
-        const [activeCount, resultCount] = await Promise.all([
+        // enrolledCount is this exam's own year's roster, closed enrollments
+        // included — requiring status: "ACTIVE" here produced the impossible
+        // "1/0 completed" display for any exam whose section has since moved
+        // on to a new year (a real, permanent Result row from that historical
+        // enrollment, divided by a roster miscounted as empty).
+        const [enrolledCount, resultCount] = await Promise.all([
           this.prisma.studentEnrollment.count({
-            where: { sectionId: s.sectionId, academicYearId: s.examSubject.exam.academicYearId, status: "ACTIVE" },
+            where: { sectionId: s.sectionId, academicYearId: s.examSubject.exam.academicYearId },
           }),
           this.prisma.result.count({ where: { resultSubmissionId: s.id } }),
         ]);
@@ -751,9 +761,9 @@ export class ExamsService {
           teacherId: assignment?.teacherId ?? null,
           teacherName: assignment ? `${assignment.teacher.firstName} ${assignment.teacher.lastName}` : null,
           status: s.status,
-          studentCount: activeCount,
+          studentCount: enrolledCount,
           completedCount: resultCount,
-          missingCount: activeCount - resultCount,
+          missingCount: enrolledCount - resultCount,
           submittedAt: s.submittedAt,
         };
       }),

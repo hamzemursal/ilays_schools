@@ -72,7 +72,12 @@ export class StudentDirectoryService {
 
     const where: Prisma.StudentEnrollmentWhereInput = {
       schoolId,
-      status: "ACTIVE",
+      // academicYearId alone is the correct historical scope — a student's
+      // enrollment for a past year is closed (PROMOTED/RETAINED/etc.) once
+      // they move on, not deleted, so requiring status: "ACTIVE" here used
+      // to make every non-current year silently show zero students. This
+      // matches the pattern already used in StudentPortalService.mySubjects
+      // and GuardianPortalService's equivalent lookup.
       academicYearId: filters.academicYearId,
       ...(filters.classId ? { classId: filters.classId } : {}),
       ...(filters.sectionId ? { sectionId: filters.sectionId } : {}),

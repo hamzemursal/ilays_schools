@@ -399,6 +399,34 @@ describe("ExamsService.getResultsForSection — stats math and submission shape"
       "That section does not belong to this exam subject's class",
     );
   });
+
+  // Test D (regression): a historical exam's own year is enough to find its
+  // roster — the enrollment being closed since (promoted/retained out) must
+  // never make an otherwise-real, already-published exam look empty.
+  it("Test D: never requires the roster's enrollment to still be ACTIVE — a historical exam's roster query is scoped by year alone", async () => {
+    stubGetResultsForSection(prisma, { enrollments: [enrollment("e1", 1, 85)] });
+
+    await service.getResultsForSection(ADMIN_ACTOR, SCHOOL_ID, EXAM_SUBJECT_ID, SECTION_ID);
+
+    const args = prisma.studentEnrollment.findMany.mock.calls[0][0];
+    expect(args.where).toEqual({ sectionId: SECTION_ID, academicYearId: "year-1" });
+    expect(args.where).not.toHaveProperty("status");
+  });
+
+  // Test E (regression): the impossible "1/0 completed" state came from
+  // dividing a real Result count by a roster miscounted as 0 for a
+  // historical year — with the roster query fixed, a student who has a
+  // result also appears in `students`, so completedCount can never exceed
+  // the roster it was drawn from.
+  it("Test E: completedCount can never exceed the roster size for a valid historical result — no impossible N/0 state", async () => {
+    stubGetResultsForSection(prisma, { enrollments: [enrollment("e1", 1, 85)] });
+
+    const result = await service.getResultsForSection(ADMIN_ACTOR, SCHOOL_ID, EXAM_SUBJECT_ID, SECTION_ID);
+
+    expect(result.students).toHaveLength(1);
+    expect(result.completedCount).toBe(1);
+    expect(result.completedCount).toBeLessThanOrEqual(result.students.length);
+  });
 });
 
 describe("ExamsService — teacher-assignment authorization boundary", () => {
@@ -914,6 +942,44 @@ describe("ExamsService.listResultSubmissions / listExamPapers — viewpoint scop
 
     expect(rows).toHaveLength(1);
     expect(rows[0].resultSubmissionId).toBe("sub-1");
+  });
+
+  // Test D/E (regression): Results Review used to show "1/0 completed" for
+  // an exam whose section has since moved on to a new academic year — a
+  // real Result row (completedCount) divided by a roster count that only
+  // ever matched still-ACTIVE enrollments (studentCount), which is 0 for a
+  // closed historical year. Scoping the roster count by academicYearId alone
+  // fixes both the count and the resulting impossible display.
+  it("Test D/E: a historical exam's studentCount reflects its own year's real (closed) enrollments — no impossible 1/0 completed state", async () => {
+    prisma.resultSubmission.findMany.mockResolvedValue([
+      {
+        id: "sub-historical",
+        examSubjectId: "es-1",
+        sectionId: SECTION_ID,
+        status: "PUBLISHED",
+        submittedAt: null,
+        section: { name: "A", class: { name: "Class 1" } },
+        examSubject: {
+          classId: "class-1",
+          subjectId: "subject-1",
+          exam: { id: "exam-1", name: "wqrer", schoolId: SCHOOL_ID, academicYearId: "year-2025", school: { name: "Test School" }, academicYear: { name: "2025" } },
+          subject: { name: "Mathematics" },
+        },
+      },
+    ]);
+    prisma.teacherAssignment.findFirst.mockResolvedValue(null);
+    // The one student who sat this historical exam has since been promoted
+    // — their enrollment for year-2025 is closed, not deleted, and a real
+    // Result row still exists for it.
+    prisma.studentEnrollment.count.mockResolvedValue(1);
+    prisma.result.count.mockResolvedValue(1);
+
+    const rows = await service.listResultSubmissions(ADMIN_ACTOR, {});
+
+    expect(rows[0]).toMatchObject({ studentCount: 1, completedCount: 1, missingCount: 0 });
+    const countArgs = prisma.studentEnrollment.count.mock.calls[0][0];
+    expect(countArgs.where).toEqual({ sectionId: SECTION_ID, academicYearId: "year-2025" });
+    expect(countArgs.where).not.toHaveProperty("status");
   });
 });
 

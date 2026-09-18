@@ -40,7 +40,12 @@ export class ClassesService {
         division: true,
         sections: {
           include: {
-            _count: { select: { enrollments: { where: { status: "ACTIVE", ...(academicYearId ? { academicYearId } : {}) } } } },
+            // A specific year's count must reflect who was actually enrolled
+            // THAT year, closed enrollments included — status: "ACTIVE" only
+            // applies when no year is given at all (then it means "right now,
+            // across time"). Combining both used to make every non-current
+            // year's count silently read 0.
+            _count: { select: { enrollments: { where: academicYearId ? { academicYearId } : { status: "ACTIVE" } } } },
           },
         },
         _count: { select: { classSubjects: true } },
@@ -179,7 +184,9 @@ export class ClassesService {
     return this.prisma.section.findMany({
       where: { classId },
       include: {
-        _count: { select: { enrollments: { where: { status: "ACTIVE", ...(academicYearId ? { academicYearId } : {}) } } } },
+        // Same reasoning as list() above — a given year's count must include
+        // enrollments already closed for that year, not just ones still ACTIVE.
+        _count: { select: { enrollments: { where: academicYearId ? { academicYearId } : { status: "ACTIVE" } } } },
       },
       orderBy: { name: "asc" },
     });
@@ -331,7 +338,10 @@ export class ClassesService {
     if (!section) throw new NotFoundException("Section not found in this class");
 
     const enrollments = await this.prisma.studentEnrollment.findMany({
-      where: { sectionId, status: "ACTIVE", ...(academicYearId ? { academicYearId } : {}) },
+      // A requested year's roster must include enrollments already closed
+      // for that year (promoted/retained/etc. since) — status: "ACTIVE"
+      // only applies when browsing with no year specified at all.
+      where: { sectionId, ...(academicYearId ? { academicYearId } : { status: "ACTIVE" }) },
       include: { student: true },
       orderBy: { rollNumber: "asc" },
     });
@@ -394,8 +404,12 @@ export class ClassesService {
       sectionName = section.name;
     }
 
+    // This count reflects who was enrolled in that year (a past year's
+    // students are correctly shown even though their enrollment there is now
+    // closed) — the actual bulkTransfer mutation below still only moves
+    // currently ACTIVE enrollments, which is unaffected by this display fix.
     const students = await this.prisma.studentEnrollment.count({
-      where: { classId, academicYearId, status: "ACTIVE", ...(fromSectionId ? { sectionId: fromSectionId } : {}) },
+      where: { classId, academicYearId, ...(fromSectionId ? { sectionId: fromSectionId } : {}) },
     });
 
     return { className: cls.name, sectionName, academicYearName: academicYear.name, studentCount: students };

@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type MyChildResult, type MyChildSubject } from "@/lib/api";
+import { api, type MyChildSubject, type MyResultsReport, type PortalTermResults } from "@/lib/api";
 import { useSelectedChild } from "@/features/parent-portal/SelectedChildContext";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
+import { PortalResults, ResultsSummary } from "@/features/portal-results/PortalResults";
 import { BookOpen, TrendingUp, Users } from "lucide-react";
 
 const TABS = ["Subjects", "Exams & Results", "Performance"] as const;
@@ -92,96 +92,64 @@ function SubjectsTab({ accessToken, studentId }: { accessToken: string; studentI
 }
 
 function ResultsTab({ accessToken, studentId }: { accessToken: string; studentId: string }) {
-  const [results, setResults] = useState<MyChildResult[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api
-      .getMyChildResults(accessToken, studentId)
-      .then(setResults)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load results"));
-  }, [accessToken, studentId]);
-
-  if (error) return <Alert tone="danger">{error}</Alert>;
-  if (!results) return <SkeletonCards count={2} />;
-  if (results.length === 0) return <EmptyState icon={BookOpen} title="No published results yet" />;
-
+  const loadYears = useCallback(() => api.getMyChildAcademicYears(accessToken, studentId), [accessToken, studentId]);
+  const loadReport = useCallback(
+    (academicYearId: string) => api.getMyChildResultsReport(accessToken, studentId, academicYearId),
+    [accessToken, studentId],
+  );
   return (
-    <Card padding="none">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px] text-left text-sm">
-          <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
-            <tr>
-              <th className="px-5 py-2.5">Exam</th>
-              <th className="px-5 py-2.5">Academic Year</th>
-              <th className="px-5 py-2.5">Subject</th>
-              <th className="px-5 py-2.5">Marks</th>
-              <th className="px-5 py-2.5">Percentage</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {results.map((r) => (
-              <tr key={r.id}>
-                <td className="px-5 py-3 text-foreground">
-                  {r.examName}
-                  <span className="ml-1.5 text-xs text-foreground-muted">{r.examType}</span>
-                </td>
-                <td className="px-5 py-3 text-foreground-soft">{r.academicYearName}</td>
-                <td className="px-5 py-3 text-foreground-soft">{r.subjectName}</td>
-                <td className="px-5 py-3 text-foreground-soft">
-                  {r.marksObtained} / {r.maxMarks}
-                </td>
-                <td className="px-5 py-3">
-                  <Badge tone={r.percentage >= 50 ? "success" : "danger"}>{r.percentage}%</Badge>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
+    <div className="space-y-5">
+      <PortalResults loadYears={loadYears} loadReport={loadReport} />
+    </div>
   );
 }
 
+// Per-subject average across one term's published results: SUM(marks)/SUM(max),
+// the same rule as the term average itself — never a mean of percentages.
+function subjectAverages(terms: PortalTermResults[]) {
+  const bySubject = new Map<string, { marks: number; max: number }>();
+  for (const r of terms.flatMap((t) => t.results)) {
+    const totals = bySubject.get(r.subjectName) ?? { marks: 0, max: 0 };
+    totals.marks += r.marksObtained;
+    totals.max += r.maxMarks;
+    bySubject.set(r.subjectName, totals);
+  }
+  return Array.from(bySubject.entries())
+    .filter(([, t]) => t.max > 0)
+    .map(([name, t]) => ({ name, average: Math.round((t.marks / t.max) * 1000) / 10 }))
+    .sort((a, b) => b.average - a.average);
+}
+
+// The current academic year only — historical years live on the Exams &
+// Results tab's year picker. Never a blend of years or terms.
 function PerformanceTab({ accessToken, studentId }: { accessToken: string; studentId: string }) {
-  const [results, setResults] = useState<MyChildResult[] | null>(null);
+  const [report, setReport] = useState<MyResultsReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api
-      .getMyChildResults(accessToken, studentId)
-      .then(setResults)
+      .getMyChildResultsReport(accessToken, studentId)
+      .then(setReport)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load performance"));
   }, [accessToken, studentId]);
 
   if (error) return <Alert tone="danger">{error}</Alert>;
-  if (!results) return <SkeletonCards count={1} />;
-  if (results.length === 0) return <EmptyState icon={TrendingUp} title="No published results yet" />;
+  if (!report) return <SkeletonCards count={1} />;
 
-  const overallAverage = Math.round((results.reduce((sum, r) => sum + r.percentage, 0) / results.length) * 10) / 10;
-
-  const bySubject = new Map<string, number[]>();
-  for (const r of results) {
-    const list = bySubject.get(r.subjectName) ?? [];
-    list.push(r.percentage);
-    bySubject.set(r.subjectName, list);
-  }
-  const subjectAverages = Array.from(bySubject.entries())
-    .map(([name, pcts]) => ({ name, average: Math.round((pcts.reduce((s, p) => s + p, 0) / pcts.length) * 10) / 10 }))
-    .sort((a, b) => b.average - a.average);
+  const averages = subjectAverages(report.terms);
+  if (averages.length === 0) return <EmptyState icon={TrendingUp} title="No published results yet" />;
 
   return (
     <div className="space-y-5">
-      <Card>
-        <CardHeader title="Overall average" />
-        <p className="mt-2 text-3xl font-semibold text-foreground">{overallAverage}%</p>
-        <p className="mt-1 text-sm text-foreground-soft">Across {results.length} published result(s).</p>
-      </Card>
+      <p className="text-sm text-foreground-soft">
+        {report.academicYear.name} · {report.enrollment.className} · Section {report.enrollment.sectionName}
+      </p>
+      <ResultsSummary report={report} />
 
       <Card padding="none">
-        <CardHeader title="Average by subject" />
+        <CardHeader title="Average by subject" description={`Across the published results of ${report.academicYear.name}.`} />
         <div className="divide-y divide-border">
-          {subjectAverages.map((s) => (
+          {averages.map((s) => (
             <div key={s.name} className="flex items-center justify-between px-5 py-3">
               <span className="text-sm font-medium text-foreground">{s.name}</span>
               <div className="flex items-center gap-3">

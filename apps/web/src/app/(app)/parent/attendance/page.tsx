@@ -178,7 +178,8 @@ function YearAttendance({
     <>
       <Alert tone="info">
         This shows both of the school day&apos;s attendance sessions — Morning and Afternoon — separately. It is not
-        broken down by subject.
+        broken down by subject. &quot;Not Recorded&quot; means attendance was not taken for that session; it is never
+        counted as Absent, and the rate is calculated only from sessions that were recorded.
       </Alert>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -192,7 +193,7 @@ function YearAttendance({
         <StatCard icon={CalendarX} label="Absent" value={summary.absent} tone="danger" />
         <StatCard icon={Clock} label="Late" value={summary.late} tone="warning" />
         <StatCard icon={ShieldCheck} label="Excused" value={summary.excused} tone="neutral" />
-        <StatCard icon={CalendarDays} label="Total days" value={summary.total} tone="neutral" />
+        <StatCard icon={CalendarDays} label="Sessions" value={summary.total} tone="neutral" />
       </div>
 
       <Card padding="none">

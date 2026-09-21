@@ -56,6 +56,15 @@ export class GuardianPortalController {
     return this.portal.myChildResults(user, studentId);
   }
 
+  @Get("children/:studentId/results-report")
+  childResultsReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("studentId") studentId: string,
+    @Query("academicYearId") academicYearId?: string,
+  ) {
+    return this.portal.myChildResultsReport(user, studentId, academicYearId);
+  }
+
   @Get("children/:studentId/fees")
   childInvoices(@CurrentUser() user: AuthenticatedUser, @Param("studentId") studentId: string) {
     return this.portal.myChildInvoices(user, studentId);

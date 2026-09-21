@@ -22,6 +22,7 @@ type MockPrisma = {
   classSubject: { findMany: jest.Mock };
   teacherAssignment: { findMany: jest.Mock };
   result: { findMany: jest.Mock };
+  term: { findMany: jest.Mock };
   invoice: { findMany: jest.Mock };
   charge: { findMany: jest.Mock };
   announcement: { findMany: jest.Mock };
@@ -38,6 +39,7 @@ function createMockPrisma(): MockPrisma {
     classSubject: { findMany: jest.fn() },
     teacherAssignment: { findMany: jest.fn() },
     result: { findMany: jest.fn() },
+    term: { findMany: jest.fn() },
     invoice: { findMany: jest.fn() },
     charge: { findMany: jest.fn() },
     announcement: { findMany: jest.fn() },
@@ -426,5 +428,124 @@ describe("GuardianPortalService.myNotifications / markNotificationRead", () => {
 
     expect(prisma.notification.findFirst).toHaveBeenCalledWith({ where: { id: "notif-1", guardianId: "guardian-1" } });
     expect(prisma.notification.update).toHaveBeenCalledWith({ where: { id: "notif-1" }, data: { isRead: true } });
+  });
+});
+
+describe("GuardianPortalService.myChildResultsReport — linked child only, Term 1 / Term 2 / Annual", () => {
+  const row = (id: string, termId: string, marks: number, max: number) => ({
+    id,
+    marksObtained: marks,
+    examSubject: { maxMarks: max, examDate: new Date("2028-03-01"), subject: { name: "Math" }, exam: { name: "Exam", type: "FINAL", termId } },
+    resultSubmission: { publishedAt: new Date("2028-03-10") },
+  });
+  const enrollment = {
+    id: "enr-1",
+    status: "ACTIVE",
+    academicYearId: "year-1",
+    academicYear: { id: "year-1", name: "2028", isCurrent: true },
+    school: { name: "Saamalay Primary" },
+    class: { name: "Class 5" },
+    section: { name: "A" },
+  };
+
+  function setup() {
+    const prisma = createMockPrisma();
+    prisma.studentEnrollment.findMany.mockResolvedValue([enrollment]);
+    prisma.term.findMany.mockResolvedValue([
+      { id: "t1", name: "Term 1", weight: 50 },
+      { id: "t2", name: "Term 2", weight: 50 },
+    ]);
+    prisma.result.findMany.mockResolvedValue([]);
+    const { service, guardians } = createService(prisma);
+    return { prisma, service, guardians };
+  }
+
+  it("verifies the parent-child link BEFORE touching any result data", async () => {
+    const { prisma, service, guardians } = setup();
+    guardians.assertGuardianCanAccessStudent.mockRejectedValue(new NotFoundException("Student not found"));
+
+    await expect(service.myChildResultsReport(ACTOR, "someone-elses-child")).rejects.toThrow(NotFoundException);
+
+    expect(guardians.assertGuardianCanAccessStudent).toHaveBeenCalledWith(ACTOR, "someone-elses-child");
+    expect(prisma.studentEnrollment.findMany).not.toHaveBeenCalled();
+    expect(prisma.result.findMany).not.toHaveBeenCalled();
+  });
+
+  it("builds the report from exactly the requested child's id — never a mix of children", async () => {
+    const { prisma, service } = setup();
+
+    await service.myChildResultsReport(ACTOR, "child-1");
+
+    expect(prisma.studentEnrollment.findMany.mock.calls[0][0].where).toEqual({ studentId: "child-1" });
+    expect(prisma.result.findMany.mock.calls[0][0].where.enrollmentId).toEqual({ in: ["enr-1"] });
+  });
+
+  it("returns Term 1, Term 2 and the annual result with eligibility", async () => {
+    const { prisma, service } = setup();
+    prisma.result.findMany.mockResolvedValue([row("r1", "t1", 45, 100), row("r2", "t2", 40, 100)]);
+
+    const report = await service.myChildResultsReport(ACTOR, "child-1");
+
+    expect(report.terms[0]).toMatchObject({ name: "Term 1", percentage: 45 });
+    expect(report.terms[1]).toMatchObject({ name: "Term 2", percentage: 40 });
+    expect(report.annual).toMatchObject({ annualPercentage: 42.5, eligible: false });
+  });
+
+  it("only asks the database for PUBLISHED results", async () => {
+    const { prisma, service } = setup();
+
+    await service.myChildResultsReport(ACTOR, "child-1");
+
+    expect(prisma.result.findMany.mock.calls[0][0].where).toMatchObject({
+      resultSubmission: { status: "PUBLISHED" },
+      isAbsent: false,
+    });
+  });
+
+  it("scopes to a requested historical year with {studentId, academicYearId}", async () => {
+    const { prisma, service } = setup();
+
+    await service.myChildResultsReport(ACTOR, "child-1", "year-1");
+
+    expect(prisma.studentEnrollment.findMany.mock.calls[0][0].where).toEqual({ studentId: "child-1", academicYearId: "year-1" });
+  });
+
+  it("a year the child was never enrolled in is NotFound", async () => {
+    const { prisma, service } = setup();
+    prisma.studentEnrollment.findMany.mockResolvedValue([]);
+
+    await expect(service.myChildResultsReport(ACTOR, "child-1", "not-their-year")).rejects.toThrow(NotFoundException);
+    expect(prisma.result.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("GuardianPortalService.myChildAttendance — two sessions, linked child only", () => {
+  const rec = (id: string, session: "MORNING" | "AFTERNOON", status: string) => ({
+    id,
+    date: new Date("2028-03-01"),
+    session,
+    status,
+    note: null,
+    enrollment: { class: { name: "Class 5" }, section: { name: "A" }, academicYear: { name: "2028" } },
+  });
+
+  it("verifies the parent-child link before reading attendance", async () => {
+    const prisma = createMockPrisma();
+    const { service, guardians } = createService(prisma);
+    guardians.assertGuardianCanAccessStudent.mockRejectedValue(new NotFoundException("Student not found"));
+
+    await expect(service.myChildAttendance(ACTOR, "someone-elses-child", "year-1")).rejects.toThrow(NotFoundException);
+    expect(prisma.attendance.findMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps Morning and Afternoon as separate records; a missing session is not fabricated as Absent", async () => {
+    const prisma = createMockPrisma();
+    prisma.attendance.findMany.mockResolvedValue([rec("a1", "MORNING", "PRESENT")]);
+    const { service } = createService(prisma);
+
+    const { summary, records } = await service.myChildAttendance(ACTOR, "child-1", "year-1");
+
+    expect(records.map((r) => [r.session, r.status])).toEqual([["MORNING", "PRESENT"]]);
+    expect(summary).toMatchObject({ total: 1, present: 1, absent: 0 });
   });
 });

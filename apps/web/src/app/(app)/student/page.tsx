@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type MyChildAttendance, type MyChildInvoice, type MyChildResult } from "@/lib/api";
+import { api, type MyChildAttendance, type MyChildInvoice, type MyResultsReport } from "@/lib/api";
 import { useStudentProfile } from "@/features/student-portal/useStudentProfile";
 import { StatTile, rateLabel } from "@/features/student-portal/StatTile";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -44,7 +44,7 @@ export default function StudentDashboardPage() {
 
   const [attendance, setAttendance] = useState<MyChildAttendance | null>(null);
   const [invoices, setInvoices] = useState<MyChildInvoice[] | null>(null);
-  const [results, setResults] = useState<MyChildResult[] | null>(null);
+  const [results, setResults] = useState<MyResultsReport | null>(null);
   const [widgetsError, setWidgetsError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -54,7 +54,7 @@ export default function StudentDashboardPage() {
 
     api.getMyStudentAttendance(accessToken, profile.enrollment.academicYearId).then(setAttendance).catch(fail);
     api.getMyStudentInvoices(accessToken).then(setInvoices).catch(fail);
-    api.getMyStudentResults(accessToken).then(setResults).catch(fail);
+    api.getMyStudentResultsReport(accessToken, profile.enrollment.academicYearId).then(setResults).catch(fail);
   }, [accessToken, profile]);
 
   if (profileError) {
@@ -75,11 +75,17 @@ export default function StudentDashboardPage() {
 
   const totalOutstanding = invoices?.reduce((sum, i) => sum + i.balance, 0) ?? 0;
   const totalPaid = invoices?.reduce((sum, i) => sum + i.paid, 0) ?? 0;
-  const approvedResults = results ?? [];
-  const academicAverage =
-    approvedResults.length > 0
-      ? Math.round((approvedResults.reduce((sum, r) => sum + r.percentage, 0) / approvedResults.length) * 10) / 10
-      : null;
+  // The headline figure is the current year's own published result: the
+  // annual result once both terms are published, otherwise the latest term
+  // that has one. Never a blend across years or terms.
+  const headline = (() => {
+    if (!results) return null;
+    const { annual } = results;
+    if (annual.annualPercentage !== null) return { label: "Annual Result", value: annual.annualPercentage };
+    if (annual.term2Percentage !== null) return { label: "Term 2 Average", value: annual.term2Percentage };
+    if (annual.term1Percentage !== null) return { label: "Term 1 Average", value: annual.term1Percentage };
+    return null;
+  })();
 
   return (
     <div>
@@ -115,16 +121,16 @@ export default function StudentDashboardPage() {
               </div>
             </div>
 
-            {academicAverage !== null && (
+            {headline !== null && (
               <Link
                 href="/student/results"
                 className="flex shrink-0 flex-col items-center gap-1 rounded-xl bg-accent-soft px-6 py-4 text-center transition-colors hover:bg-accent-soft/70"
               >
                 <Award className="size-5 text-accent" />
-                <p className="text-xs font-medium uppercase tracking-wide text-accent">Academic Average</p>
-                <p className="text-3xl font-semibold tabular-nums text-accent">{academicAverage}%</p>
+                <p className="text-xs font-medium uppercase tracking-wide text-accent">{headline.label}</p>
+                <p className="text-3xl font-semibold tabular-nums text-accent">{headline.value.toFixed(2)}%</p>
                 <p className="text-xs text-accent/80">
-                  {approvedResults.length} approved result{approvedResults.length === 1 ? "" : "s"} · View Details →
+                  {results?.academicYear.name} · Published results · View Details →
                 </p>
               </Link>
             )}

@@ -7,6 +7,7 @@ import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import { DocumentsService } from "../documents/documents.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
+import { combineTermPercentages, percentageFromMarks, publishedMarkedResultWhere } from "./result-calculation";
 import { CreateExamDto } from "./dto/create-exam.dto";
 import { CreateExamSubjectDto } from "./dto/create-exam-subject.dto";
 import { UpdateExamSubjectDto } from "./dto/update-exam-subject.dto";
@@ -1212,20 +1213,16 @@ export class ExamsService {
     const results = await this.prisma.result.findMany({
       where: {
         enrollmentId,
-        resultSubmission: { status: "PUBLISHED" },
+        // PUBLISHED and not absent: an absent student has no mark, excluded
+        // from BOTH the marks and the max-marks sums, never counted as a 0.
+        ...publishedMarkedResultWhere(),
         examSubject: { exam: { termId } },
-        // An absent student has no mark: excluded from BOTH the marks and the
-        // max-marks sums, so absence is never counted as a 0.
-        isAbsent: false,
       },
       select: { marksObtained: true, examSubject: { select: { maxMarks: true } } },
     });
-    if (results.length === 0) return null;
-
-    const totalMarks = results.reduce((sum, r) => sum + Number(r.marksObtained), 0);
-    const totalMax = results.reduce((sum, r) => sum + r.examSubject.maxMarks, 0);
-    if (totalMax === 0) return null;
-    return Math.round((totalMarks / totalMax) * 10000) / 100;
+    return percentageFromMarks(
+      results.map((r) => ({ marksObtained: Number(r.marksObtained), maxMarks: r.examSubject.maxMarks })),
+    );
   }
 
   // Combines Term 1 + Term 2 using this academic year's own configured
@@ -1259,8 +1256,12 @@ export class ExamsService {
       return { term1Percentage, term2Percentage, annualPercentage: null, eligible: null };
     }
 
-    const annualPercentage =
-      Math.round((term1Percentage * (term1.weight / 100) + term2Percentage * (term2.weight / 100)) * 100) / 100;
-    return { term1Percentage, term2Percentage, annualPercentage, eligible: annualPercentage >= 50 };
+    const { annualPercentage, eligible } = combineTermPercentages(
+      term1Percentage,
+      term2Percentage,
+      term1.weight,
+      term2.weight,
+    );
+    return { term1Percentage, term2Percentage, annualPercentage, eligible };
   }
 }

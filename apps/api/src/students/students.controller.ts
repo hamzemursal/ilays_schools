@@ -79,6 +79,11 @@ export class StudentsController {
     return this.portal.myResults(user);
   }
 
+  @Get("students/me/results-report")
+  myResultsReport(@CurrentUser() user: AuthenticatedUser, @Query("academicYearId") academicYearId?: string) {
+    return this.portal.myResultsReport(user, academicYearId);
+  }
+
   @Get("students/me/invoices")
   myInvoices(@CurrentUser() user: AuthenticatedUser) {
     return this.portal.myInvoices(user);

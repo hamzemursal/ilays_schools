@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { GuardiansService } from "./guardians.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
+import { buildStudentResultsReport } from "../exams/student-results-report";
 
 // Every method here is a parent looking at their own data — gated only by
 // authentication (JwtAuthGuard), never @RequirePermissions. Authorization is
@@ -218,6 +219,16 @@ export class GuardianPortalService {
       examDate: r.examSubject.examDate,
       publishedDate: r.resultSubmission.publishedAt,
     }));
+  }
+
+  // Term 1 / Term 2 / Annual view of ONE linked child's published results for
+  // ONE academic year (defaults to the child's current enrollment year). The
+  // parent-child link is verified first, on every call, exactly like every
+  // other child-scoped method here; the report itself is built from that
+  // single studentId, so children can never be mixed in one response.
+  async myChildResultsReport(actor: AuthenticatedUser, studentId: string, academicYearId?: string) {
+    await this.guardians.assertGuardianCanAccessStudent(actor, studentId);
+    return buildStudentResultsReport(this.prisma, studentId, academicYearId);
   }
 
   // Invoice (one-time) and Charge (recurring/billing-period) are separate

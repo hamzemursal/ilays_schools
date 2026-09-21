@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
+import { buildStudentResultsReport } from "../exams/student-results-report";
 
 // A SECONDARY student looking at their own data — every method below is
 // gated only by authentication (JwtAuthGuard), never @RequirePermissions,
@@ -240,6 +241,16 @@ export class StudentPortalService {
       examDate: r.examSubject.examDate,
       publishedDate: r.resultSubmission.publishedAt,
     }));
+  }
+
+  // Term 1 / Term 2 / Annual view of the student's own published results for
+  // ONE academic year (defaults to the current enrollment's year). Ownership
+  // is resolved from the actor alone via getSelfOrThrow — there is no
+  // studentId anywhere in the request to tamper with; the year param can only
+  // narrow to a year this same student was actually enrolled in.
+  async myResultsReport(actor: AuthenticatedUser, academicYearId?: string) {
+    const { student } = await this.getSelfOrThrow(actor);
+    return buildStudentResultsReport(this.prisma, student.id, academicYearId);
   }
 
   async myInvoices(actor: AuthenticatedUser) {

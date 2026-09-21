@@ -560,6 +560,47 @@ export interface MyChildResult {
   publishedDate: string | null;
 }
 
+// One published result inside a term (see GET /students/me/results-report and
+// GET /guardians/me/children/:studentId/results-report). Absent students are
+// never present here — an absent row has no mark and is never shown as 0.
+export interface PortalResultRow {
+  id: string;
+  examName: string;
+  examType: string;
+  subjectName: string;
+  marksObtained: number;
+  maxMarks: number;
+  percentage: number;
+  examDate: string | null;
+  publishedDate: string | null;
+}
+
+export interface PortalTermResults {
+  name: "Term 1" | "Term 2";
+  termId: string | null;
+  weight: number | null;
+  results: PortalResultRow[];
+  // SUM(marks)/SUM(max) over the published results; null = Incomplete (never 0).
+  percentage: number | null;
+}
+
+// A student's published results for ONE academic year, grouped into the two
+// existing terms plus the combined annual result and eligibility (the same
+// numbers promotion uses). null values mean "not determined yet".
+export interface MyResultsReport {
+  academicYear: { id: string; name: string; isCurrent: boolean };
+  enrollment: { schoolName: string; className: string; sectionName: string };
+  terms: [PortalTermResults, PortalTermResults];
+  otherResults: PortalResultRow[];
+  annual: {
+    term1Percentage: number | null;
+    term2Percentage: number | null;
+    annualPercentage: number | null;
+    eligible: boolean | null;
+    passMark: number;
+  };
+}
+
 export interface MyChildInvoice {
   id: string;
   feeName: string;
@@ -2375,6 +2416,8 @@ export const api = {
     }),
   getMyChildResults: (accessToken: string, studentId: string) =>
     request<MyChildResult[]>(`/guardians/me/children/${studentId}/exams`, { accessToken }),
+  getMyChildResultsReport: (accessToken: string, studentId: string, academicYearId?: string) =>
+    request<MyResultsReport>(`/guardians/me/children/${studentId}/results-report${qs({ academicYearId })}`, { accessToken }),
   getMyChildInvoices: (accessToken: string, studentId: string) =>
     request<MyChildInvoice[]>(`/guardians/me/children/${studentId}/fees`, { accessToken }),
   getMyChildPhotoUrl: (accessToken: string, studentId: string) =>
@@ -2399,6 +2442,8 @@ export const api = {
   getMyStudentAttendance: (accessToken: string, academicYearId?: string) =>
     request<MyChildAttendance>(`/students/me/attendance${qs({ academicYearId })}`, { accessToken }),
   getMyStudentResults: (accessToken: string) => request<MyChildResult[]>(`/students/me/results`, { accessToken }),
+  getMyStudentResultsReport: (accessToken: string, academicYearId?: string) =>
+    request<MyResultsReport>(`/students/me/results-report${qs({ academicYearId })}`, { accessToken }),
   getMyStudentInvoices: (accessToken: string) => request<MyChildInvoice[]>(`/students/me/invoices`, { accessToken }),
   getMyStudentAnnouncements: (accessToken: string) =>
     request<Announcement[]>(`/students/me/announcements`, { accessToken }),

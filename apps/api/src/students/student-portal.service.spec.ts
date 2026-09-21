@@ -21,6 +21,7 @@ type MockPrisma = {
   teacher: { findMany: jest.Mock };
   userRole: { findMany: jest.Mock };
   result: { findMany: jest.Mock };
+  term: { findMany: jest.Mock };
   invoice: { findMany: jest.Mock };
   announcement: { findMany: jest.Mock };
 };
@@ -35,6 +36,7 @@ function createMockPrisma(): MockPrisma {
     teacher: { findMany: jest.fn() },
     userRole: { findMany: jest.fn() },
     result: { findMany: jest.fn() },
+    term: { findMany: jest.fn() },
     invoice: { findMany: jest.fn() },
     announcement: { findMany: jest.fn() },
   };
@@ -337,5 +339,163 @@ describe("StudentPortalService.myAnnouncements", () => {
     expect(prisma.announcement.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { schoolId: "school-1", audience: "ALL" } }),
     );
+  });
+});
+
+describe("StudentPortalService.myResultsReport — Term 1 / Term 2 / Annual, own data only", () => {
+  const term = (id: string, name: string) => ({ id, name, weight: 50 });
+  const row = (id: string, termId: string, marks: number, max: number) => ({
+    id,
+    marksObtained: marks,
+    examSubject: { maxMarks: max, examDate: new Date("2028-03-01"), subject: { name: "Math" }, exam: { name: "Exam", type: "FINAL", termId } },
+    resultSubmission: { publishedAt: new Date("2028-03-10") },
+  });
+  const reportEnrollment = {
+    ...SECONDARY_ENROLLMENT,
+    academicYear: { id: "year-1", name: "2028", isCurrent: true },
+  };
+
+  function setup() {
+    const prisma = createMockPrisma();
+    prisma.student.findFirst.mockResolvedValue({ id: "student-1" });
+    // getSelfOrThrow gate
+    prisma.studentEnrollment.findFirst.mockResolvedValue(SECONDARY_ENROLLMENT);
+    // the report's own enrollment lookup
+    prisma.studentEnrollment.findMany.mockResolvedValue([reportEnrollment]);
+    prisma.term.findMany.mockResolvedValue([term("t1", "Term 1"), term("t2", "Term 2")]);
+    prisma.result.findMany.mockResolvedValue([]);
+    return { prisma, service: createService(prisma) };
+  }
+
+  it("resolves the student strictly from the authenticated actor's own userId — no student id is accepted", async () => {
+    const { prisma, service } = setup();
+
+    await service.myResultsReport(ACTOR);
+
+    expect(prisma.student.findFirst).toHaveBeenCalledWith({ where: { userId: "user-1" } });
+    expect(prisma.studentEnrollment.findMany.mock.calls[0][0].where).toEqual({ studentId: "student-1" });
+  });
+
+  it("returns Term 1, Term 2 and the annual result with eligibility", async () => {
+    const { prisma, service } = setup();
+    prisma.result.findMany.mockResolvedValue([row("r1", "t1", 80, 100), row("r2", "t2", 60, 100)]);
+
+    const report = await service.myResultsReport(ACTOR);
+
+    expect(report.terms[0]).toMatchObject({ name: "Term 1", percentage: 80 });
+    expect(report.terms[1]).toMatchObject({ name: "Term 2", percentage: 60 });
+    expect(report.annual).toMatchObject({ annualPercentage: 70, eligible: true });
+  });
+
+  it("only asks the database for PUBLISHED results — Draft/Submitted/Needs Correction/Approved never reach the response", async () => {
+    const { prisma, service } = setup();
+
+    await service.myResultsReport(ACTOR);
+
+    expect(prisma.result.findMany.mock.calls[0][0].where).toMatchObject({
+      resultSubmission: { status: "PUBLISHED" },
+      isAbsent: false,
+    });
+  });
+
+  it("the result query is pinned to this student's own enrollment ids — another student's rows can never match", async () => {
+    const { prisma, service } = setup();
+
+    await service.myResultsReport(ACTOR);
+
+    expect(prisma.result.findMany.mock.calls[0][0].where.enrollmentId).toEqual({ in: ["enr-1"] });
+  });
+
+  it("scopes to a requested historical year with {studentId, academicYearId} — not combined with status ACTIVE", async () => {
+    const { prisma, service } = setup();
+
+    await service.myResultsReport(ACTOR, "year-1");
+
+    expect(prisma.studentEnrollment.findMany.mock.calls[0][0].where).toEqual({ studentId: "student-1", academicYearId: "year-1" });
+  });
+
+  it("a year this student was never enrolled in is NotFound", async () => {
+    const { prisma, service } = setup();
+    prisma.studentEnrollment.findMany.mockResolvedValue([]);
+
+    await expect(service.myResultsReport(ACTOR, "another-students-year")).rejects.toThrow(NotFoundException);
+    expect(prisma.result.findMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Student Portal gate: an account with no linked Student profile gets nothing", async () => {
+    const { prisma, service } = setup();
+    prisma.student.findFirst.mockResolvedValue(null);
+
+    await expect(service.myResultsReport(ACTOR)).rejects.toThrow(NotFoundException);
+    expect(prisma.result.findMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Student Portal gate: a PRIMARY-division student gets nothing", async () => {
+    const { prisma, service } = setup();
+    prisma.studentEnrollment.findFirst.mockResolvedValue({ ...SECONDARY_ENROLLMENT, class: { name: "Class 5", division: { type: "PRIMARY" } } });
+
+    await expect(service.myResultsReport(ACTOR)).rejects.toThrow(ForbiddenException);
+    expect(prisma.result.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("StudentPortalService.myAttendance — two sessions, Not Recorded is never Absent", () => {
+  const rec = (id: string, date: string, session: "MORNING" | "AFTERNOON", status: string) => ({
+    id,
+    date: new Date(date),
+    session,
+    status,
+    note: null,
+    markedByUserId: "marker-1",
+    enrollment: { class: { name: "Form 2" }, section: { name: "A" }, academicYear: { name: "2028" } },
+  });
+
+  it("returns each session as its own record, so Morning Present / Afternoon Absent stays separable", async () => {
+    const prisma = createMockPrisma();
+    prisma.student.findFirst.mockResolvedValue({ id: "student-1" });
+    prisma.studentEnrollment.findFirst.mockResolvedValue(SECONDARY_ENROLLMENT);
+    prisma.teacher.findMany.mockResolvedValue([]);
+    prisma.userRole.findMany.mockResolvedValue([]);
+    prisma.attendance.findMany.mockResolvedValue([
+      rec("a1", "2028-03-01", "MORNING", "PRESENT"),
+      rec("a2", "2028-03-01", "AFTERNOON", "ABSENT"),
+    ]);
+    const service = createService(prisma);
+
+    const { records } = await service.myAttendance(ACTOR, "year-1");
+
+    expect(records.map((r) => [r.session, r.status])).toEqual([
+      ["MORNING", "PRESENT"],
+      ["AFTERNOON", "ABSENT"],
+    ]);
+  });
+
+  it("a session that was never recorded is simply not a record: it is not counted as absent and not fabricated", async () => {
+    const prisma = createMockPrisma();
+    prisma.student.findFirst.mockResolvedValue({ id: "student-1" });
+    prisma.studentEnrollment.findFirst.mockResolvedValue(SECONDARY_ENROLLMENT);
+    prisma.teacher.findMany.mockResolvedValue([]);
+    prisma.userRole.findMany.mockResolvedValue([]);
+    prisma.attendance.findMany.mockResolvedValue([rec("a1", "2028-03-01", "MORNING", "PRESENT")]);
+    const service = createService(prisma);
+
+    const { summary, records } = await service.myAttendance(ACTOR, "year-1");
+
+    expect(records).toHaveLength(1);
+    expect(summary).toMatchObject({ total: 1, present: 1, absent: 0, percentage: 100 });
+  });
+
+  it("scopes to the requested academic year and to the actor's own student only", async () => {
+    const prisma = createMockPrisma();
+    prisma.student.findFirst.mockResolvedValue({ id: "student-1" });
+    prisma.studentEnrollment.findFirst.mockResolvedValue(SECONDARY_ENROLLMENT);
+    prisma.attendance.findMany.mockResolvedValue([]);
+    const service = createService(prisma);
+
+    await service.myAttendance(ACTOR, "year-2027");
+
+    expect(prisma.attendance.findMany.mock.calls[0][0].where).toEqual({
+      enrollment: { studentId: "student-1", academicYearId: "year-2027" },
+    });
   });
 });

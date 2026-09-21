@@ -160,7 +160,8 @@ function YearAttendance({ accessToken, academicYearId }: { accessToken: string; 
     <>
       <Alert tone="info">
         This shows both of the school day&apos;s attendance sessions — Morning and Afternoon — separately. It is not
-        broken down by subject.
+        broken down by subject. &quot;Not Recorded&quot; means attendance was not taken for that session; it is never
+        counted as Absent, and the rate is calculated only from sessions that were recorded.
       </Alert>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -171,14 +172,14 @@ function YearAttendance({ accessToken, academicYearId }: { accessToken: string; 
           tone={rate?.tone ?? "accent"}
           badge={rate && <Badge tone={rate.tone}>{rate.text}</Badge>}
         />
-        <StatTile icon={CalendarCheck} label="Present" value={summary.present} unit="days" tone="success" />
-        <StatTile icon={CalendarX} label="Absent" value={summary.absent} unit="days" tone="danger" />
-        <StatTile icon={Clock} label="Late" value={summary.late} unit="days" tone="warning" />
-        <StatTile icon={ShieldCheck} label="Excused" value={summary.excused} unit="days" tone="accent" />
+        <StatTile icon={CalendarCheck} label="Present" value={summary.present} unit="sessions" tone="success" />
+        <StatTile icon={CalendarX} label="Absent" value={summary.absent} unit="sessions" tone="danger" />
+        <StatTile icon={Clock} label="Late" value={summary.late} unit="sessions" tone="warning" />
+        <StatTile icon={ShieldCheck} label="Excused" value={summary.excused} unit="sessions" tone="accent" />
       </div>
 
       <Card>
-        <CardHeader title="Attendance Overview" description="Breakdown of every recorded school day this year." />
+        <CardHeader title="Attendance Overview" description="Breakdown of every recorded attendance session this year." />
         <div className="mt-5 flex flex-wrap items-center justify-center gap-8 sm:justify-between">
           <AttendanceDonut
             present={summary.present}

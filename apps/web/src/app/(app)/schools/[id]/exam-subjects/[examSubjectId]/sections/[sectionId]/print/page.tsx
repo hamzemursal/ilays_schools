@@ -132,7 +132,7 @@ export default function PrintResultSheetPage({
                   {visibleColumns.rollNumber && <td className="py-2 pr-3 text-foreground-soft">{s.rollNumber}</td>}
                   {visibleColumns.mark && (
                     <td className="py-2 pr-3 text-right text-foreground">
-                      {s.marksObtained ?? "—"} / {data.maxMarks}
+                      {s.isAbsent ? "Absent" : `${s.marksObtained ?? "—"} / ${data.maxMarks}`}
                     </td>
                   )}
                   {visibleColumns.percentage && (

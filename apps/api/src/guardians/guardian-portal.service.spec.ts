@@ -295,7 +295,7 @@ describe("GuardianPortalService.myChildResults", () => {
     const result = await service.myChildResults(ACTOR, "student-1");
 
     expect(prisma.result.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { enrollment: { studentId: "student-1" }, resultSubmission: { status: "PUBLISHED" } } }),
+      expect.objectContaining({ where: { enrollment: { studentId: "student-1" }, resultSubmission: { status: "PUBLISHED" }, isAbsent: false } }),
     );
     expect(result[0].percentage).toBe(90);
     expect(result[0].marksObtained).toBe(45);

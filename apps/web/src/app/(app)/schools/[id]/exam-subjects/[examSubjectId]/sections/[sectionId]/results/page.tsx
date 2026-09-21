@@ -30,6 +30,8 @@ export default function ResultsPage({
 
   const [data, setData] = useState<ResultsForSection | null>(null);
   const [pending, setPending] = useState<Record<string, string>>({});
+  // Students marked Absent — they have no mark at all (not a 0).
+  const [absent, setAbsent] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState(false);
@@ -50,16 +52,24 @@ export default function ResultsPage({
       .getResults(accessToken, schoolId, examSubjectId, sectionId)
       .then((res) => {
         setData(res);
-        setPending(Object.fromEntries(res.students.filter((s) => s.marksObtained !== null).map((s) => [s.enrollmentId, s.marksObtained!])));
+        syncFromServer(res);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load results"));
   }, [accessToken, schoolId, examSubjectId, sectionId]);
+
+  function syncFromServer(res: ResultsForSection) {
+    setPending(Object.fromEntries(res.students.filter((s) => s.marksObtained !== null).map((s) => [s.enrollmentId, s.marksObtained!])));
+    setAbsent(Object.fromEntries(res.students.filter((s) => s.isAbsent).map((s) => [s.enrollmentId, true])));
+  }
 
   const isTeacher = user?.roles.includes("TEACHER") ?? false;
   const canApprove = (user?.permissions.includes("results.approve") ?? false) && !isTeacher;
   const editable = !!data && (data.submission.status === "DRAFT" || data.submission.status === "NEEDS_CORRECTION");
   const canReview = canApprove && data?.submission.status === "SUBMITTED";
   const canPublish = canApprove && data?.submission.status === "APPROVED";
+  // An approved (not yet published) set can still be sent back for correction —
+  // otherwise a mistake spotted after approval could never be fixed.
+  const canReturnApproved = canApprove && data?.submission.status === "APPROVED";
   const canUnpublish = canApprove && data?.submission.status === "PUBLISHED";
 
   async function save(): Promise<ResultsForSection | null> {
@@ -67,11 +77,17 @@ export default function ResultsPage({
     setSaving(true);
     setError(null);
     try {
-      const entries = Object.entries(pending)
-        .filter(([, v]) => v.trim() !== "")
-        .map(([enrollmentId, v]) => ({ enrollmentId, marksObtained: Number(v) }));
+      // Absent students are sent as absent (no mark); everyone else with a
+      // typed mark is sent as a number. A blank, non-absent row is simply
+      // left as "Missing" — never turned into 0.
+      const entries = data.students.flatMap((s): { enrollmentId: string; marksObtained?: number; isAbsent?: boolean }[] => {
+        if (absent[s.enrollmentId]) return [{ enrollmentId: s.enrollmentId, isAbsent: true }];
+        const v = (pending[s.enrollmentId] ?? "").trim();
+        return v === "" ? [] : [{ enrollmentId: s.enrollmentId, marksObtained: Number(v) }];
+      });
       const updated = await api.enterMarks(accessToken, schoolId, examSubjectId, sectionId, entries);
       setData(updated);
+      syncFromServer(updated);
       setSavedMessage(true);
       return updated;
     } catch (err) {
@@ -207,6 +223,7 @@ export default function ResultsPage({
                 <ResultsStatusBadge status={data.submission.status} />
                 <span className="ml-auto text-sm text-foreground-soft">
                   {data.completedCount} / {data.students.length} student(s) completed
+                  {data.absentCount > 0 && ` (${data.absentCount} absent)`}
                 </span>
               </div>
               {(data.average !== null || data.highest !== null || data.lowest !== null) && (
@@ -257,13 +274,32 @@ export default function ResultsPage({
                           type="number"
                           min={0}
                           max={data.maxMarks}
-                          value={pending[s.enrollmentId] ?? ""}
-                          disabled={!editable}
+                          value={absent[s.enrollmentId] ? "" : (pending[s.enrollmentId] ?? "")}
+                          disabled={!editable || !!absent[s.enrollmentId]}
                           onChange={(e) => setPending((prev) => ({ ...prev, [s.enrollmentId]: e.target.value }))}
                           className="w-24"
+                          aria-label={`Mark for ${s.firstName} ${s.lastName}`}
                         />
+                        <label className="flex items-center gap-1.5 text-sm text-foreground-soft">
+                          <input
+                            type="checkbox"
+                            checked={!!absent[s.enrollmentId]}
+                            disabled={!editable}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setAbsent((prev) => ({ ...prev, [s.enrollmentId]: checked }));
+                              // Absent means NO mark — drop any typed value rather than keep a stale one.
+                              if (checked) setPending((prev) => ({ ...prev, [s.enrollmentId]: "" }));
+                            }}
+                            aria-label={`Absent: ${s.firstName} ${s.lastName}`}
+                            className="size-4 rounded border-border text-accent"
+                          />
+                          Absent
+                        </label>
                         <span className="w-14 text-right text-sm text-foreground-soft">{s.percentage !== null ? `${s.percentage}%` : "—"}</span>
-                        <Badge tone={s.hasMark ? "success" : "neutral"}>{s.hasMark ? "Entered" : "Missing"}</Badge>
+                        <Badge tone={s.isAbsent ? "warning" : s.hasMark ? "success" : "neutral"}>
+                          {s.isAbsent ? "Absent" : s.hasMark ? "Entered" : "Missing"}
+                        </Badge>
                       </div>
                     </div>
                   </Card>
@@ -271,7 +307,7 @@ export default function ResultsPage({
               </div>
             )}
 
-            {editable && !canApprove && data.students.length > 0 && (
+            {editable && data.students.length > 0 && (
               <div className="flex flex-wrap items-center gap-3">
                 <Button variant="outline" icon={<Save className="size-4" />} loading={saving} onClick={() => save()}>
                   Save Draft
@@ -300,6 +336,11 @@ export default function ResultsPage({
 
             {canPublish && (
               <div className="flex flex-wrap items-center gap-3">
+                {canReturnApproved && (
+                  <Button variant="outline" icon={<RotateCcw className="size-4" />} onClick={() => setReturnDialogOpen(true)}>
+                    Return for Correction
+                  </Button>
+                )}
                 <Button icon={<Megaphone className="size-4" />} onClick={() => setPublishDialogOpen(true)}>
                   Publish Results
                 </Button>

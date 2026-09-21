@@ -528,7 +528,9 @@ describe("ExamsService.enterMarks — edit-window gating and validation", () => 
     prisma.examSubject.findFirst.mockResolvedValue(examSubject);
     prisma.teacher.findFirst.mockResolvedValue(null);
     prisma.section.findFirst.mockResolvedValue({ id: SECTION_ID, classId: examSubject.classId });
-    prisma.studentEnrollment.findMany.mockResolvedValue([{ id: "e1" }]);
+    prisma.studentEnrollment.findMany.mockResolvedValue([{ id: "e1", studentId: "student-e1", student: { firstName: "Hodan", lastName: "Ali" } }]);
+    prisma.section.findUnique.mockResolvedValue({ id: SECTION_ID, name: "A" });
+    prisma.result.findMany.mockResolvedValue([]); // nothing recorded yet, unless a test says otherwise
     prisma.resultSubmission.upsert.mockResolvedValue({ id: "submission-1" });
     prisma.result.upsert.mockResolvedValue({});
     // Stub the re-fetch enterMarks ends with — this describe block is about
@@ -595,7 +597,7 @@ describe("ExamsService.enterMarks — edit-window gating and validation", () => 
     expect(prisma.result.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { examSubjectId_enrollmentId: { examSubjectId: EXAM_SUBJECT_ID, enrollmentId: "e1" } },
-        update: { marksObtained: 77, enteredByUserId: ADMIN_ACTOR.id },
+        update: { marksObtained: 77, isAbsent: false, enteredByUserId: ADMIN_ACTOR.id },
         create: expect.objectContaining({ marksObtained: 77, enteredByUserId: ADMIN_ACTOR.id, resultSubmissionId: "submission-1" }),
       }),
     );
@@ -700,11 +702,11 @@ describe("ExamsService — review state machine (return / approve / publish / un
   });
 
   describe("returnForCorrection", () => {
-    it("rejects unless the submission is SUBMITTED", async () => {
+    it("rejects unless the submission is SUBMITTED or APPROVED", async () => {
       prisma.resultSubmission.findUnique.mockResolvedValue({ id: "sub-1", status: "DRAFT" });
       await expect(
         service.returnForCorrection(ADMIN_ACTOR, SCHOOL_ID, EXAM_SUBJECT_ID, SECTION_ID, { reason: "Missing marks" }),
-      ).rejects.toThrow("Only a submitted result set waiting for review can be returned");
+      ).rejects.toThrow("Only a submitted or approved (not yet published) result set can be returned for correction");
     });
 
     it("moves SUBMITTED to NEEDS_CORRECTION, records the reason, and notifies the assigned teacher", async () => {

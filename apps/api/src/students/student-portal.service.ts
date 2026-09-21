@@ -222,7 +222,8 @@ export class StudentPortalService {
     const { student } = await this.getSelfOrThrow(actor);
 
     const results = await this.prisma.result.findMany({
-      where: { enrollment: { studentId: student.id }, resultSubmission: { status: "PUBLISHED" } },
+      // Absent students have no mark — an absent row is never shown as 0/max.
+      where: { enrollment: { studentId: student.id }, resultSubmission: { status: "PUBLISHED" }, isAbsent: false },
       include: { examSubject: { include: { exam: { include: { academicYear: true } }, subject: true } }, resultSubmission: true },
       orderBy: { createdAt: "desc" },
     });

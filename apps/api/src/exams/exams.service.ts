@@ -41,6 +41,17 @@ export interface ResultSubmissionListFilters {
   dateTo?: string;
 }
 
+// A single mark, or an explicit absence — never a stored 0 standing in for one.
+type MarkValue = number | "ABSENT";
+
+interface MarkChange {
+  enrollmentId: string;
+  studentId: string;
+  studentName: string;
+  oldMark: MarkValue | null; // null = nothing was recorded before
+  newMark: MarkValue;
+}
+
 @Injectable()
 export class ExamsService {
   constructor(
@@ -350,6 +361,11 @@ export class ExamsService {
       enrollments.map(async (e) => {
         const result = e.results[0];
         const photoUrl = await this.documents.tryGetPhotoUrl("STUDENT", e.studentId);
+        // An absent student has a result row but NO mark: they're resolved
+        // (nothing left to enter) yet contribute no marks, no percentage and
+        // nothing to the average — absence is never shown or counted as 0.
+        const isAbsent = !!result?.isAbsent;
+        const marks = result && !isAbsent ? result.marksObtained : null;
         return {
           enrollmentId: e.id,
           studentId: e.studentId,
@@ -358,14 +374,16 @@ export class ExamsService {
           lastName: e.student.lastName,
           rollNumber: e.rollNumber,
           photoUrl,
-          marksObtained: result?.marksObtained ?? null,
-          percentage: result ? Math.round((Number(result.marksObtained) / examSubject.maxMarks) * 1000) / 10 : null,
-          hasMark: !!result,
+          marksObtained: marks,
+          percentage: marks !== null ? Math.round((Number(marks) / examSubject.maxMarks) * 1000) / 10 : null,
+          hasMark: marks !== null,
+          isAbsent,
         };
       }),
     );
 
-    const completedCount = students.filter((s) => s.hasMark).length;
+    const completedCount = students.filter((s) => s.hasMark || s.isAbsent).length;
+    const absentCount = students.filter((s) => s.isAbsent).length;
     const marks = students.map((s) => s.marksObtained).filter((m): m is Prisma.Decimal => m !== null).map((m) => Number(m));
     const average = marks.length > 0 ? Math.round((marks.reduce((a, b) => a + b, 0) / marks.length) * 100) / 100 : null;
     const highest = marks.length > 0 ? Math.max(...marks) : null;
@@ -389,6 +407,7 @@ export class ExamsService {
       maxMarks: examSubject.maxMarks,
       students,
       completedCount,
+      absentCount,
       missingCount: students.length - completedCount,
       average,
       highest,
@@ -419,18 +438,35 @@ export class ExamsService {
     await this.assertSectionBelongsToClass(sectionId, examSubject.classId);
 
     const enrollmentIds = dto.entries.map((e) => e.enrollmentId);
+
+    // The enrollment must belong to THIS exam's academic year and section —
+    // never just "some active enrollment somewhere". ACTIVE students can be
+    // marked; a student who has since moved on (promoted, retained, or
+    // transferred out) can only have an ALREADY-recorded result corrected,
+    // never receive a brand-new one.
     const validEnrollments = await this.prisma.studentEnrollment.findMany({
-      where: { id: { in: enrollmentIds }, sectionId, status: "ACTIVE" },
-      select: { id: true },
+      where: {
+        id: { in: enrollmentIds },
+        sectionId,
+        academicYearId: examSubject.exam.academicYearId,
+        OR: [{ status: "ACTIVE" }, { results: { some: { examSubjectId } } }],
+      },
+      select: { id: true, studentId: true, student: { select: { firstName: true, lastName: true } } },
     });
-    const validIds = new Set(validEnrollments.map((e) => e.id));
-    const invalid = enrollmentIds.filter((id) => !validIds.has(id));
+    const enrollmentById = new Map(validEnrollments.map((e) => [e.id, e]));
+    const invalid = enrollmentIds.filter((id) => !enrollmentById.has(id));
     if (invalid.length > 0) {
       throw new BadRequestException(`These enrollments aren't active in this section: ${invalid.join(", ")}`);
     }
 
     for (const entry of dto.entries) {
-      if (entry.marksObtained > examSubject.maxMarks) {
+      if (entry.isAbsent) {
+        if (entry.marksObtained !== undefined && entry.marksObtained !== null) {
+          throw new BadRequestException(`Enrollment ${entry.enrollmentId} can't be both absent and have a mark`);
+        }
+      } else if (entry.marksObtained === undefined || entry.marksObtained === null) {
+        throw new BadRequestException(`Enrollment ${entry.enrollmentId} needs a mark, or must be marked absent`);
+      } else if (entry.marksObtained > examSubject.maxMarks) {
         throw new BadRequestException(
           `Marks for enrollment ${entry.enrollmentId} exceed the max of ${examSubject.maxMarks}`,
         );
@@ -442,6 +478,9 @@ export class ExamsService {
     // NEEDS_CORRECTION (an Admin explicitly reopened it) are the only
     // editable states. Result's own legacy status field is never consulted
     // here anymore (see Phase 2's migration notes on why it's still around).
+    // A submitted/approved/published set is corrected by having an Admin
+    // return it for correction first (see returnForCorrection) — never by
+    // editing it in place.
     const existingSubmission = await this.prisma.resultSubmission.findUnique({
       where: { examSubjectId_sectionId: { examSubjectId, sectionId } },
     });
@@ -451,34 +490,80 @@ export class ExamsService {
       );
     }
 
+    // What each student currently has, so the audit trail can say exactly
+    // what changed (old -> new) and unchanged rows can be left out of it.
+    const existingResults = await this.prisma.result.findMany({
+      where: { examSubjectId, enrollmentId: { in: enrollmentIds } },
+      select: { enrollmentId: true, marksObtained: true, isAbsent: true },
+    });
+    const existingByEnrollment = new Map(existingResults.map((r) => [r.enrollmentId, r]));
+
+    const changes: MarkChange[] = [];
+    for (const entry of dto.entries) {
+      const before = existingByEnrollment.get(entry.enrollmentId);
+      const oldMark: MarkValue | null = before ? (before.isAbsent ? "ABSENT" : Number(before.marksObtained)) : null;
+      const newMark: MarkValue = entry.isAbsent ? "ABSENT" : (entry.marksObtained as number);
+      if (oldMark === newMark) continue;
+      const enrollment = enrollmentById.get(entry.enrollmentId)!;
+      changes.push({
+        enrollmentId: entry.enrollmentId,
+        studentId: enrollment.studentId,
+        studentName: `${enrollment.student.firstName} ${enrollment.student.lastName}`,
+        oldMark,
+        newMark,
+      });
+    }
+
     const submission = await this.getOrCreateSubmission(examSubjectId, sectionId);
 
     await this.prisma.$transaction(
-      dto.entries.map((entry) =>
-        this.prisma.result.upsert({
+      dto.entries.map((entry) => {
+        const marksObtained = entry.isAbsent ? null : (entry.marksObtained as number);
+        const isAbsent = !!entry.isAbsent;
+        return this.prisma.result.upsert({
           where: { examSubjectId_enrollmentId: { examSubjectId, enrollmentId: entry.enrollmentId } },
-          update: { marksObtained: entry.marksObtained, enteredByUserId: actor.id },
+          update: { marksObtained, isAbsent, enteredByUserId: actor.id },
           create: {
             examSubjectId,
             enrollmentId: entry.enrollmentId,
-            marksObtained: entry.marksObtained,
+            marksObtained,
+            isAbsent,
             enteredByUserId: actor.id,
             resultSubmissionId: submission.id,
           },
-        }),
-      ),
+        });
+      }),
     );
 
-    await this.audit.record({
-      actor,
-      organizationId: actor.organizationId,
-      schoolId,
-      action: AuditAction.RESULTS_ENTERED,
-      module: AuditModuleName.RESULTS,
-      resourceType: "ExamSubject",
-      resourceId: examSubjectId,
-      after: { enteredCount: dto.entries.length },
-    });
+    if (changes.length > 0) {
+      const isCorrection = changes.some((c) => c.oldMark !== null);
+      const section = await this.prisma.section.findUnique({ where: { id: sectionId } });
+      await this.audit.record({
+        actor,
+        organizationId: actor.organizationId,
+        schoolId,
+        action: isCorrection ? AuditAction.RESULTS_CORRECTED : AuditAction.RESULTS_ENTERED,
+        module: AuditModuleName.RESULTS,
+        resourceType: "ExamSubject",
+        resourceId: examSubjectId,
+        resourceName: `${examSubject.exam.name} · ${examSubject.class.name} · Section ${section?.name ?? ""} · ${examSubject.subject.name}`,
+        severity: isCorrection ? "WARNING" : "INFO",
+        // Why a correction is happening, when the workflow recorded one:
+        // the Admin's reason for returning these results.
+        reason: existingSubmission?.status === "NEEDS_CORRECTION" ? existingSubmission.returnReason : null,
+        after: {
+          examId: examSubject.exam.id,
+          examName: examSubject.exam.name,
+          subjectName: examSubject.subject.name,
+          className: examSubject.class.name,
+          sectionId,
+          maxMarks: examSubject.maxMarks,
+          enteredCount: dto.entries.length,
+          changedCount: changes.length,
+          changes,
+        },
+      });
+    }
 
     return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
   }
@@ -557,9 +642,16 @@ export class ExamsService {
     const submission = await this.prisma.resultSubmission.findUnique({
       where: { examSubjectId_sectionId: { examSubjectId, sectionId } },
     });
-    if (!submission || submission.status !== "SUBMITTED") {
-      throw new BadRequestException("Only a submitted result set waiting for review can be returned");
+    // SUBMITTED (still under review) or APPROVED (reviewed but not yet — or no
+    // longer — published). APPROVED used to be a dead end: nothing could
+    // reopen it, so a mistake found after approval (or after Undo Publish)
+    // could never be corrected. A PUBLISHED set still has to be unpublished
+    // first — that is a separate, reason-carrying step which this doesn't
+    // bypass.
+    if (!submission || !["SUBMITTED", "APPROVED"].includes(submission.status)) {
+      throw new BadRequestException("Only a submitted or approved (not yet published) result set can be returned for correction");
     }
+    const returnedFrom = submission.status;
 
     await this.prisma.resultSubmission.update({
       where: { id: submission.id },
@@ -574,7 +666,7 @@ export class ExamsService {
       module: AuditModuleName.RESULTS,
       resourceType: "ResultSubmission",
       resourceId: submission.id,
-      after: { examSubjectId, sectionId, reason: dto.reason },
+      after: { examSubjectId, sectionId, reason: dto.reason, returnedFrom },
     });
 
     const teacherUserId = await this.resolveResponsibleTeacherUserId(sectionId, examSubject.subjectId, examSubject.exam.academicYearId);
@@ -1105,6 +1197,9 @@ export class ExamsService {
         enrollmentId,
         resultSubmission: { status: "PUBLISHED" },
         examSubject: { exam: { termId } },
+        // An absent student has no mark: excluded from BOTH the marks and the
+        // max-marks sums, so absence is never counted as a 0.
+        isAbsent: false,
       },
       select: { marksObtained: true, examSubject: { select: { maxMarks: true } } },
     });

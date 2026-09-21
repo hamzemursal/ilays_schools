@@ -36,6 +36,9 @@ export const AuditAction = {
   ATTENDANCE_DRAFT_SAVED: "ATTENDANCE_DRAFT_SAVED",
 
   RESULTS_ENTERED: "RESULTS_ENTERED",
+  // A save that changed at least one ALREADY-recorded mark (or absence) —
+  // distinct from first-time entry so corrections are easy to find.
+  RESULTS_CORRECTED: "RESULTS_CORRECTED",
   RESULTS_APPROVED: "RESULTS_APPROVED",
   EXAM_PAPER_UPLOADED: "EXAM_PAPER_UPLOADED",
   RESULTS_SUBMITTED: "RESULTS_SUBMITTED",

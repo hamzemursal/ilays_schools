@@ -875,7 +875,10 @@ export interface ResultRow {
   photoUrl: string | null;
   marksObtained: string | null;
   percentage: number | null;
+  // A numeric mark is recorded (never true for an absent student).
   hasMark: boolean;
+  // Explicitly absent: no mark at all — not a 0, and not "missing".
+  isAbsent: boolean;
 }
 
 export interface ResultSubmissionInfo {
@@ -907,7 +910,9 @@ export interface ResultsForSection {
   context: ResultsSectionContext;
   maxMarks: number;
   students: ResultRow[];
+  // Students with a mark OR an explicit absence — i.e. nothing left to enter.
   completedCount: number;
+  absentCount: number;
   missingCount: number;
   average: number | null;
   highest: number | null;
@@ -2754,7 +2759,7 @@ export const api = {
     schoolId: string,
     examSubjectId: string,
     sectionId: string,
-    entries: { enrollmentId: string; marksObtained: number }[],
+    entries: { enrollmentId: string; marksObtained?: number; isAbsent?: boolean }[],
   ) =>
     request<ResultsForSection>(
       `/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/results`,

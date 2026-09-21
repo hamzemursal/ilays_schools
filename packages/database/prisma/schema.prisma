@@ -1019,7 +1019,11 @@ model Result {
   resultSubmissionId String
   resultSubmission   ResultSubmission  @relation(fields: [resultSubmissionId], references: [id], onDelete: Cascade)
 
-  marksObtained   Decimal @db.Decimal(6, 2)
+  // Null exactly when isAbsent is true (enforced by a CHECK constraint): an
+  // absent student has NO mark — never a stored 0. Every reader that sums or
+  // averages marks must skip absent rows so absence is never counted as zero.
+  marksObtained   Decimal? @db.Decimal(6, 2)
+  isAbsent        Boolean  @default(false)
   enteredByUserId String
 
   // Superseded by ResultSubmission.status — kept only so this migration

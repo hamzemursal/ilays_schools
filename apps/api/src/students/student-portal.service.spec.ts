@@ -279,7 +279,7 @@ describe("StudentPortalService.myResults", () => {
     const result = await service.myResults(ACTOR);
 
     expect(prisma.result.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { enrollment: { studentId: "student-1" }, resultSubmission: { status: "PUBLISHED" } } }),
+      expect.objectContaining({ where: { enrollment: { studentId: "student-1" }, resultSubmission: { status: "PUBLISHED" }, isAbsent: false } }),
     );
     expect(result[0].percentage).toBe(80);
   });

@@ -22,6 +22,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { SuperAdminDashboard } from "@/features/dashboard/SuperAdminDashboard";
+import { OrganizationControlCenter } from "@/features/dashboard/OrganizationControlCenter";
+import { isSuperAdmin } from "@/components/layout/super-admin-nav";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -62,6 +64,19 @@ export default function DashboardPage() {
   }, [accessToken, primarySchool, hasSchoolDashboard]);
 
   if (loading || !user || isStudent) return null;
+
+  // The Super Admin's landing page is the Organization Control Center - a
+  // separate, organization-level layout. Every other role (School Admin,
+  // Teacher, Organization Admin, Central Finance/HR...) keeps the dashboard
+  // below exactly as it was.
+  if (isSuperAdmin(user)) {
+    return (
+      <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6 sm:px-6">
+        <OrganizationControlCenter />
+        <YourAccountCard roles={user.roles} schools={user.schools} />
+      </div>
+    );
+  }
 
   const quickLinks = [
     primarySchool &&
@@ -154,34 +169,41 @@ export default function DashboardPage() {
           </section>
         )}
 
-        <Card padding="none">
-          <div className="border-b border-border px-5 py-4">
-            <h2 className="text-sm font-semibold text-foreground">Your account</h2>
-          </div>
-          <div className="grid gap-4 p-5 sm:grid-cols-2">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">Roles</p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {user.roles.map((role) => (
-                  <Badge key={role} tone="accent">
-                    {role}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">
-                Authorized schools
-              </p>
-              {user.schools.length === 0 ? (
-                <p className="mt-2 text-sm text-foreground-soft">Organization-wide access.</p>
-              ) : (
-                <p className="mt-2 text-sm text-foreground">{user.schools.map((s) => s.name).join(", ")}</p>
-              )}
-            </div>
-          </div>
-        </Card>
+        <YourAccountCard roles={user.roles} schools={user.schools} />
       </div>
     </div>
+  );
+}
+
+// The account summary card (roles and authorized schools), shared by every
+// dashboard variant so its markup - and the role badges other tests look for -
+// stays identical.
+function YourAccountCard({ roles, schools }: { roles: string[]; schools: { name: string }[] }) {
+  return (
+    <Card padding="none">
+      <div className="border-b border-border px-5 py-4">
+        <h2 className="text-sm font-semibold text-foreground">Your account</h2>
+      </div>
+      <div className="grid gap-4 p-5 sm:grid-cols-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">Roles</p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {roles.map((role) => (
+              <Badge key={role} tone="accent">
+                {role}
+              </Badge>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">Authorized schools</p>
+          {schools.length === 0 ? (
+            <p className="mt-2 text-sm text-foreground-soft">Organization-wide access.</p>
+          ) : (
+            <p className="mt-2 text-sm text-foreground">{schools.map((s) => s.name).join(", ")}</p>
+          )}
+        </div>
+      </div>
+    </Card>
   );
 }

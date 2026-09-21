@@ -55,6 +55,13 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 
+  /* Super Admin identity colors - static, only ever referenced by the Super
+     Admin sidebar/header/dashboard components (bg-sa-navy etc.), so they
+     cannot leak into any other role's UI. */
+  --color-sa-navy: #0b1220;
+  --color-sa-navy-2: #0f172a;
+  --color-sa-cyan: #06b6d4;
+
   /* Tailwind's box-shadow theme namespace — this is what actually makes
      the shadow-sm/md/lg utility classes used all over the app (Card,
      StatCard, dropdown menus, dialogs) resolve to the soft values above. */
@@ -78,4 +85,37 @@ body {
 ::selection {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+/* SUPER ADMIN theme - "Organization Control Center".
+   Applied by AppShell as data-theme="super-admin" on the shell root, and ONLY
+   when the signed-in account holds the SUPER_ADMIN role, so every page a
+   Super Admin opens (Dashboard, Schools, Audit Log, Central Finance...) picks
+   up Indigo actions on a light slate canvas without any page or shared
+   component changing. School Admin, Teacher, Student and Parent never get this
+   attribute and keep the default palette above. Because @theme inline maps
+   the utilities straight to these variables, overriding them on a wrapper is
+   enough - no component needs to know about the theme.
+   Text-bearing status colors stay a shade darker than the brand green/amber
+   (#10B981 / #F59E0B) so badges keep readable contrast; the brand values are
+   used for non-text marks (status dots, bars) inside the Super Admin
+   components themselves. */
+[data-theme="super-admin"] {
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-soft: #eef2ff;
+  --surface: #f8fafc;
+  --surface-soft: #f8fafc;
+  --surface-hover: #f1f5f9;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --foreground: #0f172a;
+  --foreground-soft: #64748b;
+  --foreground-muted: #8391a7;
+  --success: #059669;
+  --success-soft: #ecfdf5;
+  --warning: #b45309;
+  --warning-soft: #fffbeb;
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
 }

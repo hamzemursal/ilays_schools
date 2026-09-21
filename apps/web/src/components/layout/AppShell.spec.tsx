@@ -116,3 +116,73 @@ describe("AppShell — shared school-context resolution", () => {
     expect(apiMock.listSchools).not.toHaveBeenCalled();
   });
 });
+
+describe("AppShell — the Super Admin shell is scoped to SUPER_ADMIN only", () => {
+  function signIn(user: Record<string, unknown>) {
+    authMock.useAuth.mockReturnValue({ user, accessToken: "token-1", loading: false, refreshProfile: vi.fn(), logout: vi.fn() });
+  }
+
+  it("SUPER_ADMIN gets the navy Organization Control Center shell and the scoped Indigo theme", async () => {
+    signIn(superAdminUser());
+    apiMock.listSchools.mockResolvedValue([school("school-a", "Xaafuun Secondary School")]);
+
+    const { container } = renderShell();
+
+    expect((await screen.findAllByText("Organization Control Center")).length).toBeGreaterThan(0);
+    expect(container.querySelector('[data-theme="super-admin"]')).not.toBeNull();
+    expect(screen.getAllByRole("navigation", { name: "Organization navigation" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Switch school context" }).length).toBeGreaterThan(0);
+  });
+
+  it("the Super Admin sidebar identity stays the organization even while a school is selected", async () => {
+    signIn({ ...superAdminUser(), permissions: ["schools.view", "academic.view"] });
+    apiMock.listSchools.mockResolvedValue([school("school-a", "Xaafuun Secondary School")]);
+
+    renderShell();
+
+    expect((await screen.findAllByText("Ilays Schools")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Selected school · Xaafuun Secondary School").length).toBeGreaterThan(0);
+  });
+
+  it("a SCHOOL_ADMIN gets NO Super Admin theme and keeps the school-branded shell", () => {
+    signIn({
+      id: "u2",
+      email: "admin@school.example",
+      permissions: ["academic.view", "students.view"],
+      roles: ["SCHOOL_ADMIN"],
+      schools: [{ id: "school-a", name: "Xaafuun Secondary School", logoUrl: null }],
+      mustChangePassword: false,
+      mustSetup2FA: false,
+    });
+
+    const { container } = renderShell();
+
+    expect(container.querySelector("[data-theme]")).toBeNull();
+    expect(screen.queryByText("Organization Control Center")).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Organization navigation" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("Xaafuun Secondary School").length).toBeGreaterThan(0);
+    expect(screen.getByText("Main menu")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["ORGANIZATION_ADMIN", ["schools.view"]],
+    ["TEACHER", ["results.enter"]],
+    ["PARENT", []],
+  ])("%s gets no Super Admin theme or sidebar", (role, permissions) => {
+    signIn({
+      id: "u3",
+      email: "someone@example.test",
+      permissions,
+      roles: [role],
+      schools: [],
+      mustChangePassword: false,
+      mustSetup2FA: false,
+    });
+    apiMock.listSchools.mockResolvedValue([]);
+
+    const { container } = renderShell();
+
+    expect(container.querySelector("[data-theme]")).toBeNull();
+    expect(screen.queryByText("Organization Control Center")).not.toBeInTheDocument();
+  });
+});

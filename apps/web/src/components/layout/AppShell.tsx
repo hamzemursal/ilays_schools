@@ -12,6 +12,9 @@ import { TwoFactorSection } from "@/features/account/TwoFactorSection";
 import { GraduationCap, ShieldCheck } from "lucide-react";
 import { Sidebar, useCurrentSchool } from "./Sidebar";
 import { Topbar } from "./Topbar";
+import { SuperAdminSidebar } from "./SuperAdminSidebar";
+import { SuperAdminTopbar } from "./SuperAdminTopbar";
+import { isSuperAdmin } from "./super-admin-nav";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -23,6 +26,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Finance/HR viewer). Only they ever need the full authorized-schools
   // list, so nobody else pays for this fetch.
   const canSwitchSchools = !!user?.permissions.includes("schools.view");
+  // The Super Admin (and only the Super Admin) gets the "Organization Control
+  // Center" shell: its own navy sidebar and organization header, and the
+  // scoped Indigo theme below. Every other role - School Admin, Teacher,
+  // Student, Parent, Organization Admin, Central Finance/HR - renders the
+  // shared Sidebar/Topbar exactly as before.
+  const superAdmin = isSuperAdmin(user);
   const currentSchoolFromUrl = useCurrentSchool(user);
   const [schools, setSchools] = useState<School[] | null>(null);
 
@@ -34,10 +43,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // can't know it on its own.
   useEffect(() => {
     if (!canSwitchSchools || !accessToken) return;
-    api
-      .listSchools(accessToken)
-      .then(setSchools)
-      .catch(() => setSchools([]));
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const load = (retriesLeft: number) =>
+      api
+        .listSchools(accessToken)
+        .then((list) => {
+          if (!cancelled) setSchools(list);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          // One quiet retry (a cold API or a brief hiccup) before settling on
+          // "none", so a transient failure never reads as "no schools".
+          if (retriesLeft > 0) retry = setTimeout(() => load(retriesLeft - 1), 1500);
+          else setSchools([]);
+        });
+    load(1);
+    return () => {
+      cancelled = true;
+      if (retry) clearTimeout(retry);
+    };
   }, [canSwitchSchools, accessToken]);
 
   // `schools` (from listSchools) carries the real name but no logoUrl — that
@@ -108,15 +133,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-surface print:h-auto print:overflow-visible">
-      <aside className="hidden w-64 shrink-0 border-r border-border lg:block print:hidden">
-        <Sidebar
-          user={user}
-          accessToken={accessToken}
-          canSwitchSchools={canSwitchSchools}
-          resolvedCurrentSchool={resolvedCurrentSchool}
-          onBrandingChanged={refreshProfile}
-        />
+    <div
+      data-theme={superAdmin ? "super-admin" : undefined}
+      className="flex h-screen overflow-hidden bg-surface print:h-auto print:overflow-visible"
+    >
+      <aside className={`hidden w-64 shrink-0 border-r lg:block print:hidden ${superAdmin ? "border-sa-navy" : "border-border"}`}>
+        {superAdmin ? (
+          <SuperAdminSidebar user={user} resolvedCurrentSchool={resolvedCurrentSchool} />
+        ) : (
+          <Sidebar
+            user={user}
+            accessToken={accessToken}
+            canSwitchSchools={canSwitchSchools}
+            resolvedCurrentSchool={resolvedCurrentSchool}
+            onBrandingChanged={refreshProfile}
+          />
+        )}
       </aside>
 
       {drawerOpen && (
@@ -125,31 +157,49 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="absolute inset-y-0 left-0 w-72 max-w-[85%] border-r border-border shadow-lg">
             <button
               onClick={() => setDrawerOpen(false)}
-              className="absolute right-3 top-3 rounded-lg p-1.5 text-foreground-soft hover:bg-surface-hover"
+              className={`absolute right-3 top-3 rounded-lg p-1.5 ${
+                superAdmin ? "z-10 text-slate-300 hover:bg-white/10" : "text-foreground-soft hover:bg-surface-hover"
+              }`}
               aria-label="Close menu"
             >
               <X className="size-5" />
             </button>
-            <Sidebar
-              user={user}
-              accessToken={accessToken}
-              canSwitchSchools={canSwitchSchools}
-              resolvedCurrentSchool={resolvedCurrentSchool}
-              onBrandingChanged={refreshProfile}
-              onNavigate={() => setDrawerOpen(false)}
-            />
+            {superAdmin ? (
+              <SuperAdminSidebar
+                user={user}
+                resolvedCurrentSchool={resolvedCurrentSchool}
+                onNavigate={() => setDrawerOpen(false)}
+              />
+            ) : (
+              <Sidebar
+                user={user}
+                accessToken={accessToken}
+                canSwitchSchools={canSwitchSchools}
+                resolvedCurrentSchool={resolvedCurrentSchool}
+                onBrandingChanged={refreshProfile}
+                onNavigate={() => setDrawerOpen(false)}
+              />
+            )}
           </div>
         </div>
       )}
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden print:overflow-visible">
         <div className="print:hidden">
-          <Topbar
-            onMenuClick={() => setDrawerOpen(true)}
-            canSwitchSchools={canSwitchSchools}
-            resolvedCurrentSchool={resolvedCurrentSchool}
-            schools={schools}
-          />
+          {superAdmin ? (
+            <SuperAdminTopbar
+              onMenuClick={() => setDrawerOpen(true)}
+              resolvedCurrentSchool={resolvedCurrentSchool}
+              schools={schools}
+            />
+          ) : (
+            <Topbar
+              onMenuClick={() => setDrawerOpen(true)}
+              canSwitchSchools={canSwitchSchools}
+              resolvedCurrentSchool={resolvedCurrentSchool}
+              schools={schools}
+            />
+          )}
         </div>
         <SelectedChildProvider>
           <main className="flex-1 overflow-y-auto print:overflow-visible">

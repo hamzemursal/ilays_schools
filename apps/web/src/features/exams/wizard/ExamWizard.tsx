@@ -44,20 +44,24 @@ export function ExamWizard({ schoolId }: { schoolId: string }) {
         setClasses(c);
         setSubjects(s);
         const current = y.find((year) => year.isCurrent) ?? y[0];
-        if (current) {
-          const term1 = current.terms.find((t) => t.name === "Term 1");
-          setState((prev) => ({
-            ...prev,
-            academicYearId: prev.academicYearId || current.id,
-            termId: prev.termId || term1?.id || "",
-          }));
-        }
+        if (current) setState((prev) => ({ ...prev, academicYearId: prev.academicYearId || current.id }));
       })
       .catch((err) => setLoadError(err instanceof ApiError ? err.message : "Failed to load form data"));
   }, [accessToken, schoolId]);
 
   function patch(p: Partial<typeof state>) {
     setState((prev) => ({ ...prev, ...p }));
+  }
+
+  // A brand-new exam starts from a clean form on the first step. Nothing from
+  // the exam just created carries over — above all not its Term, because
+  // reusing it is exactly how a Term 2 exam ends up saved under Term 1.
+  function createAnother() {
+    const current = years.find((y) => y.isCurrent) ?? years[0];
+    setState(emptyExamWizardState(current?.id ?? ""));
+    setStep(0);
+    setSubmitError(null);
+    setCreated(null);
   }
 
   const canProceed =
@@ -124,7 +128,7 @@ export function ExamWizard({ schoolId }: { schoolId: string }) {
           <Button variant="outline" onClick={() => router.push(`/schools/${schoolId}/academic?tab=Exams`)}>
             Back to Exams
           </Button>
-          <Button onClick={() => setCreated(null)}>Create another</Button>
+          <Button onClick={createAnother}>Create another</Button>
         </div>
       </Card>
     );

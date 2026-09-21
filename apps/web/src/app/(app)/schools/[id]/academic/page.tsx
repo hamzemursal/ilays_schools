@@ -25,6 +25,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { BulkActionBar } from "@/components/ui/BulkActionBar";
 import { useToast } from "@/components/ui/Toast";
 import { runBulkAction, summarizeBulkResult } from "@/lib/bulkAction";
+import { ExamTermControl } from "@/features/exams/ExamTermControl";
 import { Check, ChevronRight, GraduationCap, Pencil, Plus, Search, Trash2 } from "lucide-react";
 
 const TABS = ["Years", "Classes & sections", "Subjects", "Exams"] as const;
@@ -974,6 +975,7 @@ function ExamsSection({
               schoolId={schoolId}
               accessToken={accessToken}
               exam={exam}
+              years={years}
               classes={classes}
               subjects={subjects}
               setExams={setExams}
@@ -990,6 +992,7 @@ function ExamRow({
   schoolId,
   accessToken,
   exam,
+  years,
   classes,
   subjects,
   setExams,
@@ -998,6 +1001,7 @@ function ExamRow({
   schoolId: string;
   accessToken: string;
   exam: Exam;
+  years: AcademicYear[];
   classes: ClassWithSections[];
   subjects: Subject[];
   setExams: (fn: (prev: Exam[]) => Exam[]) => void;
@@ -1085,6 +1089,18 @@ function ExamRow({
             </>
           }
           description="Subjects already scheduled for this exam."
+          actions={
+            <ExamTermControl
+              schoolId={schoolId}
+              accessToken={accessToken}
+              exam={exam}
+              years={years}
+              canManage={canManage}
+              onChanged={(term) =>
+                setExams((prev) => prev.map((ex) => (ex.id === exam.id ? { ...ex, termId: term.id, term } : ex)))
+              }
+            />
+          }
         />
         <div className="space-y-2 p-5">
           {exam.examSubjects.map((es) => (

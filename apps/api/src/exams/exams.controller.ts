@@ -4,6 +4,7 @@ import { ExamsService } from "./exams.service";
 import { CreateExamDto } from "./dto/create-exam.dto";
 import { CreateExamSubjectDto } from "./dto/create-exam-subject.dto";
 import { UpdateExamSubjectDto } from "./dto/update-exam-subject.dto";
+import { UpdateExamTermDto } from "./dto/update-exam-term.dto";
 import { EnterMarksDto } from "./dto/enter-marks.dto";
 import { ReturnForCorrectionDto } from "./dto/return-for-correction.dto";
 import { UnpublishResultsDto } from "./dto/unpublish-results.dto";
@@ -46,6 +47,19 @@ export class ExamsController {
     @Body() dto: CreateExamSubjectDto,
   ) {
     return this.exams.createExamSubject(user, schoolId, examId, dto);
+  }
+
+  // Repair path for an exam saved under the wrong (or no) term — see
+  // ExamsService.updateExamTerm. Admin-only, same bar as creating an exam.
+  @RequirePermissions("results.approve")
+  @Patch(":examId/term")
+  updateTerm(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("examId") examId: string,
+    @Body() dto: UpdateExamTermDto,
+  ) {
+    return this.exams.updateExamTerm(user, schoolId, examId, dto);
   }
 
   @RequirePermissions("results.approve")

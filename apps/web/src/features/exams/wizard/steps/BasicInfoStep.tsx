@@ -63,13 +63,12 @@ export function BasicInfoStep({
   const terms = selectedYear?.terms ?? [];
 
   function onAcademicYearChange(id: string) {
-    // Term choices belong to whichever year is selected — a Term 1 id from
-    // the previous year isn't even a valid option for the new one (each
-    // year's terms have their own ids), so switching years re-defaults to
-    // the new year's own Term 1, same as Exam Type/Academic Year already
-    // default to a usable value the Admin can still change.
-    const year = years.find((y) => y.id === id);
-    onChange({ academicYearId: id, termId: year?.terms.find((t) => t.name === "Term 1")?.id ?? "" });
+    // Term choices belong to whichever year is selected — the previous
+    // year's term id isn't even a valid option for the new one. The Term is
+    // deliberately never pre-selected: a default would make it far too easy
+    // to save a Term 2 exam under Term 1 (which silently hides Term 2 from
+    // the Annual Result), so the Admin must always choose it on purpose.
+    onChange({ academicYearId: id, termId: "" });
   }
 
   function onStartDateChange(value: string) {
@@ -93,7 +92,7 @@ export function BasicInfoStep({
             required
             value={state.name}
             onChange={(e) => onChange({ name: e.target.value })}
-            placeholder="e.g. Mid-Term Exam – Term 1 2027"
+            placeholder="e.g. Term 1 Exam 2027"
             autoFocus
           />
         </FormField>
@@ -120,7 +119,12 @@ export function BasicInfoStep({
           </Select>
         </FormField>
 
-        <FormField label="Term" htmlFor="examTermId" required hint="Every exam counts toward one of the year's two terms.">
+        <FormField
+          label="Term"
+          htmlFor="examTermId"
+          required
+          hint="Which term this exam counts toward — Term 1 Exam or Term 2 Exam. Exam Type below is only a label."
+        >
           <Select
             id="examTermId"
             value={state.termId}

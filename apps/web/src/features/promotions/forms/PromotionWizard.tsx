@@ -143,6 +143,11 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
 
   const needsDestination = (outcome: PromotionOutcome | "") => outcome === "PROMOTED" || outcome === "RETAINED";
 
+  // Promotion only ever moves students INTO an academic year the Admin has
+  // already created, and only a later one than the year being promoted from.
+  const fromYear = years.find((y) => y.id === fromYearId);
+  const laterYears = fromYear ? years.filter((y) => new Date(y.startDate) > new Date(fromYear.startDate)) : [];
+
   const allDecided = preview
     ? preview.students.every((s) => {
         const outcome = outcomes.get(s.enrollmentId) ?? "";
@@ -219,6 +224,7 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
               value={fromYearId}
               onChange={(e) => {
                 setFromYearId(e.target.value);
+                setToYearId("");
                 setPreview(null);
               }}
             >
@@ -296,7 +302,9 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
                                 aria-label={`Outcome for ${s.firstName} ${s.lastName}`}
                               >
                                 <option value="">Review…</option>
-                                <option value={preview.naturalOutcome}>{NATURAL_OUTCOME_LABEL[preview.naturalOutcome]}</option>
+                                <option value={preview.naturalOutcome} disabled={s.eligible === false}>
+                                  {NATURAL_OUTCOME_LABEL[preview.naturalOutcome]}
+                                </option>
                                 <option value="RETAINED">Retain</option>
                               </Select>
                             </td>
@@ -332,22 +340,26 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
                   <FormField label="To academic year" htmlFor="toAcademicYearId" required>
                     <Select id="toAcademicYearId" required value={toYearId} onChange={(e) => setToYearId(e.target.value)}>
                       <option value="">Select…</option>
-                      {years
-                        .filter((y) => y.id !== fromYearId)
-                        .map((y) => (
-                          <option key={y.id} value={y.id}>
-                            {y.name}
-                          </option>
-                        ))}
+                      {laterYears.map((y) => (
+                        <option key={y.id} value={y.id}>
+                          {y.name}
+                        </option>
+                      ))}
                     </Select>
                   </FormField>
                 </div>
+                {laterYears.length === 0 && (
+                  <Alert tone="warning" className="mt-4">
+                    There is no academic year after {fromYear?.name ?? "this one"} yet. Create the new academic year first
+                    (Academic → Years) and prepare its classes and sections — Promotion never creates an academic year for you.
+                  </Alert>
+                )}
 
                 <Button
                   className="mt-4"
                   icon={<CheckCircle2 className="size-4" />}
                   loading={confirming}
-                  disabled={!toYearId || !allDecided}
+                  disabled={!toYearId || !laterYears.some((y) => y.id === toYearId) || !allDecided}
                   onClick={onConfirm}
                 >
                   Confirm promotion

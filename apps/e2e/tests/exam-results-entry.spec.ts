@@ -22,12 +22,13 @@ test("Admin creates an exam, Teacher submits results, Admin approves and publish
   // same pattern as "Add student"/"View School" elsewhere — match by text.
   await page.getByText("Create Exam", { exact: true }).click();
 
-  // Step 1 — Basic Information. None of this wizard's fields have an
-  // id/htmlFor association at all (unlike most of this codebase's forms),
-  // so getByPlaceholder is the only reliable anchor here. Type and Academic
-  // Year both already default to a usable value (Mid-Term / the current
-  // year) — left untouched.
-  await page.getByPlaceholder("e.g. Mid-Term Exam – Term 1 2027").fill(examName);
+  // Step 1 — Basic Information. Exam Type and Academic Year already default
+  // to a usable value (Mid-Term / the current year) — left untouched. Term is
+  // deliberately NEVER pre-selected (a default is how a Term 2 exam ends up
+  // saved under Term 1), so it must be chosen: the seeded year always has
+  // Term 1 and Term 2, after the "Select…" placeholder.
+  await page.getByPlaceholder("e.g. Term 1 Exam 2027").fill(examName);
+  await page.locator("#examTermId").selectOption({ label: "Term 1 (50%)" });
   await page.getByRole("button", { name: "Next" }).click();
 
   // Step 2 — Classes & Subjects: checkboxes, not a dropdown. With exactly

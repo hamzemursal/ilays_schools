@@ -2702,7 +2702,7 @@ export const api = {
     schoolId: string,
     body: {
       academicYearId: string;
-      termId?: string;
+      termId: string;
       name: string;
       type: ExamType;
       startDate?: string;
@@ -2714,6 +2714,13 @@ export const api = {
       examDate?: string;
     },
   ) => request<Exam>(`/schools/${schoolId}/exams`, { method: "POST", body, accessToken }),
+  // Repair path for an exam saved under the wrong (or, for legacy exams, no)
+  // term — see ExamsService.updateExamTerm. Returns the exam with its term.
+  updateExamTerm: (accessToken: string, schoolId: string, examId: string, body: { termId: string }) =>
+    request<{ id: string; termId: string | null; term: { id: string; name: string } | null }>(
+      `/schools/${schoolId}/exams/${examId}/term`,
+      { method: "PATCH", body, accessToken },
+    ),
   createExamSubject: (
     accessToken: string,
     schoolId: string,

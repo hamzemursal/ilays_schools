@@ -218,3 +218,75 @@ describe("PromotionWizard — per-student review table", () => {
     expect(destination.value).toBe("");
   });
 });
+
+// Phase 1 — Promotion only moves students into an academic year the Admin
+// has already created and that comes AFTER the source year, and a student
+// below the pass mark can only be retained.
+describe("PromotionWizard — target year and eligibility rules", () => {
+  const EARLIER: AcademicYear = { id: "year-0", name: "2024-2025", startDate: "2024-01-01", endDate: "2024-12-31", isCurrent: false, terms: [] };
+
+  it("only offers academic years that start AFTER the year being promoted from — never the same or an earlier one", async () => {
+    apiMock.listAcademicYears.mockResolvedValue([EARLIER, ...YEARS]);
+    apiMock.previewPromotion.mockResolvedValue(basePreview());
+    const user = userEvent.setup();
+    renderWizard();
+    await preview(user);
+
+    const toYear = screen.getByLabelText("To academic year", { exact: false }) as HTMLSelectElement;
+    expect(Array.from(toYear.options).map((o) => o.textContent)).toEqual(["Select…", "2028"]);
+  });
+
+  it("with no later academic year, tells the Admin to create it first and never lets them confirm", async () => {
+    apiMock.listAcademicYears.mockResolvedValue([YEARS[0]]); // only the current year exists
+    apiMock.previewPromotion.mockResolvedValue(basePreview());
+    const user = userEvent.setup();
+    renderWizard();
+    await preview(user);
+
+    expect(screen.getByText(/Create the new academic year first/)).toBeInTheDocument();
+    expect(screen.getByText(/Promotion never creates an academic year for you/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm promotion" })).toBeDisabled();
+    expect(apiMock.confirmPromotion).not.toHaveBeenCalled();
+  });
+
+  it("a student below 50% cannot be given the Promote outcome — only Retain is selectable", async () => {
+    apiMock.previewPromotion.mockResolvedValue(
+      basePreview({
+        students: [eligibleStudent({ term1Percentage: 45, term2Percentage: 41, annualPercentage: 43, eligible: false, suggestedOutcome: "RETAINED" })],
+      }),
+    );
+    const user = userEvent.setup();
+    renderWizard();
+    await preview(user);
+
+    const outcome = screen.getByLabelText("Outcome for Ahmed Ali") as HTMLSelectElement;
+    const optionFor = (value: string) => Array.from(outcome.options).find((o) => o.value === value)!;
+    expect(optionFor("PROMOTED").disabled).toBe(true);
+    expect(optionFor("RETAINED").disabled).toBe(false);
+    expect(outcome.value).toBe("RETAINED");
+  });
+
+  it("an eligible student (exactly 50.00%) can still be promoted", async () => {
+    apiMock.previewPromotion.mockResolvedValue(
+      basePreview({ students: [eligibleStudent({ annualPercentage: 50, term1Percentage: 50, term2Percentage: 50, eligible: true })] }),
+    );
+    const user = userEvent.setup();
+    renderWizard();
+    await preview(user);
+
+    const outcome = screen.getByLabelText("Outcome for Ahmed Ali") as HTMLSelectElement;
+    expect(Array.from(outcome.options).find((o) => o.value === "PROMOTED")!.disabled).toBe(false);
+    expect(screen.getByText("50.00%", { selector: "td.font-medium" })).toBeInTheDocument();
+  });
+
+  it("shows the API's message when the school structure is incomplete (e.g. Form 3 not created) instead of a Graduate outcome", async () => {
+    apiMock.previewPromotion.mockRejectedValue(new ApiError("Form 2 can't be promoted yet — Form 3 has not been created in this school.", 400));
+    const user = userEvent.setup();
+    renderWizard();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Preview" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(await screen.findByText(/Form 3 has not been created/)).toBeInTheDocument();
+    expect(screen.queryByText(/Graduate/)).not.toBeInTheDocument();
+  });
+});

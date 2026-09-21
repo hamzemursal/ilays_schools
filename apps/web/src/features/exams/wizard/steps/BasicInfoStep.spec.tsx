@@ -74,7 +74,15 @@ describe("BasicInfoStep — Term selector", () => {
     expect(termSelect.options[0].textContent).toBe("Select an academic year first");
   });
 
-  it("re-defaults to the new year's own Term 1 when the academic year changes — the old year's term id isn't a valid option anymore", async () => {
+  it("never pre-selects a term — a fresh form has none chosen, so Term 1 can't be saved by accident", () => {
+    render(<Harness years={[YEAR_WITH_TERMS]} />);
+
+    const termSelect = screen.getByLabelText("Term", { exact: false }) as HTMLSelectElement;
+    expect(termSelect.value).toBe("");
+    expect(isBasicInfoValid({ ...emptyExamWizardState("year-1"), name: "Term 2 Exam" }, [YEAR_WITH_TERMS])).toBe(false);
+  });
+
+  it("clears the chosen term when the academic year changes (the old year's term id isn't valid for the new one) and does NOT default to Term 1", async () => {
     const user = userEvent.setup();
     render(<Harness years={[YEAR_WITH_TERMS, OTHER_YEAR]} initialTermId="term-1" />);
 
@@ -82,7 +90,7 @@ describe("BasicInfoStep — Term selector", () => {
     await user.selectOptions(yearSelect, "year-2");
 
     const termSelect = screen.getByLabelText("Term", { exact: false }) as HTMLSelectElement;
-    expect(termSelect.value).toBe("term-3");
+    expect(termSelect.value).toBe("");
     const optionLabels = Array.from(termSelect.options).map((o) => o.textContent);
     expect(optionLabels).toEqual(["Select…", "Term 1 (40%)", "Term 2 (60%)"]);
   });

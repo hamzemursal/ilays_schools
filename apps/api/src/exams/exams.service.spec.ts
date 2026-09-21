@@ -57,7 +57,7 @@ function baseExamSubject(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 type MockPrisma = {
-  exam: { findMany: jest.Mock; findFirst: jest.Mock; findUniqueOrThrow: jest.Mock };
+  exam: { findMany: jest.Mock; findFirst: jest.Mock; findUniqueOrThrow: jest.Mock; update: jest.Mock };
   examSubject: { findFirst: jest.Mock; findMany: jest.Mock; create: jest.Mock; update: jest.Mock; createMany: jest.Mock };
   classSubject: { findMany: jest.Mock };
   class: { findFirst: jest.Mock };
@@ -67,7 +67,7 @@ type MockPrisma = {
   studentEnrollment: { findMany: jest.Mock; count: jest.Mock };
   resultSubmission: { findUnique: jest.Mock; upsert: jest.Mock; update: jest.Mock; findMany: jest.Mock };
   result: { upsert: jest.Mock; count: jest.Mock; findMany: jest.Mock };
-  term: { findMany: jest.Mock };
+  term: { findMany: jest.Mock; findFirst: jest.Mock };
   teacher: { findFirst: jest.Mock };
   teacherAssignment: { findFirst: jest.Mock; findMany: jest.Mock };
   $transaction: jest.Mock;
@@ -75,7 +75,7 @@ type MockPrisma = {
 
 function createMockPrisma(): MockPrisma {
   return {
-    exam: { findMany: jest.fn(), findFirst: jest.fn(), findUniqueOrThrow: jest.fn() },
+    exam: { findMany: jest.fn(), findFirst: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn() },
     examSubject: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn(), createMany: jest.fn() },
     classSubject: { findMany: jest.fn() },
     class: { findFirst: jest.fn() },
@@ -85,7 +85,7 @@ function createMockPrisma(): MockPrisma {
     studentEnrollment: { findMany: jest.fn(), count: jest.fn() },
     resultSubmission: { findUnique: jest.fn(), upsert: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     result: { upsert: jest.fn(), count: jest.fn(), findMany: jest.fn() },
-    term: { findMany: jest.fn() },
+    term: { findMany: jest.fn(), findFirst: jest.fn() },
     teacher: { findFirst: jest.fn() },
     teacherAssignment: { findFirst: jest.fn(), findMany: jest.fn() },
     // Handles both forms ExamsService uses: a callback ($transaction(async tx => ...))
@@ -160,10 +160,11 @@ describe("ExamsService.createExam — pair validation, dedup, and conflicts", ()
     prisma = createMockPrisma();
     ({ service } = createService(prisma));
     prisma.academicYear.findFirst.mockResolvedValue({ id: "year-1", schoolId: SCHOOL_ID });
+    prisma.term.findFirst.mockResolvedValue({ id: "term-1", name: "Term 1", academicYearId: "year-1" });
   });
 
   function dto(examSubjects: CreateExamDto["examSubjects"]): CreateExamDto {
-    return { academicYearId: "year-1", name: "Term 1 Exam", type: "TERM" as CreateExamDto["type"], examSubjects };
+    return { academicYearId: "year-1", termId: "term-1", name: "Term 1 Exam", type: "TERM" as CreateExamDto["type"], examSubjects };
   }
 
   it("rejects when the academic year does not belong to this school", async () => {
@@ -171,6 +172,33 @@ describe("ExamsService.createExam — pair validation, dedup, and conflicts", ()
     await expect(service.createExam(ADMIN_ACTOR, SCHOOL_ID, dto([]))).rejects.toThrow(
       "That academic year does not belong to this school",
     );
+  });
+
+  // An exam only counts toward Term/Annual results (and Promotion) through
+  // its term, so every new exam must be tied to one of THIS year's terms.
+  it("always validates the term against the exam's own academic year — a term from another year is rejected", async () => {
+    prisma.term.findFirst.mockResolvedValue(null);
+    await expect(service.createExam(ADMIN_ACTOR, SCHOOL_ID, dto([]))).rejects.toThrow(
+      "That term does not belong to the selected academic year",
+    );
+    expect(prisma.term.findFirst).toHaveBeenCalledWith({ where: { id: "term-1", academicYearId: "year-1" } });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("persists the chosen term on the exam, independent of the exam's Exam Type", async () => {
+    const examCreate = jest.fn().mockResolvedValue({ id: "exam-1" });
+    prisma.$transaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
+      cb({
+        exam: { create: examCreate, findUniqueOrThrow: jest.fn().mockResolvedValue({ id: "exam-1" }) },
+        examSubject: { createMany: jest.fn() },
+      }),
+    );
+
+    await service.createExam(ADMIN_ACTOR, SCHOOL_ID, { ...dto(undefined), type: "MIDTERM" as CreateExamDto["type"] });
+
+    expect(examCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ termId: "term-1", type: "MIDTERM", academicYearId: "year-1" }),
+    });
   });
 
   it("deduplicates repeated (classId, subjectId) pairs before validating them", async () => {
@@ -1285,5 +1313,153 @@ describe("ExamsService.getTermPercentage / getAnnualResult", () => {
     expect(annual.term2Percentage).toBeNull();
     expect(annual.annualPercentage).toBeNull();
     expect(annual.eligible).toBeNull();
+  });
+});
+
+// Phase 1 — the school's structure is exactly two terms, each with one exam
+// (Term 1 Exam / Term 2 Exam). These prove a Term 2 exam's published
+// results land in Term 2 (not Term 1, not nowhere), whatever Exam Type the
+// exam carries and whether it is out of 50 or out of 100.
+describe("ExamsService — Term 1 / Term 2 exams feed the Annual Result", () => {
+  let prisma: MockPrisma;
+  let service: ExamsService;
+
+  const TERMS = [
+    { id: "term-1", name: "Term 1", weight: 50 },
+    { id: "term-2", name: "Term 2", weight: 50 },
+  ];
+
+  beforeEach(() => {
+    prisma = createMockPrisma();
+    ({ service } = createService(prisma));
+    prisma.term.findMany.mockResolvedValue(TERMS);
+  });
+
+  // Simulates the database: each published result belongs to the exam of one
+  // specific term, and the service's own where-clause picks which ones it sees.
+  function seedPublishedResults(byTerm: Record<string, Array<{ marksObtained: number; examSubject: { maxMarks: number } }>>) {
+    prisma.result.findMany.mockImplementation((args: { where: { examSubject: { exam: { termId: string } } } }) =>
+      Promise.resolve(byTerm[args.where.examSubject.exam.termId] ?? []),
+    );
+  }
+
+  it("a Term 2 exam's published results appear as Term 2 — with Term 1 out of 50 and Term 2 out of 100", async () => {
+    seedPublishedResults({
+      "term-1": [{ marksObtained: 42, examSubject: { maxMarks: 50 } }], // 84%
+      "term-2": [{ marksObtained: 78, examSubject: { maxMarks: 100 } }], // 78%
+    });
+
+    const annual = await service.getAnnualResult("enr-1", "year-1");
+
+    expect(annual).toEqual({ term1Percentage: 84, term2Percentage: 78, annualPercentage: 81, eligible: true });
+  });
+
+  it("looks up each term by its own id and never filters on Exam Type — a Mid-Term/Final exam is not a separate term", async () => {
+    seedPublishedResults({ "term-1": [{ marksObtained: 60, examSubject: { maxMarks: 100 } }] });
+
+    await service.getAnnualResult("enr-1", "year-1");
+
+    const wheres = prisma.result.findMany.mock.calls.map((c) => c[0].where);
+    expect(wheres).toHaveLength(2);
+    expect(wheres.map((w) => w.examSubject)).toEqual([{ exam: { termId: "term-1" } }, { exam: { termId: "term-2" } }]);
+    for (const w of wheres) expect(JSON.stringify(w)).not.toMatch(/"type"/);
+  });
+
+  it("Term 2 not yet published: Term 2 and Annual stay Incomplete — never 0%, never a failing result", async () => {
+    seedPublishedResults({ "term-1": [{ marksObtained: 69, examSubject: { maxMarks: 100 } }] });
+
+    const annual = await service.getAnnualResult("enr-1", "year-1");
+
+    expect(annual).toEqual({ term1Percentage: 69, term2Percentage: null, annualPercentage: null, eligible: null });
+  });
+
+  it("uses ONLY Term 1 and Term 2 — a stray third term row is never queried or counted", async () => {
+    prisma.term.findMany.mockResolvedValue([...TERMS, { id: "term-3", name: "Term 3", weight: 0 }]);
+    seedPublishedResults({
+      "term-1": [{ marksObtained: 70, examSubject: { maxMarks: 100 } }],
+      "term-2": [{ marksObtained: 80, examSubject: { maxMarks: 100 } }],
+      "term-3": [{ marksObtained: 0, examSubject: { maxMarks: 100 } }],
+    });
+
+    const annual = await service.getAnnualResult("enr-1", "year-1");
+
+    expect(prisma.result.findMany).toHaveBeenCalledTimes(2);
+    expect(annual.annualPercentage).toBe(75);
+  });
+
+  it("an academic year missing either of its two terms is Incomplete, not computed from the one that exists", async () => {
+    prisma.term.findMany.mockResolvedValue([TERMS[0]]);
+
+    const annual = await service.getAnnualResult("enr-1", "year-1");
+
+    expect(annual).toEqual({ term1Percentage: null, term2Percentage: null, annualPercentage: null, eligible: null });
+    expect(prisma.result.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("ExamsService.updateExamTerm — repairing an exam saved under the wrong term", () => {
+  let prisma: MockPrisma;
+  let service: ExamsService;
+  let audit: { record: jest.Mock };
+  let schools: { findOneAccessibleOrThrow: jest.Mock };
+
+  const TERM1_EXAM = { id: "exam-1", name: "Term 2 Exam", schoolId: SCHOOL_ID, academicYearId: "year-1", termId: "term-1", term: { id: "term-1", name: "Term 1" } };
+
+  beforeEach(() => {
+    prisma = createMockPrisma();
+    ({ service, audit, schools } = createService(prisma));
+    prisma.exam.findFirst.mockResolvedValue(TERM1_EXAM);
+    prisma.term.findFirst.mockResolvedValue({ id: "term-2", name: "Term 2", academicYearId: "year-1" });
+    prisma.exam.update.mockResolvedValue({ ...TERM1_EXAM, termId: "term-2", term: { id: "term-2", name: "Term 2" } });
+  });
+
+  it("moves the exam to the other term of its own year and audits the old and new term", async () => {
+    const result = await service.updateExamTerm(ADMIN_ACTOR, SCHOOL_ID, "exam-1", { termId: "term-2" });
+
+    expect(prisma.exam.update).toHaveBeenCalledWith({ where: { id: "exam-1" }, data: { termId: "term-2" }, include: { term: true } });
+    expect(result.term).toEqual({ id: "term-2", name: "Term 2" });
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "EXAM_TERM_CHANGED",
+        resourceId: "exam-1",
+        before: { termId: "term-1", termName: "Term 1" },
+        after: { termId: "term-2", termName: "Term 2" },
+      }),
+    );
+  });
+
+  it("assigns a term to a legacy exam that has none", async () => {
+    prisma.exam.findFirst.mockResolvedValue({ ...TERM1_EXAM, termId: null, term: null });
+
+    await service.updateExamTerm(ADMIN_ACTOR, SCHOOL_ID, "exam-1", { termId: "term-2" });
+
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ before: { termId: null, termName: null } }));
+  });
+
+  it("rejects a term that belongs to a different academic year", async () => {
+    prisma.term.findFirst.mockResolvedValue(null);
+
+    await expect(service.updateExamTerm(ADMIN_ACTOR, SCHOOL_ID, "exam-1", { termId: "other-year-term" })).rejects.toThrow(
+      "That term does not belong to this exam's academic year",
+    );
+    expect(prisma.term.findFirst).toHaveBeenCalledWith({ where: { id: "other-year-term", academicYearId: "year-1" } });
+    expect(prisma.exam.update).not.toHaveBeenCalled();
+  });
+
+  it("only finds exams in the given school — another school's exam is a 404", async () => {
+    prisma.exam.findFirst.mockResolvedValue(null);
+
+    await expect(service.updateExamTerm(ADMIN_ACTOR, "another-school", "exam-1", { termId: "term-2" })).rejects.toThrow(NotFoundException);
+    expect(prisma.exam.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "exam-1", schoolId: "another-school" } }));
+    expect(schools.findOneAccessibleOrThrow).toHaveBeenCalledWith(ADMIN_ACTOR, "another-school");
+  });
+
+  it("does nothing (and audits nothing) when the exam is already on that term", async () => {
+    prisma.term.findFirst.mockResolvedValue({ id: "term-1", name: "Term 1", academicYearId: "year-1" });
+
+    await service.updateExamTerm(ADMIN_ACTOR, SCHOOL_ID, "exam-1", { termId: "term-1" });
+
+    expect(prisma.exam.update).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
   });
 });

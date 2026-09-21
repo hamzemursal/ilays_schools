@@ -10,6 +10,7 @@ import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateExamDto } from "./dto/create-exam.dto";
 import { CreateExamSubjectDto } from "./dto/create-exam-subject.dto";
 import { UpdateExamSubjectDto } from "./dto/update-exam-subject.dto";
+import { UpdateExamTermDto } from "./dto/update-exam-term.dto";
 import { EnterMarksDto } from "./dto/enter-marks.dto";
 import { ReturnForCorrectionDto } from "./dto/return-for-correction.dto";
 import { UnpublishResultsDto } from "./dto/unpublish-results.dto";
@@ -108,10 +109,8 @@ export class ExamsService {
     const year = await this.prisma.academicYear.findFirst({ where: { id: dto.academicYearId, schoolId } });
     if (!year) throw new BadRequestException("That academic year does not belong to this school");
 
-    if (dto.termId) {
-      const term = await this.prisma.term.findFirst({ where: { id: dto.termId, academicYearId: dto.academicYearId } });
-      if (!term) throw new BadRequestException("That term does not belong to the selected academic year");
-    }
+    const term = await this.prisma.term.findFirst({ where: { id: dto.termId, academicYearId: dto.academicYearId } });
+    if (!term) throw new BadRequestException("That term does not belong to the selected academic year");
 
     // The wizard's bulk step: every pair must be a real ClassSubject
     // relationship, not just a class and a subject that each independently
@@ -266,6 +265,46 @@ export class ExamsService {
       resourceType: "ExamSubject",
       resourceId: examSubjectId,
       after: { examDate: dto.examDate ?? null },
+    });
+
+    return updated;
+  }
+
+  // Re-links an existing exam to one of its own academic year's two terms —
+  // the repair path for an exam saved under the wrong term (or, for exams
+  // created before Terms existed, under none). Deliberately allowed even
+  // when results are already published: that is exactly the situation where
+  // a mislinked exam is hiding a whole term from the Annual Result. The
+  // change is audited with both the old and new term.
+  async updateExamTerm(actor: AuthenticatedUser, schoolId: string, examId: string, dto: UpdateExamTermDto) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+
+    const exam = await this.prisma.exam.findFirst({ where: { id: examId, schoolId }, include: { term: true } });
+    if (!exam) throw new NotFoundException("Exam not found in this school");
+
+    const term = await this.prisma.term.findFirst({ where: { id: dto.termId, academicYearId: exam.academicYearId } });
+    if (!term) throw new BadRequestException("That term does not belong to this exam's academic year");
+
+    if (exam.termId === term.id) return exam;
+
+    const updated = await this.prisma.exam.update({
+      where: { id: examId },
+      data: { termId: term.id },
+      include: { term: true },
+    });
+
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId,
+      action: AuditAction.EXAM_TERM_CHANGED,
+      module: AuditModuleName.ACADEMIC,
+      resourceType: "Exam",
+      resourceId: examId,
+      resourceName: exam.name,
+      severity: "WARNING",
+      before: { termId: exam.termId, termName: exam.term?.name ?? null },
+      after: { termId: term.id, termName: term.name },
     });
 
     return updated;

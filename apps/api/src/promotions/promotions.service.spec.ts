@@ -21,8 +21,8 @@ const INCOMPLETE_RESULT = { term1Percentage: null, term2Percentage: null, annual
 type MockPrisma = {
   section: { findFirst: jest.Mock; findMany: jest.Mock; findUniqueOrThrow: jest.Mock };
   class: { findFirst: jest.Mock };
-  academicYear: { findFirst: jest.Mock };
-  studentEnrollment: { findMany: jest.Mock; count: jest.Mock; update: jest.Mock; create: jest.Mock; aggregate: jest.Mock };
+  academicYear: { findFirst: jest.Mock; create: jest.Mock };
+  studentEnrollment: { findMany: jest.Mock; count: jest.Mock; update: jest.Mock; create: jest.Mock; aggregate: jest.Mock; delete: jest.Mock; deleteMany: jest.Mock };
   student: { update: jest.Mock };
   promotionBatch: { create: jest.Mock; findUniqueOrThrow: jest.Mock };
   promotionItem: { create: jest.Mock };
@@ -33,8 +33,8 @@ function createMockPrisma(): MockPrisma {
   const prisma: Partial<MockPrisma> = {
     section: { findFirst: jest.fn(), findMany: jest.fn(), findUniqueOrThrow: jest.fn() },
     class: { findFirst: jest.fn() },
-    academicYear: { findFirst: jest.fn() },
-    studentEnrollment: { findMany: jest.fn(), count: jest.fn(), update: jest.fn(), create: jest.fn(), aggregate: jest.fn() },
+    academicYear: { findFirst: jest.fn(), create: jest.fn() },
+    studentEnrollment: { findMany: jest.fn(), count: jest.fn(), update: jest.fn(), create: jest.fn(), aggregate: jest.fn(), delete: jest.fn(), deleteMany: jest.fn() },
     student: { update: jest.fn() },
     promotionBatch: { create: jest.fn(), findUniqueOrThrow: jest.fn() },
     promotionItem: { create: jest.fn() },
@@ -54,6 +54,26 @@ function createService(prisma: MockPrisma) {
     audit as unknown as AuditService,
   );
   return { service, schools, exams, audit };
+}
+
+
+// The Admin-created academic years Promotion moves between: year-1 (2025)
+// is the year being promoted FROM, year-2 (2026) the already-existing year
+// being promoted TO. Looked up by id, like the real query.
+const YEAR_ROWS: Record<string, { id: string; name: string; startDate: Date }> = {
+  "year-1": { id: "year-1", name: "2025-2026", startDate: new Date("2025-09-01") },
+  "year-2": { id: "year-2", name: "2026-2027", startDate: new Date("2026-09-01") },
+};
+function mockYears(prisma: MockPrisma) {
+  prisma.academicYear.findFirst.mockImplementation((args: { where: { id: string } }) =>
+    Promise.resolve(YEAR_ROWS[args.where.id] ?? null),
+  );
+}
+
+// Class rows for the progression tests — level + division type are what
+// decide the natural outcome.
+function classRow(name: string, level: number, type: "PRIMARY" | "SECONDARY") {
+  return { id: `class-${name}`, name, level, divisionId: `div-${type}`, division: { type } };
 }
 
 // A Section belongs to a Class of a given level, inside a Division of a
@@ -153,7 +173,7 @@ describe("PromotionsService.confirm — structural validation", () => {
     ({ service } = createService(prisma));
     prisma.section.findFirst.mockResolvedValue(section());
     prisma.class.findFirst.mockResolvedValue({ id: "class-2", name: "Class 2" });
-    prisma.academicYear.findFirst.mockResolvedValue({ id: "year-2", name: "2028" });
+    mockYears(prisma);
     prisma.studentEnrollment.findMany.mockResolvedValue([
       { id: "enr-1", studentId: "student-1", organizationId: "org-1", studentNumber: "STU-1" },
     ]);
@@ -247,10 +267,14 @@ describe("PromotionsService.confirm — structural validation", () => {
     ).rejects.toThrow(BadRequestException);
   });
 
-  it("rejects PROMOTED when there is no next class at all", async () => {
+  // Class 1 with no Class 2 is an incomplete school structure (blocked by
+  // the progression rules — see promotions.rules.spec.ts); on the real final
+  // class, PROMOTED is simply not one of the outcomes it can produce.
+  it("rejects PROMOTED on a final class — it can only complete or retain", async () => {
+    prisma.section.findFirst.mockResolvedValue(section({ class: classRow("Class 8", 8, "PRIMARY") }));
     prisma.class.findFirst.mockResolvedValue(null);
     await expect(service.confirm(ACTOR, "school-1", "section-1", dto())).rejects.toThrow(
-      "There is no next class to promote into",
+      "Class 8 students can only be completed or retained",
     );
   });
 
@@ -285,7 +309,7 @@ describe("PromotionsService.confirm — PROMOTED outcome", () => {
     ({ service } = createService(prisma));
     prisma.section.findFirst.mockResolvedValue(section());
     prisma.class.findFirst.mockResolvedValue({ id: "class-2", name: "Class 2" });
-    prisma.academicYear.findFirst.mockResolvedValue({ id: "year-2", name: "2028" });
+    mockYears(prisma);
     prisma.studentEnrollment.findMany.mockResolvedValue([
       { id: "enr-1", studentId: "student-1", organizationId: "org-1", studentNumber: "STU-1" },
     ]);
@@ -349,7 +373,7 @@ describe("PromotionsService.confirm — RETAINED outcome", () => {
     ({ service } = createService(prisma));
     prisma.section.findFirst.mockResolvedValue(section());
     prisma.class.findFirst.mockResolvedValue({ id: "class-2", name: "Class 2" });
-    prisma.academicYear.findFirst.mockResolvedValue({ id: "year-2", name: "2028" });
+    mockYears(prisma);
     prisma.studentEnrollment.findMany.mockResolvedValue([
       { id: "enr-2", studentId: "student-2", organizationId: "org-1", studentNumber: "STU-2" },
     ]);
@@ -423,7 +447,7 @@ describe("PromotionsService.confirm — mixed PROMOTED + RETAINED in one batch",
     ({ service } = createService(prisma));
     prisma.section.findFirst.mockResolvedValue(section());
     prisma.class.findFirst.mockResolvedValue({ id: "class-2", name: "Class 2" });
-    prisma.academicYear.findFirst.mockResolvedValue({ id: "year-2", name: "2028" });
+    mockYears(prisma);
     prisma.studentEnrollment.findMany.mockResolvedValue([
       { id: "enr-1", studentId: "student-1", organizationId: "org-1", studentNumber: "STU-1" },
       { id: "enr-2", studentId: "student-2", organizationId: "org-1", studentNumber: "STU-2" },
@@ -486,7 +510,7 @@ describe("PromotionsService.confirm — COMPLETED/GRADUATED outcomes (no next cl
 
   beforeEach(() => {
     prisma = createMockPrisma();
-    prisma.academicYear.findFirst.mockResolvedValue({ id: "year-2", name: "2028" });
+    mockYears(prisma);
     prisma.studentEnrollment.findMany.mockResolvedValue([
       { id: "enr-1", studentId: "student-1", organizationId: "org-1", studentNumber: "STU-1" },
     ]);
@@ -505,7 +529,8 @@ describe("PromotionsService.confirm — COMPLETED/GRADUATED outcomes (no next cl
   }
 
   it("COMPLETED: never requires a targetSectionId, closes the enrollment as COMPLETED, and sets currentStatus without creating a new enrollment", async () => {
-    prisma.section.findFirst.mockResolvedValue(section()); // PRIMARY division
+    // Class 8 is the Primary division's real final class — the only place Primary Completion can happen.
+    prisma.section.findFirst.mockResolvedValue(section({ class: classRow("Class 8", 8, "PRIMARY") }));
     const { service } = createService(prisma);
 
     await service.confirm(ACTOR, "school-1", "section-1", dto());

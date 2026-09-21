@@ -172,3 +172,37 @@ describe("AcademicYearsService.updateTermWeights", () => {
     ).rejects.toThrow("Term 1 and Term 2 weights must sum to exactly 100");
   });
 });
+
+// Phase 1: an Academic Year has EXACTLY Term 1 and Term 2 — there is no Term
+// 3, no Mid-Term term, and no way to add or remove one.
+describe("Academic Year terms — exactly two, never more", () => {
+  it("year creation produces precisely Term 1 and Term 2 (no third term, whatever the Exam Types are)", async () => {
+    const term = { createMany: jest.fn().mockResolvedValue({ count: 2 }) };
+    const prisma = {
+      academicYear: {
+        updateMany: jest.fn(),
+        create: jest.fn().mockResolvedValue({ id: "year-1" }),
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ id: "year-1", terms: [] }),
+      },
+      term,
+      $transaction: jest.fn(),
+    };
+    prisma.$transaction = jest.fn((cb: (tx: unknown) => unknown) => cb(prisma));
+    const schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
+    const service = new AcademicYearsService(prisma as unknown as PrismaService, schools as unknown as SchoolsService, {} as unknown as AuditService);
+
+    await service.create(ACTOR, "school-1", { name: "2026-2027", startDate: "2026-09-01", endDate: "2027-06-30" });
+
+    const rows = term.createMany.mock.calls[0][0].data as Array<{ name: string; weight: number }>;
+    expect(rows.map((r) => r.name)).toEqual(["Term 1", "Term 2"]);
+    expect(rows.reduce((sum, r) => sum + r.weight, 0)).toBe(100);
+    expect(term.createMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("the service exposes no way to create or delete a term — only to re-weight the existing two", () => {
+    const service = new AcademicYearsService({} as unknown as PrismaService, {} as unknown as SchoolsService, {} as unknown as AuditService);
+    const methods = Object.getOwnPropertyNames(Object.getPrototypeOf(service));
+
+    expect(methods.filter((m) => /term/i.test(m))).toEqual(["updateTermWeights"]);
+  });
+});

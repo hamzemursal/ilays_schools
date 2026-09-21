@@ -22,7 +22,6 @@ function row(overrides: Partial<PortalResultRow> = {}): PortalResultRow {
   return {
     id: "r1",
     examName: "Midterm",
-    examType: "MIDTERM",
     subjectName: "Mathematics",
     marksObtained: 80,
     maxMarks: 100,
@@ -42,7 +41,7 @@ function report(overrides: Partial<MyResultsReport> = {}): MyResultsReport {
       { name: "Term 2", termId: "t2", weight: 50, results: [row({ id: "r2", examName: "Final", subjectName: "Physics", marksObtained: 60, percentage: 60 })], percentage: 60 },
     ],
     otherResults: [],
-    annual: { term1Percentage: 80, term2Percentage: 60, annualPercentage: 70, eligible: true, passMark: 50 },
+    annual: { term1Percentage: 80, term2Percentage: 60, annualPercentage: 70 },
     ...overrides,
   };
 }
@@ -69,31 +68,40 @@ describe("PortalResults", () => {
     await screen.findByText("Term average: 80.00% · weight 50%");
     expect(screen.getByText("Term average: 60.00% · weight 50%")).toBeInTheDocument();
 
-    // Once as the summary figure label, once as the term card's own title.
-    expect(screen.getAllByText("Term 1")).toHaveLength(2);
-    expect(screen.getAllByText("Term 2")).toHaveLength(2);
+    // The summary labels ("Term 1 Result"...) are separate from the two term sections' own titles.
+    expect(screen.getAllByText("Term 1")).toHaveLength(1);
+    expect(screen.getAllByText("Term 2")).toHaveLength(1);
+    expect(screen.getByText("Term 1 Result")).toBeInTheDocument();
+    expect(screen.getByText("Term 2 Result")).toBeInTheDocument();
+    expect(screen.getByText("Annual / Combined Result")).toBeInTheDocument();
     expect(screen.getByText("80 / 100")).toBeInTheDocument();
     expect(screen.getByText("60 / 100")).toBeInTheDocument();
     expect(screen.getByText("Mathematics")).toBeInTheDocument();
     expect(screen.getByText("Physics")).toBeInTheDocument();
   });
 
-  it("shows the Annual result with the year's weights and an Eligible verdict", async () => {
+  it("shows the Annual / Combined result with the year's weights", async () => {
     renderResults();
 
-    await screen.findByText("Combines Term 1 (50%) and Term 2 (50%). Pass mark: 50%.");
+    await screen.findByText("Combines Term 1 (50%) and Term 2 (50%).");
     expect(screen.getByText("70.00%")).toBeInTheDocument();
-    expect(screen.getByText("Eligible")).toBeInTheDocument();
   });
 
-  it("shows Not eligible when the annual result is below the pass mark", async () => {
-    renderResults({
-      loadReport: () =>
-        Promise.resolve(report({ annual: { term1Percentage: 45, term2Percentage: 40, annualPercentage: 42.5, eligible: false, passMark: 50 } })),
-    });
+  it("never shows Eligibility, Eligible, Not eligible, pass mark or promotion wording — whatever the result", async () => {
+    for (const annualPercentage of [42.5, 50, 88]) {
+      const { unmount } = render(
+        <PortalResults
+          loadYears={vi.fn().mockResolvedValue([Y2027])}
+          loadReport={vi.fn().mockResolvedValue(
+            report({ annual: { term1Percentage: annualPercentage, term2Percentage: annualPercentage, annualPercentage } }),
+          )}
+        />,
+      );
+      await screen.findByText("Annual / Combined Result");
 
-    expect(await screen.findByText("Not eligible")).toBeInTheDocument();
-    expect(screen.getByText("42.50%")).toBeInTheDocument();
+      expect(document.body.textContent).not.toMatch(/eligib|promotion|pass mark|not eligible/i);
+      unmount();
+    }
   });
 
   it("Term 2 not published yet: Term 2 and the annual result read Incomplete — never 0%", async () => {
@@ -105,17 +113,16 @@ describe("PortalResults", () => {
               { name: "Term 1", termId: "t1", weight: 50, results: [row()], percentage: 80 },
               { name: "Term 2", termId: "t2", weight: 50, results: [], percentage: null },
             ],
-            annual: { term1Percentage: 80, term2Percentage: null, annualPercentage: null, eligible: null, passMark: 50 },
+            annual: { term1Percentage: 80, term2Percentage: null, annualPercentage: null },
           }),
         ),
     });
 
     expect(await screen.findByText("No published results for Term 2 yet.")).toBeInTheDocument();
     expect(screen.getByText("Term average: Incomplete · weight 50%")).toBeInTheDocument();
-    expect(screen.getAllByText("Incomplete").length).toBeGreaterThanOrEqual(3); // Term 2, Annual, Eligibility
+    expect(screen.getAllByText("Incomplete").length).toBeGreaterThanOrEqual(2); // Term 2 Result and Annual / Combined Result
     expect(screen.queryByText("0.00%")).not.toBeInTheDocument();
-    expect(screen.queryByText("Eligible")).not.toBeInTheDocument();
-    expect(screen.queryByText("Not eligible")).not.toBeInTheDocument();
+    expect(screen.getByText(/appears once both Term 1 and Term 2 results have been published/)).toBeInTheDocument();
   });
 
   it("lists term-less published results separately and says they are outside the averages — not as a third term", async () => {
@@ -140,7 +147,7 @@ describe("PortalResults", () => {
                   { name: "Term 1", termId: "h1", weight: 50, results: [row({ id: "h1", subjectName: "History", marksObtained: 70, percentage: 70 })], percentage: 70 },
                   { name: "Term 2", termId: "h2", weight: 50, results: [row({ id: "h2", subjectName: "History", marksObtained: 90, percentage: 90 })], percentage: 90 },
                 ],
-                annual: { term1Percentage: 70, term2Percentage: 90, annualPercentage: 80, eligible: true, passMark: 50 },
+                annual: { term1Percentage: 70, term2Percentage: 90, annualPercentage: 80 },
               })
             : report(),
         ),
@@ -153,6 +160,20 @@ describe("PortalResults", () => {
     expect(loadReport).toHaveBeenLastCalledWith("year-2026");
     expect(screen.queryByText("Physics")).not.toBeInTheDocument();
     expect(screen.getByText("80.00%")).toBeInTheDocument();
+  });
+
+  it("never shows an exam type (Mid-Term, Final, Assignment...) — the Term is the only academic period", async () => {
+    renderResults({
+      loadReport: () =>
+        Promise.resolve(report({ terms: [
+          { name: "Term 1", termId: "t1", weight: 50, results: [row({ examName: "Term 1 Exam" })], percentage: 80 },
+          { name: "Term 2", termId: "t2", weight: 50, results: [], percentage: null },
+        ] })),
+    });
+
+    await screen.findByText("Term 1 Exam");
+    expect(screen.queryByText(/MIDTERM|Mid-Term|FINAL|ASSIGNMENT|QUIZ/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Term 1 Exam").textContent).toBe("Term 1 Exam"); // no "(TYPE)" suffix on the exam name
   });
 
   it("offers the current year first and marks it (Current)", async () => {

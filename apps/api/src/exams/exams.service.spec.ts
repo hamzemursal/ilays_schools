@@ -556,7 +556,7 @@ describe("ExamsService.enterMarks — edit-window gating and validation", () => 
     prisma.resultSubmission.findUnique.mockResolvedValue(null);
     await expect(
       service.enterMarks(ADMIN_ACTOR, SCHOOL_ID, EXAM_SUBJECT_ID, SECTION_ID, dto([{ enrollmentId: "e1", marksObtained: 150 }])),
-    ).rejects.toThrow(`Marks for enrollment e1 exceed the max of 100`);
+    ).rejects.toThrow(`150 is above the maximum of 100`);
   });
 
   it.each(["SUBMITTED", "APPROVED", "PUBLISHED"])(

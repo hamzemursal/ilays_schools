@@ -642,6 +642,14 @@ export class TeachersService {
     const subject = await this.prisma.subject.findFirst({ where: { id: a.subjectId, schoolId } });
     if (!subject) throw new BadRequestException("That subject does not belong to this school");
 
+    // Only an existing Subject that the section's class actually teaches can
+    // be assigned - assigning never creates a Subject, and a subject that
+    // isn't part of this class can't be attached to one of its sections.
+    const taughtInClass = await this.prisma.classSubject.findFirst({
+      where: { classId: section.classId, subjectId: a.subjectId },
+    });
+    if (!taughtInClass) throw new BadRequestException("That subject isn't taught in this section's class");
+
     const academicYear = await this.prisma.academicYear.findFirst({ where: { id: a.academicYearId, schoolId } });
     if (!academicYear) throw new BadRequestException("That academic year does not belong to this school");
   }

@@ -6,6 +6,11 @@ import { SchoolsService } from "../schools/schools.service";
 import { AuditService } from "../audit/audit.service";
 import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
+import {
+  applyTemporaryPassword,
+  assertResettablePortalUser,
+  createTemporaryCredentials,
+} from "../auth/portal-password-reset";
 import { GuardianInputDto } from "./dto/guardian-input.dto";
 import { CreateGuardianDto } from "./dto/create-guardian.dto";
 import { UpdateGuardianDto } from "./dto/update-guardian.dto";
@@ -82,13 +87,63 @@ export class GuardiansService {
     });
   }
 
+  // Find-or-create the parent AND link them to the student as ONE unit of
+  // work. Both steps used to run separately, so a link refused by the
+  // one-Mother / one-Father rule (or any other failure) left behind a
+  // freshly created Guardian with no children - an orphan record that the
+  // next attempt would then have to work around. Now a refused link leaves
+  // nothing behind.
+  async addToStudent(organizationId: string, studentId: string, dto: GuardianInputDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const guardian = await this.findOrCreate(tx, organizationId, dto);
+      await this.linkToStudent(tx, studentId, guardian.id, dto.relationship, dto.isPrimaryContact);
+      // relationship/isPrimaryContact live on StudentGuardian, not Guardian -
+      // return the combined shape from what was just persisted, no refetch.
+      return {
+        id: guardian.id,
+        firstName: guardian.firstName,
+        lastName: guardian.lastName,
+        phone: guardian.phone,
+        email: guardian.email,
+        relationship: dto.relationship,
+        isPrimaryContact: dto.isPrimaryContact ?? false,
+      };
+    });
+  }
+
+  // A student has at most ONE Mother and ONE Father (active links). Any
+  // other relationship (Guardian, Other, ...) can be held by any number of
+  // people. Enforced here - the single choke point every link goes through
+  // (add-guardian, link-existing-parent, new-student wizard) - and checked
+  // inside the caller's own transaction, so two guardians in the same
+  // request are seen by each other. Re-saving the SAME guardian's own link
+  // (e.g. changing their primary-contact flag) is never a conflict.
+  private async assertRelationshipAvailable(
+    tx: Tx | PrismaService,
+    studentId: string,
+    guardianId: string,
+    relationship: GuardianInputDto["relationship"],
+  ) {
+    if (relationship !== "MOTHER" && relationship !== "FATHER") return;
+    const holder = await tx.studentGuardian.findFirst({
+      where: { studentId, relationship, status: "ACTIVE", guardianId: { not: guardianId } },
+      include: { guardian: true },
+    });
+    if (!holder) return;
+    const label = relationship === "MOTHER" ? "Mother" : "Father";
+    throw new ConflictException(
+      `This student already has a ${label} (${holder.guardian.firstName} ${holder.guardian.lastName}). A student can have only one ${label}; use Guardian or Other for additional relatives.`,
+    );
+  }
+
   async linkToStudent(
-    tx: Tx,
+    tx: Tx | PrismaService,
     studentId: string,
     guardianId: string,
     relationship: GuardianInputDto["relationship"],
     isPrimaryContact?: boolean,
   ) {
+    await this.assertRelationshipAvailable(tx, studentId, guardianId, relationship);
     return tx.studentGuardian.upsert({
       where: { studentId_guardianId: { studentId, guardianId } },
       update: { relationship, isPrimaryContact, status: "ACTIVE" },
@@ -445,6 +500,45 @@ export class GuardiansService {
 
     const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3010";
     return { email: targetEmail, acceptUrl: `${webOrigin}/accept-invite?token=${rawToken}` };
+  }
+
+  // Separate from createPortalAccount on purpose: this operates ONLY on the
+  // parent's existing login (Guardian.userId) and refuses when there is none.
+  // It changes that one User's password hash and mustChangePassword flag,
+  // revokes its sessions and any pending invite link - it creates no user,
+  // guardian, role, school link or student-parent link, and never touches an
+  // id. The temporary password is returned once and never audited.
+  async resetPortalPassword(actor: AuthenticatedUser, schoolId: string, guardianId: string) {
+    const school = await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    const guardian = await this.assertAccessibleGuardian(schoolId, guardianId);
+    if (!guardian.userId) {
+      throw new NotFoundException("This parent has no portal account yet - create one first");
+    }
+    const userId = guardian.userId;
+    const user = await assertResettablePortalUser(this.prisma, userId, "PARENT", school.organizationId);
+
+    const { temporaryPassword, passwordHash } = await createTemporaryCredentials();
+
+    await this.prisma.$transaction(async (tx) => {
+      const { sessionsRevoked } = await applyTemporaryPassword(tx, userId, passwordHash);
+      await this.audit.record(
+        {
+          actor,
+          organizationId: school.organizationId,
+          schoolId,
+          action: AuditAction.PARENT_PORTAL_PASSWORD_RESET,
+          module: AuditModuleName.PARENTS,
+          resourceType: "Guardian",
+          resourceId: guardian.id,
+          resourceName: `${guardian.firstName} ${guardian.lastName}`,
+          severity: "WARNING",
+          after: { mustChangePassword: true, sessionsRevoked },
+        },
+        tx,
+      );
+    }, { timeout: 30_000 });
+
+    return { email: user.email, temporaryPassword };
   }
 
   // Confirms this guardian is allowed to see this student, for every

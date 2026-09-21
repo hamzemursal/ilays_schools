@@ -33,7 +33,7 @@ const REPORT: MyResultsReport = {
       weight: 50,
       results: [
         {
-          id: "r1", examName: "Midterm", examType: "MIDTERM", subjectName: "Mathematics", marksObtained: 85, maxMarks: 100,
+          id: "r1", examName: "Term 1 Exam", subjectName: "Mathematics", marksObtained: 85, maxMarks: 100,
           percentage: 85, examDate: null, publishedDate: null,
         },
       ],
@@ -42,7 +42,7 @@ const REPORT: MyResultsReport = {
     { name: "Term 2", termId: "t2", weight: 50, results: [], percentage: null },
   ],
   otherResults: [],
-  annual: { term1Percentage: 85, term2Percentage: null, annualPercentage: null, eligible: null, passMark: 50 },
+  annual: { term1Percentage: 85, term2Percentage: null, annualPercentage: null },
 };
 
 beforeEach(() => {

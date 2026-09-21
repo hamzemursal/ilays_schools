@@ -12,6 +12,7 @@ export const studentsApi = {
   remove: api.deleteStudent,
   addGuardian: api.addGuardian,
   createPortalAccount: api.createStudentPortalAccount,
+  resetPortalPassword: api.resetStudentPortalPassword,
   uploadPhoto: api.uploadStudentPhoto,
   getPhotoUrl: api.getStudentPhotoUrl,
   listInvoices: api.listStudentInvoices,

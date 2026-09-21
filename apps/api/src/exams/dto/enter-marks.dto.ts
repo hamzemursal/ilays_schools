@@ -13,8 +13,10 @@ class MarkEntryDto {
   isAbsent?: boolean;
 
   @ValidateIf((o: MarkEntryDto) => !o.isAbsent)
-  @IsNumber()
-  @Min(0)
+  // Result.marksObtained is Decimal(6,2): more than two decimals would be
+  // silently rounded by the database, so it is refused up front instead.
+  @IsNumber({ maxDecimalPlaces: 2 }, { message: "Each mark must be a number with at most 2 decimal places" })
+  @Min(0, { message: "A mark can't be negative" })
   marksObtained?: number;
 }
 

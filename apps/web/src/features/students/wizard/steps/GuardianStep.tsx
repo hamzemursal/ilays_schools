@@ -10,14 +10,14 @@ import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { GuardianFieldSet, emptyGuardian } from "@/features/guardians/components/GuardianFieldSet";
+import {
+  RelationshipBadge,
+  RelationshipOptions,
+  firstAvailableRelationship,
+  takenRelationships,
+  type TakenRelationships,
+} from "@/features/guardians/relationships";
 import type { WizardGuardian, WizardState } from "../types";
-
-const RELATIONSHIPS: { value: GuardianRelationship; label: string }[] = [
-  { value: "FATHER", label: "Father" },
-  { value: "MOTHER", label: "Mother" },
-  { value: "GUARDIAN", label: "Guardian" },
-  { value: "OTHER", label: "Other" },
-];
 
 export function GuardianStep({
   schoolId,
@@ -66,9 +66,9 @@ export function GuardianStep({
                     </Badge>
                     {g.isPrimaryContact && <Badge tone="success">Primary</Badge>}
                   </div>
-                  <p className="text-sm text-foreground-soft">
-                    {RELATIONSHIPS.find((r) => r.value === g.relationship)?.label}
-                    {g.phone && ` · ${g.phone}`}
+                  <p className="mt-1 flex items-center gap-2 text-sm text-foreground-soft">
+                    <RelationshipBadge relationship={g.relationship} />
+                    {g.phone && <span>{g.phone}</span>}
                   </p>
                 </div>
                 <button
@@ -85,7 +85,12 @@ export function GuardianStep({
       )}
 
       {adding ? (
-        <AddGuardianPanel schoolId={schoolId} onAdd={addGuardian} onCancel={() => setAdding(false)} />
+        <AddGuardianPanel
+          schoolId={schoolId}
+          taken={takenRelationships(state.guardians)}
+          onAdd={addGuardian}
+          onCancel={() => setAdding(false)}
+        />
       ) : (
         <Button variant="outline" size="sm" icon={<Plus className="size-4" />} onClick={() => setAdding(true)}>
           Add guardian
@@ -97,10 +102,12 @@ export function GuardianStep({
 
 function AddGuardianPanel({
   schoolId,
+  taken,
   onAdd,
   onCancel,
 }: {
   schoolId: string;
+  taken: TakenRelationships;
   onAdd: (g: WizardGuardian) => void;
   onCancel: () => void;
 }) {
@@ -132,9 +139,9 @@ function AddGuardianPanel({
       </div>
 
       {mode === "search" ? (
-        <SearchExistingGuardian schoolId={schoolId} onAdd={onAdd} onCancel={onCancel} />
+        <SearchExistingGuardian schoolId={schoolId} taken={taken} onAdd={onAdd} onCancel={onCancel} />
       ) : (
-        <CreateNewGuardian onAdd={onAdd} onCancel={onCancel} />
+        <CreateNewGuardian taken={taken} onAdd={onAdd} onCancel={onCancel} />
       )}
     </Card>
   );
@@ -142,10 +149,12 @@ function AddGuardianPanel({
 
 function SearchExistingGuardian({
   schoolId,
+  taken,
   onAdd,
   onCancel,
 }: {
   schoolId: string;
+  taken: TakenRelationships;
   onAdd: (g: WizardGuardian) => void;
   onCancel: () => void;
 }) {
@@ -153,7 +162,7 @@ function SearchExistingGuardian({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<GuardianSearchResult[]>([]);
   const [selected, setSelected] = useState<GuardianSearchResult | null>(null);
-  const [relationship, setRelationship] = useState<GuardianRelationship>("FATHER");
+  const [relationship, setRelationship] = useState<GuardianRelationship>(firstAvailableRelationship(taken));
   const [isPrimaryContact, setIsPrimaryContact] = useState(false);
   const [searching, setSearching] = useState(false);
 
@@ -184,11 +193,7 @@ function SearchExistingGuardian({
         <div className="grid grid-cols-2 gap-3">
           <FormField label="Relationship" required>
             <Select value={relationship} onChange={(e) => setRelationship(e.target.value as GuardianRelationship)}>
-              {RELATIONSHIPS.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label}
-                </option>
-              ))}
+              <RelationshipOptions taken={taken} />
             </Select>
           </FormField>
           <label className="flex items-center gap-2 self-end pb-2 text-sm text-foreground-soft">
@@ -273,17 +278,19 @@ function SearchExistingGuardian({
 }
 
 function CreateNewGuardian({
+  taken,
   onAdd,
   onCancel,
 }: {
+  taken: TakenRelationships;
   onAdd: (g: WizardGuardian) => void;
   onCancel: () => void;
 }) {
-  const [value, setValue] = useState(emptyGuardian());
+  const [value, setValue] = useState(emptyGuardian(taken));
 
   return (
     <div className="space-y-4">
-      <GuardianFieldSet value={value} onChange={setValue} />
+      <GuardianFieldSet value={value} onChange={setValue} taken={taken} />
       <div className="flex gap-2">
         <Button
           type="button"

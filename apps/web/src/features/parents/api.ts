@@ -12,5 +12,6 @@ export const parentsApi = {
   addChild: api.addParentChild,
   removeChild: api.removeParentChild,
   createPortalAccount: api.createParentPortalAccount,
+  resetPortalPassword: api.resetParentPortalPassword,
   search: api.searchGuardians,
 };

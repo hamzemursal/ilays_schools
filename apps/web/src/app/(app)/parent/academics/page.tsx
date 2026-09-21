@@ -155,7 +155,7 @@ function PerformanceTab({ accessToken, studentId }: { accessToken: string; stude
               <div className="flex items-center gap-3">
                 <div className="h-1.5 w-32 overflow-hidden rounded-full bg-surface">
                   <div
-                    className={`h-full rounded-full ${s.average >= 50 ? "bg-success" : "bg-danger"}`}
+                    className="h-full rounded-full bg-accent"
                     style={{ width: `${Math.min(100, s.average)}%` }}
                   />
                 </div>

@@ -9,13 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { GuardianFieldSet, emptyGuardian } from "../components/GuardianFieldSet";
-
-const RELATIONSHIPS: { value: GuardianRelationship; label: string }[] = [
-  { value: "FATHER", label: "Father" },
-  { value: "MOTHER", label: "Mother" },
-  { value: "GUARDIAN", label: "Guardian" },
-  { value: "OTHER", label: "Other" },
-];
+import { RelationshipOptions, firstAvailableRelationship, takenRelationships, type TakenRelationships } from "../relationships";
 
 // Search-existing-parent first, create-new only as a fallback — the same
 // duplicate-prevention shape already proven in the new-student wizard's own
@@ -28,28 +22,35 @@ export function GuardianForm({
   accessToken,
   schoolId,
   studentId,
+  existingGuardians,
   onAdded,
   onCancel,
 }: {
   accessToken: string;
   schoolId: string;
   studentId: string;
+  // The student's current guardians: a student can have only one Mother and
+  // one Father, so those options are disabled here once taken (the server
+  // enforces the same rule regardless).
+  existingGuardians?: GuardianRecord[];
   onAdded: (guardian: GuardianRecord) => void;
   onCancel: () => void;
 }) {
   const [mode, setMode] = useState<"search" | "create">("search");
+  const taken = takenRelationships(existingGuardians);
 
   return mode === "search" ? (
     <SearchExistingParent
       accessToken={accessToken}
       schoolId={schoolId}
       studentId={studentId}
+      taken={taken}
       onAdded={onAdded}
       onCancel={onCancel}
       onCreateNew={() => setMode("create")}
     />
   ) : (
-    <CreateNewParent accessToken={accessToken} studentId={studentId} onAdded={onAdded} onCancel={onCancel} />
+    <CreateNewParent accessToken={accessToken} studentId={studentId} taken={taken} onAdded={onAdded} onCancel={onCancel} />
   );
 }
 
@@ -57,6 +58,7 @@ function SearchExistingParent({
   accessToken,
   schoolId,
   studentId,
+  taken,
   onAdded,
   onCancel,
   onCreateNew,
@@ -64,6 +66,7 @@ function SearchExistingParent({
   accessToken: string;
   schoolId: string;
   studentId: string;
+  taken: TakenRelationships;
   onAdded: (guardian: GuardianRecord) => void;
   onCancel: () => void;
   onCreateNew: () => void;
@@ -72,7 +75,7 @@ function SearchExistingParent({
   const [results, setResults] = useState<GuardianSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<GuardianSearchResult | null>(null);
-  const [relationship, setRelationship] = useState<GuardianRelationship>("FATHER");
+  const [relationship, setRelationship] = useState<GuardianRelationship>(firstAvailableRelationship(taken));
   const [isPrimaryContact, setIsPrimaryContact] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -134,11 +137,7 @@ function SearchExistingParent({
               value={relationship}
               onChange={(e) => setRelationship(e.target.value as GuardianRelationship)}
             >
-              {RELATIONSHIPS.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label}
-                </option>
-              ))}
+              <RelationshipOptions taken={taken} />
             </Select>
           </FormField>
           <label className="flex items-center gap-2 self-end pb-2 text-sm text-foreground-soft">
@@ -232,15 +231,17 @@ function SearchExistingParent({
 function CreateNewParent({
   accessToken,
   studentId,
+  taken,
   onAdded,
   onCancel,
 }: {
   accessToken: string;
   studentId: string;
+  taken: TakenRelationships;
   onAdded: (guardian: GuardianRecord) => void;
   onCancel: () => void;
 }) {
-  const [value, setValue] = useState<GuardianInput>(emptyGuardian());
+  const [value, setValue] = useState<GuardianInput>(emptyGuardian(taken));
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -262,7 +263,7 @@ function CreateNewParent({
     <form onSubmit={onSubmit} className="rounded-xl border border-border bg-surface-soft p-4">
       <h3 className="text-sm font-semibold text-foreground">Create New Parent</h3>
       <div className="mt-3">
-        <GuardianFieldSet value={value} onChange={setValue} />
+        <GuardianFieldSet value={value} onChange={setValue} taken={taken} />
       </div>
       {error && (
         <Alert tone="danger" className="mt-3">

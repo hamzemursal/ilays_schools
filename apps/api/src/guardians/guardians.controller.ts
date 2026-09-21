@@ -104,4 +104,15 @@ export class GuardiansController {
   ) {
     return this.guardians.createPortalAccount(user, schoolId, guardianId, dto);
   }
+
+  // Reset (not create): only for a parent who already has a portal login.
+  @RequirePermissions("guardians.manage")
+  @Post(":guardianId/portal-account/reset-password")
+  resetPortalPassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("guardianId") guardianId: string,
+  ) {
+    return this.guardians.resetPortalPassword(user, schoolId, guardianId);
+  }
 }

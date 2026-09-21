@@ -4,19 +4,22 @@ import { useState } from "react";
 import { Send, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
+import { ExamContextGrid, type ExamContext } from "./ExamContextGrid";
 
 // Missing marks hard-block submission — there's no business rule anywhere
 // in this codebase that allows submitting a partial set of results, so this
 // dialog never offers a way around it (see ExamsService.submitForReview,
 // which enforces the same rule server-side regardless of what this shows).
+//
+// The counts add up: Students = Completed marks + Absent + Missing marks.
+// "Completed marks" are students with an actual mark; an absent student is
+// counted on their own line (absent is a status, never a mark of 0).
 export function SubmitResultsDialog({
   open,
-  examName,
-  className,
-  sectionName,
-  subjectName,
+  context,
   studentCount,
   completedCount,
+  absentCount,
   missingCount,
   isResubmit,
   loading,
@@ -24,12 +27,10 @@ export function SubmitResultsDialog({
   onCancel,
 }: {
   open: boolean;
-  examName: string;
-  className: string;
-  sectionName: string;
-  subjectName: string;
+  context: ExamContext;
   studentCount: number;
   completedCount: number;
+  absentCount: number;
   missingCount: number;
   isResubmit: boolean;
   loading: boolean;
@@ -55,26 +56,33 @@ export function SubmitResultsDialog({
       <div
         role="alertdialog"
         aria-modal="true"
+        aria-labelledby="submit-results-title"
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-sm rounded-xl border border-border bg-background p-5 shadow-lg"
+        className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-xl border border-border bg-background p-5 shadow-lg"
       >
         <div className="flex items-start gap-3">
           <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent">
             <Send className="size-4.5" />
           </div>
           <div className="min-w-0">
-            <h2 className="font-semibold text-foreground">{isResubmit ? "Resubmit Results for Review?" : "Submit Results for Review?"}</h2>
-            <p className="mt-1 text-sm text-foreground-soft">
-              {examName} · {className} · Section {sectionName} · {subjectName}
-            </p>
+            <h2 id="submit-results-title" className="font-semibold text-foreground">
+              {isResubmit ? "Resubmit Results for Review?" : "Submit Results for Review?"}
+            </h2>
+            <p className="mt-1 text-sm text-foreground-soft">Check the exam and the counts below, then confirm.</p>
           </div>
         </div>
 
-        <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border border-border p-3 text-sm">
+        <div className="mt-4 rounded-lg border border-border p-3">
+          <ExamContextGrid context={context} compact />
+        </div>
+
+        <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border border-border p-3 text-sm">
           <dt className="text-foreground-muted">Students</dt>
           <dd className="text-right font-medium text-foreground">{studentCount}</dd>
           <dt className="text-foreground-muted">Completed marks</dt>
           <dd className="text-right font-medium text-foreground">{completedCount}</dd>
+          <dt className="text-foreground-muted">Absent</dt>
+          <dd className="text-right font-medium text-foreground">{absentCount}</dd>
           <dt className="text-foreground-muted">Missing marks</dt>
           <dd className={`text-right font-medium ${missingCount > 0 ? "text-danger" : "text-foreground"}`}>{missingCount}</dd>
         </dl>
@@ -84,8 +92,8 @@ export function SubmitResultsDialog({
             <div className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <span>
-                {missingCount} student{missingCount === 1 ? "" : "s"} still need{missingCount === 1 ? "s" : ""} marks. Enter every
-                student&apos;s mark before submitting.
+                {missingCount} student{missingCount === 1 ? "" : "s"} still need{missingCount === 1 ? "s" : ""} a mark (or to be
+                marked Absent). Enter every student&apos;s mark before submitting.
               </span>
             </div>
           </Alert>

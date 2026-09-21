@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type GuardianRelationship, type ParentDetail, type StudentListItem } from "@/lib/api";
 import { parentsApi } from "@/features/parents/api";
+import { ResetPortalPasswordCard } from "@/features/portal-accounts/ResetPortalPasswordCard";
+import { RELATIONSHIPS, RelationshipBadge, relationshipLabel } from "@/features/guardians/relationships";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -18,12 +20,6 @@ import { SkeletonCards } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { Mail, MapPin, Pencil, Phone, Plus, Send, Trash2, UserSquare2, X } from "lucide-react";
 
-const RELATIONSHIPS: { value: GuardianRelationship; label: string }[] = [
-  { value: "FATHER", label: "Father" },
-  { value: "MOTHER", label: "Mother" },
-  { value: "GUARDIAN", label: "Guardian" },
-  { value: "OTHER", label: "Other" },
-];
 
 const PORTAL_TONE: Record<string, "success" | "warning" | "neutral"> = {
   ACTIVE: "success",
@@ -242,6 +238,16 @@ export default function ParentProfilePage({
           </Card>
         )}
 
+        {canManage && parent.user && (
+          <ResetPortalPasswordCard
+            personName={`${parent.firstName} ${parent.lastName}`}
+            onReset={async () => {
+              const r = await parentsApi.resetPortalPassword(accessToken!, schoolId, guardianId);
+              return { loginLabel: "Login email", loginValue: r.email, temporaryPassword: r.temporaryPassword };
+            }}
+          />
+        )}
+
         <Card padding="none">
           <CardHeader
             title="Children"
@@ -290,7 +296,7 @@ export default function ParentProfilePage({
                       )}
                       {enrollment && <p className="text-xs text-foreground-muted">{enrollment.academicYear.name}</p>}
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        <Badge tone="accent">{RELATIONSHIPS.find((r) => r.value === s.relationship)?.label}</Badge>
+                        <RelationshipBadge relationship={s.relationship} />
                         {s.isPrimaryContact && <Badge tone="success">Primary</Badge>}
                       </div>
                       <div className="mt-3 flex gap-2">
@@ -327,7 +333,7 @@ export default function ParentProfilePage({
                 <div key={s.studentId} className="flex items-center justify-between px-5 py-3">
                   <span className="text-sm text-foreground">
                     {s.student.firstName} {s.student.lastName} →{" "}
-                    {RELATIONSHIPS.find((r) => r.value === s.relationship)?.label}
+                    {relationshipLabel(s.relationship)}
                   </span>
                   <Badge tone={s.status === "ACTIVE" ? "success" : "neutral"}>{s.status}</Badge>
                 </div>

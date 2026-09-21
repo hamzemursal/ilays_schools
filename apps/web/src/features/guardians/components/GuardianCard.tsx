@@ -3,13 +3,7 @@ import { ExternalLink, Mail, Phone } from "lucide-react";
 import type { GuardianRecord } from "@/lib/api";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
-
-const RELATIONSHIP_LABEL: Record<GuardianRecord["relationship"], string> = {
-  FATHER: "Father",
-  MOTHER: "Mother",
-  GUARDIAN: "Guardian",
-  OTHER: "Other",
-};
+import { RelationshipBadge } from "../relationships";
 
 export function GuardianCard({
   guardian,
@@ -31,7 +25,7 @@ export function GuardianCard({
           <p className="font-medium text-foreground">
             {guardian.firstName} {guardian.lastName}
           </p>
-          <Badge tone="accent">{RELATIONSHIP_LABEL[guardian.relationship]}</Badge>
+          <RelationshipBadge relationship={guardian.relationship} />
           {guardian.isPrimaryContact && <Badge tone="success">Primary contact</Badge>}
           {canViewProfile && schoolId && (
             <Link

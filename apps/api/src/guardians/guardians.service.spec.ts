@@ -1,3 +1,4 @@
+import { ConflictException } from "@nestjs/common";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { GuardiansService } from "./guardians.service";
 import { PrismaService } from "../prisma/prisma.service";
@@ -325,7 +326,7 @@ describe("GuardiansService.findOrCreate — duplicate prevention", () => {
 
 describe("GuardiansService.linkToStudent — one parent, many children", () => {
   function makeService() {
-    const tx = { studentGuardian: { upsert: jest.fn() } };
+    const tx = { studentGuardian: { upsert: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) } };
     const service = new GuardiansService({} as unknown as PrismaService, {} as unknown as SchoolsService, {} as unknown as AuditService);
     return { service, tx };
   }
@@ -351,5 +352,73 @@ describe("GuardiansService.linkToStudent — one parent, many children", () => {
       update: { relationship: "MOTHER", isPrimaryContact: true, status: "ACTIVE" },
       create: { studentId: "student-A", guardianId: "guardian-1", relationship: "MOTHER", isPrimaryContact: true },
     });
+  });
+});
+
+describe("GuardiansService.linkToStudent — a student has at most one Mother and one Father", () => {
+  type Tx = Parameters<GuardiansService["linkToStudent"]>[0];
+
+  function makeService(existingHolder: { guardian: { firstName: string; lastName: string } } | null = null) {
+    const tx = { studentGuardian: { upsert: jest.fn().mockResolvedValue({}), findFirst: jest.fn().mockResolvedValue(existingHolder) } };
+    const service = new GuardiansService({} as unknown as PrismaService, {} as unknown as SchoolsService, {} as unknown as AuditService);
+    return { service, tx };
+  }
+
+  it("rejects a second Mother, naming the existing one, and writes nothing", async () => {
+    const { service, tx } = makeService({ guardian: { firstName: "Amina", lastName: "Ali" } });
+
+    await expect(service.linkToStudent(tx as unknown as Tx, "student-A", "guardian-2", "MOTHER", false)).rejects.toThrow(ConflictException);
+    await expect(service.linkToStudent(tx as unknown as Tx, "student-A", "guardian-2", "MOTHER", false)).rejects.toThrow(
+      "This student already has a Mother (Amina Ali). A student can have only one Mother",
+    );
+    expect(tx.studentGuardian.upsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects a second Father, naming the existing one", async () => {
+    const { service, tx } = makeService({ guardian: { firstName: "Hassan", lastName: "Noor" } });
+
+    await expect(service.linkToStudent(tx as unknown as Tx, "student-A", "guardian-2", "FATHER", false)).rejects.toThrow(
+      "This student already has a Father (Hassan Noor). A student can have only one Father",
+    );
+    expect(tx.studentGuardian.upsert).not.toHaveBeenCalled();
+  });
+
+  it("looks only at OTHER guardians' ACTIVE links of exactly that relationship for exactly that student", async () => {
+    const { service, tx } = makeService();
+
+    await service.linkToStudent(tx as unknown as Tx, "student-A", "guardian-2", "MOTHER", false);
+
+    expect(tx.studentGuardian.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { studentId: "student-A", relationship: "MOTHER", status: "ACTIVE", guardianId: { not: "guardian-2" } } }),
+    );
+    expect(tx.studentGuardian.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows the first Mother and the first Father", async () => {
+    const { service, tx } = makeService(null);
+
+    await service.linkToStudent(tx as unknown as Tx, "student-A", "guardian-1", "MOTHER", true);
+    await service.linkToStudent(tx as unknown as Tx, "student-A", "guardian-2", "FATHER", false);
+
+    expect(tx.studentGuardian.upsert).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["GUARDIAN", "OTHER"] as const)("%s has no limit — no lookup is even made, so any number can be added", async (relationship) => {
+    const { service, tx } = makeService({ guardian: { firstName: "Someone", lastName: "Else" } });
+
+    await service.linkToStudent(tx as unknown as Tx, "student-A", "guardian-3", relationship, false);
+    await service.linkToStudent(tx as unknown as Tx, "student-A", "guardian-4", relationship, false);
+
+    expect(tx.studentGuardian.findFirst).not.toHaveBeenCalled();
+    expect(tx.studentGuardian.upsert).toHaveBeenCalledTimes(2);
+  });
+
+  it("the same parent can be the Mother of several children (the rule is per student, not per parent)", async () => {
+    const { service, tx } = makeService(null);
+
+    await service.linkToStudent(tx as unknown as Tx, "student-A", "guardian-1", "MOTHER", false);
+    await service.linkToStudent(tx as unknown as Tx, "student-B", "guardian-1", "MOTHER", false);
+
+    expect(tx.studentGuardian.upsert).toHaveBeenCalledTimes(2);
   });
 });

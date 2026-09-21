@@ -384,7 +384,7 @@ describe("StudentPortalService.myResultsReport — Term 1 / Term 2 / Annual, own
 
     expect(report.terms[0]).toMatchObject({ name: "Term 1", percentage: 80 });
     expect(report.terms[1]).toMatchObject({ name: "Term 2", percentage: 60 });
-    expect(report.annual).toMatchObject({ annualPercentage: 70, eligible: true });
+    expect(report.annual).toEqual({ term1Percentage: 80, term2Percentage: 60, annualPercentage: 70 });
   });
 
   it("only asks the database for PUBLISHED results — Draft/Submitted/Needs Correction/Approved never reach the response", async () => {

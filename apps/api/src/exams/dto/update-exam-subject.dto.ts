@@ -1,11 +1,26 @@
-import { IsDateString, IsOptional } from "class-validator";
+import { IsDateString, IsInt, IsOptional, Max, Min } from "class-validator";
 
-// Currently just examDate — the one field the "Add subject" form has no way
-// to set later, once an exam subject already exists (see
-// ExamsService.updateExamSubject). Not a general-purpose PATCH: class,
-// subject, and maxMarks stay fixed once results may already reference them.
+// The Admin-only edit of one exam subject (route is results.approve - a
+// Teacher has results.enter/results.view only and can never reach it):
+// exam date, maximum marks, and pass mark. Class and subject stay fixed once
+// results may already reference this row. `passingMark: null` clears it.
+// Cross-field rules (pass mark <= maximum marks, maximum marks not below an
+// existing mark, no change once results are approved/published) need the
+// current row, so they live in ExamsService.updateExamSubject.
 export class UpdateExamSubjectDto {
   @IsOptional()
   @IsDateString()
   examDate?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  maxMarks?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1000)
+  passingMark?: number | null;
 }

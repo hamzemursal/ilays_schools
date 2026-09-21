@@ -171,15 +171,28 @@ describe("buildStudentResultsReport", () => {
 
       const { annual } = await buildStudentResultsReport(asPrisma(prisma), "student-1");
 
-      expect(annual).toEqual({ term1Percentage: 80, term2Percentage: 50, annualPercentage: 62, eligible: true, passMark: 50 });
+      expect(annual).toEqual({ term1Percentage: 80, term2Percentage: 50, annualPercentage: 62 });
     });
 
-    it("exactly 50.00% is eligible, just below is not", async () => {
+    it("never sends promotion eligibility or a pass mark to a student or parent — at any percentage", async () => {
+      for (const [t1, t2] of [[50, 50], [49, 50], [90, 95], [10, 5]]) {
+        prisma.result.findMany.mockResolvedValue([
+          result("r1", "term-1", "Math", t1, 100),
+          result("r2", "term-2", "Math", t2, 100),
+        ]);
+        const report = await buildStudentResultsReport(asPrisma(prisma), "student-1");
+
+        expect(JSON.stringify(report)).not.toMatch(/eligib|passMark|promotion/i);
+        expect(Object.keys(report.annual).sort()).toEqual(["annualPercentage", "term1Percentage", "term2Percentage"]);
+      }
+    });
+
+    it("the combined result is a plain weighted number either side of 50 — 50.00 and 49.50 are both just numbers", async () => {
       prisma.result.findMany.mockResolvedValue([
         result("r1", "term-1", "Math", 50, 100),
         result("r2", "term-2", "Math", 50, 100),
       ]);
-      expect((await buildStudentResultsReport(asPrisma(prisma), "student-1")).annual.eligible).toBe(true);
+      expect((await buildStudentResultsReport(asPrisma(prisma), "student-1")).annual.annualPercentage).toBe(50);
 
       prisma.result.findMany.mockResolvedValue([
         result("r1", "term-1", "Math", 49, 100),
@@ -187,7 +200,6 @@ describe("buildStudentResultsReport", () => {
       ]);
       const below = (await buildStudentResultsReport(asPrisma(prisma), "student-1")).annual;
       expect(below.annualPercentage).toBe(49.5);
-      expect(below.eligible).toBe(false);
     });
 
     it("Term 2 not yet published: annual and eligibility stay undetermined — never a failing 0", async () => {
@@ -195,7 +207,7 @@ describe("buildStudentResultsReport", () => {
 
       const { annual } = await buildStudentResultsReport(asPrisma(prisma), "student-1");
 
-      expect(annual).toEqual({ term1Percentage: 69, term2Percentage: null, annualPercentage: null, eligible: null, passMark: 50 });
+      expect(annual).toEqual({ term1Percentage: 69, term2Percentage: null, annualPercentage: null });
     });
 
     it("no Term rows configured for the year: everything is undetermined", async () => {
@@ -205,7 +217,7 @@ describe("buildStudentResultsReport", () => {
       const report = await buildStudentResultsReport(asPrisma(prisma), "student-1");
 
       expect(report.terms.map((t) => t.termId)).toEqual([null, null]);
-      expect(report.annual).toMatchObject({ term1Percentage: null, term2Percentage: null, annualPercentage: null, eligible: null });
+      expect(report.annual).toEqual({ term1Percentage: null, term2Percentage: null, annualPercentage: null });
       expect(report.otherResults).toHaveLength(1);
     });
 

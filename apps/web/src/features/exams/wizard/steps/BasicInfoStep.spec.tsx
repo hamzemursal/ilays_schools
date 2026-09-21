@@ -95,3 +95,19 @@ describe("BasicInfoStep — Term selector", () => {
     expect(optionLabels).toEqual(["Select…", "Term 1 (40%)", "Term 2 (60%)"]);
   });
 });
+
+describe("Exam Type is no longer collected — Term is the only academic period", () => {
+  it("has no Exam Type field and never offers Mid-Term, Assignment, Quiz or Final", () => {
+    render(<Harness years={[YEAR_WITH_TERMS]} />);
+
+    expect(screen.queryByText("Exam Type")).not.toBeInTheDocument();
+    for (const label of ["Mid-Term", "Assignment", "Quiz", "Final"]) {
+      expect(screen.queryByRole("option", { name: label })).not.toBeInTheDocument();
+    }
+    expect(screen.getByText("The academic period this exam counts toward — Term 1 or Term 2.")).toBeInTheDocument();
+  });
+
+  it("the fresh wizard state carries no type at all", () => {
+    expect(emptyExamWizardState("year-1")).not.toHaveProperty("type");
+  });
+});

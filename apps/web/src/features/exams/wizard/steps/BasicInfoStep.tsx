@@ -1,16 +1,8 @@
 "use client";
 
-import type { AcademicYear, ExamType } from "@/lib/api";
+import type { AcademicYear } from "@/lib/api";
 import { FormField, Input, Select, Textarea } from "@/components/ui/FormControls";
 import type { ExamWizardState } from "../types";
-
-const EXAM_TYPES: { value: ExamType; label: string }[] = [
-  { value: "QUIZ", label: "Quiz" },
-  { value: "MIDTERM", label: "Mid-Term" },
-  { value: "FINAL", label: "Final" },
-  { value: "ASSIGNMENT", label: "Assignment" },
-  { value: "OTHER", label: "Other" },
-];
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleDateString();
@@ -97,16 +89,6 @@ export function BasicInfoStep({
           />
         </FormField>
 
-        <FormField label="Exam Type" required>
-          <Select value={state.type} onChange={(e) => onChange({ type: e.target.value as ExamType })}>
-            {EXAM_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </Select>
-        </FormField>
-
         <FormField label="Academic Year" htmlFor="examAcademicYearId" required>
           <Select id="examAcademicYearId" value={state.academicYearId} onChange={(e) => onAcademicYearChange(e.target.value)}>
             {years.length === 0 && <option value="">No academic years yet</option>}
@@ -123,7 +105,7 @@ export function BasicInfoStep({
           label="Term"
           htmlFor="examTermId"
           required
-          hint="Which term this exam counts toward — Term 1 Exam or Term 2 Exam. Exam Type below is only a label."
+          hint="The academic period this exam counts toward — Term 1 or Term 2."
         >
           <Select
             id="examTermId"

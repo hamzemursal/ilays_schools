@@ -39,8 +39,12 @@ export class CreateExamDto {
   @MinLength(1)
   name!: string;
 
+  // Optional, free-form metadata only - Term (above) is the one authoritative
+  // academic period. New exams no longer collect it (defaults to OTHER);
+  // the enum keeps every historical value so no existing row is touched.
+  @IsOptional()
   @IsEnum(ExamType)
-  type!: ExamType;
+  type?: ExamType;
 
   @IsOptional()
   @IsDateString()

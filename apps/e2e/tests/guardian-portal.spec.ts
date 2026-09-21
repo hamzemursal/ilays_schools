@@ -55,7 +55,7 @@ test("Parent views real academic/attendance/fee data for their child and submits
   // closed native <select> isn't a meaningful signal; this just confirms
   // the real current year is genuinely offered as a choice.
   await expect(page.getByRole("option", { name: "2027 (Current)" })).toBeAttached();
-  await expect(page.getByText("Daily attendance")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Daily attendance" })).toBeVisible();
   // Exactly one day recorded so far, marked ABSENT — not the empty state.
   await expect(page.getByText("1 day(s) recorded this year.")).toBeVisible();
   await expect(page.getByRole("cell", { name: "ABSENT", exact: true })).toBeVisible();

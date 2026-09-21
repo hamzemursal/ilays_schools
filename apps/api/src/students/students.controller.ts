@@ -127,6 +127,13 @@ export class StudentsController {
     return this.students.createPortalAccount(user, id);
   }
 
+  // Reset (not create): only for a student who already has a portal login.
+  @RequirePermissions("students.update")
+  @Post("students/:id/portal-account/reset-password")
+  resetPortalPassword(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.students.resetPortalPassword(user, id);
+  }
+
   @RequirePermissions("guardians.manage")
   @Post("students/:id/guardians")
   async addGuardian(
@@ -135,21 +142,6 @@ export class StudentsController {
     @Body() dto: GuardianInputDto,
   ) {
     await this.students.assertAccessibleStudent(user, id);
-    const guardian = await this.guardians.findOrCreate(this.prisma, user.organizationId!, dto);
-    await this.guardians.linkToStudent(this.prisma, id, guardian.id, dto.relationship, dto.isPrimaryContact);
-    // relationship/isPrimaryContact live on StudentGuardian, not Guardian —
-    // findOrCreate's return value alone is missing them. Building the
-    // combined shape here (rather than a second fetch) since every field is
-    // already in hand: the guardian's own record, plus exactly what was
-    // just persisted by linkToStudent.
-    return {
-      id: guardian.id,
-      firstName: guardian.firstName,
-      lastName: guardian.lastName,
-      phone: guardian.phone,
-      email: guardian.email,
-      relationship: dto.relationship,
-      isPrimaryContact: dto.isPrimaryContact ?? false,
-    };
+    return this.guardians.addToStudent(user.organizationId!, id, dto);
   }
 }

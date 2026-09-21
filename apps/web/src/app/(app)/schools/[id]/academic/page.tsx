@@ -26,6 +26,7 @@ import { BulkActionBar } from "@/components/ui/BulkActionBar";
 import { useToast } from "@/components/ui/Toast";
 import { runBulkAction, summarizeBulkResult } from "@/lib/bulkAction";
 import { ExamTermControl } from "@/features/exams/ExamTermControl";
+import { ExamSubjectMarksEditor, marksConfigError } from "@/features/exams/ExamSubjectMarksEditor";
 import { Check, ChevronRight, GraduationCap, Pencil, Plus, Search, Trash2 } from "lucide-react";
 
 const TABS = ["Years", "Classes & sections", "Subjects", "Exams"] as const;
@@ -1010,6 +1011,7 @@ function ExamRow({
   const [classId, setClassId] = useState(classes[0]?.id ?? "");
   const [subjectId, setSubjectId] = useState(subjects[0]?.id ?? "");
   const [maxMarks, setMaxMarks] = useState("100");
+  const [passingMark, setPassingMark] = useState("");
   const [examDate, setExamDate] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   // Collapsed by default — with several exams on the page, an "Add a new
@@ -1022,11 +1024,17 @@ function ExamRow({
   async function onAddSubject(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
+    const invalid = marksConfigError(maxMarks, passingMark);
+    if (invalid) {
+      setFormError(invalid);
+      return;
+    }
     try {
       const examSubject = await api.createExamSubject(accessToken, schoolId, exam.id, {
         classId,
         subjectId,
         maxMarks: Number(maxMarks),
+        passingMark: passingMark.trim() ? Number(passingMark) : undefined,
         examDate: examDate || undefined,
       });
       setExams((prev) => prev.map((ex) => (ex.id === exam.id ? { ...ex, examSubjects: [...ex.examSubjects, examSubject] } : ex)));
@@ -1084,9 +1092,7 @@ function ExamRow({
       <Card padding="none">
         <CardHeader
           title={
-            <>
-              {exam.name} <span className="text-sm font-normal text-foreground-soft">· {exam.type}</span>
-            </>
+            <>{exam.name}</>
           }
           description="Subjects already scheduled for this exam."
           actions={
@@ -1108,6 +1114,24 @@ function ExamRow({
               <Badge tone="accent">
                 {es.class.name} · {es.subject.name} · /{es.maxMarks}
               </Badge>
+              {es.passingMark !== null && <span className="text-xs text-foreground-muted">Pass {es.passingMark}</span>}
+              {canManage && (
+                <ExamSubjectMarksEditor
+                  schoolId={schoolId}
+                  accessToken={accessToken}
+                  examId={exam.id}
+                  examSubject={es}
+                  onUpdated={(updated) =>
+                    setExams((prev) =>
+                      prev.map((ex) =>
+                        ex.id === exam.id
+                          ? { ...ex, examSubjects: ex.examSubjects.map((row) => (row.id === updated.id ? updated : row)) }
+                          : ex,
+                      ),
+                    )
+                  }
+                />
+              )}
               {canManage ? (
                 <Input
                   type="date"
@@ -1172,7 +1196,8 @@ function ExamRow({
                     </option>
                   ))}
                 </Select>
-                <Input type="number" min={1} value={maxMarks} onChange={(e) => setMaxMarks(e.target.value)} placeholder="Max marks" className="w-28" />
+                <Input type="number" min={1} step={1} value={maxMarks} onChange={(e) => setMaxMarks(e.target.value)} placeholder="Max marks" className="w-28" aria-label="Maximum marks" />
+                <Input type="number" min={0} step={1} value={passingMark} onChange={(e) => setPassingMark(e.target.value)} placeholder="Pass mark" className="w-28" aria-label="Pass mark" />
                 <Input type="date" value={examDate} onChange={(e) => setExamDate(e.target.value)} className="w-auto" aria-label="Exam date" />
                 <Button type="submit" size="sm" variant="outline">
                   Add subject

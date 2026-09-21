@@ -52,7 +52,8 @@ describe("GuardianStep — list", () => {
   it("lists an added guardian with relationship, mode, and primary badges", () => {
     renderStep({ ...emptyWizardState(), guardians: [guardian()] });
     expect(screen.getByText("Amina Ali")).toBeInTheDocument();
-    expect(screen.getByText("Mother · 0611111111")).toBeInTheDocument();
+    expect(screen.getByText("Mother")).toBeInTheDocument();
+    expect(screen.getByText("0611111111")).toBeInTheDocument();
     expect(screen.getByText("Existing guardian")).toBeInTheDocument();
     expect(screen.getByText("Primary")).toBeInTheDocument();
   });
@@ -201,5 +202,19 @@ describe("GuardianStep — create new", () => {
     await user.click(screen.getByRole("button", { name: "Create new" }));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByText("No guardians added yet")).toBeInTheDocument();
+  });
+});
+
+describe("GuardianStep — one Mother and one Father while building the list", () => {
+  it("once a Mother is on the list, Mother is disabled for the next guardian and Father is the default", async () => {
+    const user = userEvent.setup();
+    renderStep({ ...emptyWizardState(), guardians: [guardian({ relationship: "MOTHER" })] });
+
+    await user.click(screen.getByRole("button", { name: "Add guardian" }));
+    await user.click(screen.getByRole("button", { name: /Create new/ }));
+
+    const select = screen.getByRole("combobox", { name: /Relationship/ }) as HTMLSelectElement;
+    expect(screen.getByRole("option", { name: "Mother — already assigned to Amina Ali" })).toBeDisabled();
+    expect(select.value).toBe("FATHER");
   });
 });

@@ -18,11 +18,6 @@ export function formatAverage(percentage: number | null): string {
   return percentage === null ? "Incomplete" : `${percentage.toFixed(2)}%`;
 }
 
-function EligibilityBadge({ eligible }: { eligible: boolean | null }) {
-  if (eligible === null) return <Badge tone="neutral">Incomplete</Badge>;
-  return eligible ? <Badge tone="success">Eligible</Badge> : <Badge tone="danger">Not eligible</Badge>;
-}
-
 function SummaryFigure({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -32,8 +27,9 @@ function SummaryFigure({ label, children }: { label: string; children: React.Rea
   );
 }
 
-// Term 1, Term 2 and the annual/combined result with eligibility for one
-// academic year. Shared by the Student Portal, the Parent Portal Results tab
+// Term 1 Result, Term 2 Result and the Annual / Combined Result for one
+// academic year. Deliberately NO eligibility or pass/fail verdict: promotion
+// eligibility is an Admin concept and is never sent to a student or parent. Shared by the Student Portal, the Parent Portal Results tab
 // and the Parent Portal Performance tab so all three show identical numbers.
 export function ResultsSummary({ report }: { report: MyResultsReport }) {
   const { annual, terms } = report;
@@ -44,21 +40,18 @@ export function ResultsSummary({ report }: { report: MyResultsReport }) {
         title="Annual result"
         description={
           weights[0] !== null && weights[1] !== null
-            ? `Combines Term 1 (${weights[0]}%) and Term 2 (${weights[1]}%). Pass mark: ${annual.passMark}%.`
+            ? `Combines Term 1 (${weights[0]}%) and Term 2 (${weights[1]}%).`
             : "Term weights have not been set for this academic year."
         }
       />
-      <div className="grid grid-cols-2 gap-4 px-5 pb-5 sm:grid-cols-4">
-        <SummaryFigure label="Term 1">{formatAverage(annual.term1Percentage)}</SummaryFigure>
-        <SummaryFigure label="Term 2">{formatAverage(annual.term2Percentage)}</SummaryFigure>
-        <SummaryFigure label="Annual">{formatAverage(annual.annualPercentage)}</SummaryFigure>
-        <SummaryFigure label="Eligibility">
-          <EligibilityBadge eligible={annual.eligible} />
-        </SummaryFigure>
+      <div className="grid grid-cols-1 gap-4 px-5 pb-5 sm:grid-cols-3">
+        <SummaryFigure label="Term 1 Result">{formatAverage(annual.term1Percentage)}</SummaryFigure>
+        <SummaryFigure label="Term 2 Result">{formatAverage(annual.term2Percentage)}</SummaryFigure>
+        <SummaryFigure label="Annual / Combined Result">{formatAverage(annual.annualPercentage)}</SummaryFigure>
       </div>
       {annual.annualPercentage === null && (
         <p className="px-5 pb-5 text-sm text-foreground-soft">
-          The annual result and eligibility appear once both Term 1 and Term 2 results have been published.
+          The annual result appears once both Term 1 and Term 2 results have been published.
         </p>
       )}
     </Card>
@@ -84,14 +77,13 @@ function ResultsTable({ rows }: { rows: PortalResultRow[] }) {
             <tr key={r.id}>
               <td className="px-5 py-3 text-foreground">
                 {r.examName}
-                <span className="ml-1.5 text-xs text-foreground-muted">({r.examType})</span>
               </td>
               <td className="px-5 py-3 text-foreground-soft">{r.subjectName}</td>
               <td className="px-5 py-3 whitespace-nowrap text-foreground-soft">
                 {r.marksObtained} / {r.maxMarks}
               </td>
               <td className="px-5 py-3">
-                <Badge tone={r.percentage >= 50 ? "success" : "danger"}>{r.percentage}%</Badge>
+                <Badge tone="accent">{r.percentage}%</Badge>
               </td>
               <td className="px-5 py-3 text-foreground-muted">
                 {r.examDate ? new Date(r.examDate).toLocaleDateString() : "—"}

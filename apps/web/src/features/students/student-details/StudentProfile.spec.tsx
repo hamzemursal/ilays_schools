@@ -30,6 +30,7 @@ const apiMock = vi.hoisted(() => ({
   getStudentPhotoUrl: vi.fn(),
   deleteStudent: vi.fn(),
   createStudentPortalAccount: vi.fn(),
+  resetStudentPortalPassword: vi.fn(),
   listClassSubjects: vi.fn(),
   listSectionTeacherAssignments: vi.fn(),
   listSchoolDirectory: vi.fn(),
@@ -461,6 +462,67 @@ describe("StudentProfile — Student Portal account", () => {
     renderProfile();
     await user.click(await screen.findByRole("button", { name: "Create Student Login" }));
     expect(await screen.findByText("Only secondary students can have a portal account")).toBeInTheDocument();
+  });
+});
+
+describe("StudentProfile — Student Portal password reset", () => {
+  const resetButtons = () => screen.getAllByRole("button", { name: "Reset password" });
+
+  it("offers a reset (and no Create Student Login) once an account exists, only with students.update", async () => {
+    authMock.mockReturnValue({ accessToken: "token-1", user: { permissions: ["students.update"] } });
+    apiMock.getStudent.mockResolvedValue(student({ userId: "user-1" }));
+    renderProfile();
+
+    expect(await screen.findByText("Reset portal password")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create Student Login" })).not.toBeInTheDocument();
+  });
+
+  it("is not offered without students.update, nor when the student has no account yet", async () => {
+    authMock.mockReturnValue({ accessToken: "token-1", user: { permissions: [] } });
+    apiMock.getStudent.mockResolvedValue(student({ userId: "user-1" }));
+    const first = renderProfile();
+    await screen.findByText("Hodan Ali");
+    expect(screen.queryByText("Reset portal password")).not.toBeInTheDocument();
+    first.unmount();
+
+    authMock.mockReturnValue({ accessToken: "token-1", user: { permissions: ["students.update"] } });
+    apiMock.getStudent.mockResolvedValue(student({ userId: null }));
+    renderProfile();
+    await screen.findByText("Student Portal account");
+    expect(screen.queryByText("Reset portal password")).not.toBeInTheDocument();
+  });
+
+  it("asks for confirmation first, then calls the RESET endpoint (never create) and shows the one-time password", async () => {
+    const user = userEvent.setup();
+    authMock.mockReturnValue({ accessToken: "token-1", user: { permissions: ["students.update"] } });
+    apiMock.getStudent.mockResolvedValue(student({ userId: "user-1" }));
+    apiMock.resetStudentPortalPassword.mockResolvedValue({ loginId: "STU-2027-00001", temporaryPassword: "NewTemp-9x!" });
+    renderProfile();
+    await screen.findByText("Reset portal password");
+
+    await user.click(resetButtons()[0]);
+    expect(apiMock.resetStudentPortalPassword).not.toHaveBeenCalled();
+    await user.click(resetButtons().at(-1)!);
+
+    expect(await screen.findByText(/NewTemp-9x!/)).toBeInTheDocument();
+    expect(screen.getByText(/Login ID: STU-2027-00001/)).toBeInTheDocument();
+    expect(apiMock.resetStudentPortalPassword).toHaveBeenCalledWith("token-1", "stu-1");
+    expect(apiMock.createStudentPortalAccount).not.toHaveBeenCalled();
+    expect(screen.getByText(/won.t be shown again/)).toBeInTheDocument();
+  });
+
+  it("shows the server's message when the reset is refused", async () => {
+    const user = userEvent.setup();
+    authMock.mockReturnValue({ accessToken: "token-1", user: { permissions: ["students.update"] } });
+    apiMock.getStudent.mockResolvedValue(student({ userId: "user-1" }));
+    apiMock.resetStudentPortalPassword.mockRejectedValue(new ApiError("This portal account is suspended"));
+    renderProfile();
+    await screen.findByText("Reset portal password");
+
+    await user.click(resetButtons()[0]);
+    await user.click(resetButtons().at(-1)!);
+
+    expect(await screen.findByText("This portal account is suspended")).toBeInTheDocument();
   });
 });
 

@@ -46,6 +46,7 @@ type MockPrisma = {
   invitation: { create: jest.Mock; updateMany: jest.Mock };
   section: { findFirst: jest.Mock };
   subject: { findFirst: jest.Mock };
+  classSubject: { findFirst: jest.Mock };
   academicYear: { findFirst: jest.Mock };
   $transaction: jest.Mock;
 };
@@ -72,6 +73,7 @@ function createMockPrisma(): MockPrisma {
     invitation: { create: jest.fn(), updateMany: jest.fn() },
     section: { findFirst: jest.fn() },
     subject: { findFirst: jest.fn() },
+    classSubject: { findFirst: jest.fn() },
     academicYear: { findFirst: jest.fn() },
   };
   prisma.$transaction = jest.fn((cb: (tx: unknown) => unknown) => cb(prisma));
@@ -440,8 +442,9 @@ describe("TeachersService.create", () => {
   beforeEach(() => {
     prisma = createMockPrisma();
     ({ service } = createService(prisma));
-    prisma.section.findFirst.mockResolvedValue({ id: "sec-1" });
+    prisma.section.findFirst.mockResolvedValue({ id: "sec-1", classId: "class-1" });
     prisma.subject.findFirst.mockResolvedValue({ id: "subj-1" });
+    prisma.classSubject.findFirst.mockResolvedValue({ classId: "class-1", subjectId: "subj-1" });
     prisma.academicYear.findFirst.mockResolvedValue({ id: "year-1" });
     // Numbers are based on the HIGHEST one in use (not a row count): this school's
     // highest Employee Number and the organization's highest Teacher ID are both 5.
@@ -562,8 +565,9 @@ describe("TeachersService.addAssignment / removeAssignment", () => {
   beforeEach(() => {
     prisma = createMockPrisma();
     ({ service } = createService(prisma));
-    prisma.section.findFirst.mockResolvedValue({ id: "sec-1" });
+    prisma.section.findFirst.mockResolvedValue({ id: "sec-1", classId: "class-1" });
     prisma.subject.findFirst.mockResolvedValue({ id: "subj-1" });
+    prisma.classSubject.findFirst.mockResolvedValue({ classId: "class-1", subjectId: "subj-1" });
     prisma.academicYear.findFirst.mockResolvedValue({ id: "year-1" });
   });
 
@@ -603,6 +607,27 @@ describe("TeachersService.addAssignment / removeAssignment", () => {
     await expect(service.addAssignment(ACTOR, "school-1", "teacher-1", dto())).rejects.toThrow(
       "This teacher is already assigned to that section/subject/year",
     );
+  });
+
+  it("addAssignment only accepts a subject the section's class already teaches (existing Subject master, never a new Subject)", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.classSubject.findFirst.mockResolvedValue(null);
+
+    await expect(service.addAssignment(ACTOR, "school-1", "teacher-1", dto())).rejects.toThrow(
+      "That subject isn't taught in this section's class",
+    );
+    expect(prisma.classSubject.findFirst).toHaveBeenCalledWith({ where: { classId: "class-1", subjectId: "subj-1" } });
+    expect(prisma.teacherAssignment.create).not.toHaveBeenCalled();
+  });
+
+  it("addAssignment never creates a Subject — it only reads the school's existing one", async () => {
+    prisma.teacher.findFirst.mockResolvedValue({ id: "teacher-1" });
+    prisma.teacherAssignment.create.mockResolvedValue({ id: "assignment-1" });
+
+    await service.addAssignment(ACTOR, "school-1", "teacher-1", dto());
+
+    expect(prisma.subject.findFirst).toHaveBeenCalledWith({ where: { id: "subj-1", schoolId: "school-1" } });
+    expect((prisma as unknown as { subject: Record<string, unknown> }).subject.create).toBeUndefined();
   });
 
   it("removeAssignment throws NotFoundException for a teacher not in this organization", async () => {

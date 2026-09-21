@@ -51,7 +51,7 @@ function examSubject(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-const ENROLLMENT = { id: "e1", studentId: "student-1", student: { firstName: "Hodan", lastName: "Ali" } };
+const ENROLLMENT = { id: "e1", studentId: "student-1", rollNumber: 1, student: { firstName: "Hodan", lastName: "Ali" } };
 
 function setup(actor: AuthenticatedUser = SCHOOL_ADMIN) {
   const prisma = {
@@ -469,5 +469,95 @@ describe("Result calculation reflects the corrected mark", () => {
     await s.service.getTermPercentage("e1", "term-1");
 
     expect(s.prisma.result.findMany.mock.calls[0][0].where).toMatchObject({ isAbsent: false, resultSubmission: { status: "PUBLISHED" } });
+  });
+});
+
+// The Admin-configured maximum (ExamSubject.maxMarks = 100 here) is the only
+// upper bound a Teacher or Admin can enter against; neither can change it.
+describe("Mark bounds: 0 <= mark <= the Admin-set maximum", () => {
+  it.each([
+    ["a Teacher", TEACHER],
+    ["a School Admin", SCHOOL_ADMIN],
+  ])("%s can enter 0 and exactly the maximum", async (_name, actor) => {
+    const s = setup(actor);
+
+    await save(s, [{ enrollmentId: "e1", marksObtained: 0 }]);
+    await save(s, [{ enrollmentId: "e1", marksObtained: 100 }]);
+
+    expect(s.prisma.result.upsert).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["a Teacher", TEACHER],
+    ["a School Admin", SCHOOL_ADMIN],
+  ])("%s cannot enter a mark above the maximum, nor a negative mark", async (_name, actor) => {
+    const s = setup(actor);
+
+    await expect(save(s, [{ enrollmentId: "e1", marksObtained: 100.01 }])).rejects.toThrow("above the maximum of 100");
+    await expect(save(s, [{ enrollmentId: "e1", marksObtained: -1 }])).rejects.toThrow("can't be negative");
+    expect(s.prisma.result.upsert).not.toHaveBeenCalled();
+    expect(s.audit.record).not.toHaveBeenCalled();
+  });
+
+  it("a rejected batch writes nothing: one bad mark blocks the whole save", async () => {
+    const s = setup(TEACHER);
+
+    await expect(
+      save(s, [
+        { enrollmentId: "e1", marksObtained: 50 },
+        { enrollmentId: "e1", marksObtained: 101 },
+      ]),
+    ).rejects.toThrow("above the maximum of 100");
+    expect(s.prisma.result.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("Mark validation messages name the student, the value and the limit", () => {
+  it("an over-maximum mark: who, what value, what limit — not a bare enrollment id", async () => {
+    const s = setup(TEACHER);
+
+    await expect(save(s, [{ enrollmentId: "e1", marksObtained: 130 }])).rejects.toThrow("Hodan Ali (#1): 130 is above the maximum of 100");
+  });
+
+  it("a negative mark says it is below 0", async () => {
+    const s = setup(TEACHER);
+
+    await expect(save(s, [{ enrollmentId: "e1", marksObtained: -4 }])).rejects.toThrow("Hodan Ali (#1): -4 is below 0");
+  });
+
+  it("ROOT CAUSE of the confusing report: the page re-sends every row, so an ALREADY-SAVED mark above the maximum blocks a save the teacher typed nothing wrong into — and the message now says exactly that", async () => {
+    const s = setup(TEACHER);
+    s.prisma.result.findMany.mockResolvedValue([{ marksObtained: new Prisma.Decimal(150), isAbsent: false }]);
+
+    await expect(save(s, [{ enrollmentId: "e1", marksObtained: 150 }])).rejects.toThrow(
+      "Hodan Ali (#1) already has a saved mark of 150, which is above the maximum of 100. Correct that mark to continue.",
+    );
+    expect(s.prisma.result.upsert).not.toHaveBeenCalled();
+  });
+
+  it("a freshly typed over-maximum value is not mistaken for an already-saved one", async () => {
+    const s = setup(TEACHER);
+    s.prisma.result.findMany.mockResolvedValue([{ marksObtained: new Prisma.Decimal(60), isAbsent: false }]);
+
+    await expect(save(s, [{ enrollmentId: "e1", marksObtained: 130 }])).rejects.toThrow("130 is above the maximum of 100");
+    await expect(save(s, [{ enrollmentId: "e1", marksObtained: 130 }])).rejects.not.toThrow(/already has a saved mark/);
+  });
+
+  it("absent is a status, never a stored 0: an absent entry saves marksObtained null and isAbsent true", async () => {
+    const s = setup(TEACHER);
+
+    await save(s, [{ enrollmentId: "e1", isAbsent: true }]);
+
+    expect(s.prisma.result.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { marksObtained: null, isAbsent: true, enteredByUserId: TEACHER.id } }),
+    );
+  });
+
+  it("an entry that is both absent and carries a mark is refused, by name", async () => {
+    const s = setup(TEACHER);
+
+    await expect(save(s, [{ enrollmentId: "e1", isAbsent: true, marksObtained: 0 }])).rejects.toThrow(
+      "Hodan Ali (#1) can't be both absent and have a mark",
+    );
   });
 });

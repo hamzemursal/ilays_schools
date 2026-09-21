@@ -276,7 +276,7 @@ describeWithDb("Student & Parent portals — results and attendance, real databa
 
         expect(report.terms[1].results).toEqual([]);
         expect(report.terms[1].percentage).toBeNull();
-        expect(report.annual).toMatchObject({ term2Percentage: null, annualPercentage: null, eligible: null });
+        expect(report.annual).toMatchObject({ term2Percentage: null, annualPercentage: null });
       }
     });
 
@@ -294,7 +294,8 @@ describeWithDb("Student & Parent portals — results and attendance, real databa
       const report = await studentPortal.myResultsReport(studentA.actor, year2027);
 
       expect(marksOf(report, 1)).toEqual([[60, 100]]);
-      expect(report.annual).toEqual({ term1Percentage: 60, term2Percentage: 60, annualPercentage: 60, eligible: true, passMark: 50 });
+      expect(report.annual).toEqual({ term1Percentage: 60, term2Percentage: 60, annualPercentage: 60 });
+      expect(JSON.stringify(report)).not.toMatch(/eligib|passMark/i);
 
       // The portal must agree, to the digit, with what promotion computes.
       expect(await exams.getAnnualResult(studentA.enr2027, year2027)).toEqual({
@@ -343,7 +344,7 @@ describeWithDb("Student & Parent portals — results and attendance, real databa
       expect(report.enrollment.className).toBe("Form 1");
       expect(marksOf(report, 0)).toEqual([[70, 100]]);
       expect(marksOf(report, 1)).toEqual([[90, 100]]);
-      expect(report.annual).toEqual({ term1Percentage: 70, term2Percentage: 90, annualPercentage: 80, eligible: true, passMark: 50 });
+      expect(report.annual).toEqual({ term1Percentage: 70, term2Percentage: 90, annualPercentage: 80 });
     });
 
     dbIt("attendance is year-scoped the same way: 2027 and 2026 never mix", async () => {
@@ -399,7 +400,6 @@ describeWithDb("Student & Parent portals — results and attendance, real databa
       expect(marksOf(report, 0)).toEqual(expect.arrayContaining([[80, 100], [10, 50]]));
       expect(marksOf(report, 1)).toEqual([[60, 100]]);
       expect(report.annual.annualPercentage).toBe(60);
-      expect(report.annual.eligible).toBe(true);
     });
 
     dbIt("cannot see another parent's child — results or attendance (a NotFound, never a leak)", async () => {

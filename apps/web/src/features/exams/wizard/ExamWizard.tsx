@@ -93,7 +93,6 @@ export function ExamWizard({ schoolId }: { schoolId: string }) {
         academicYearId: state.academicYearId,
         termId: state.termId,
         name: state.name,
-        type: state.type,
         startDate: state.startDate || undefined,
         endDate: state.endDate || undefined,
         description: state.description || undefined,

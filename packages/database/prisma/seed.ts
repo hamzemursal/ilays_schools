@@ -396,6 +396,19 @@ export const E2E_TEACHER_PASSWORD = "TeacherPass123!";
 export const E2E_PARENT_EMAIL = "amina.ali@example.test";
 export const E2E_PARENT_PASSWORD = "ParentPass123!";
 
+// A second, fully separate organization with a SECONDARY school - the only
+// place the Student Portal (secondary students only) and the multi-student
+// marks/QA flows can be exercised. A different organization on purpose: no
+// existing fixture, list or count in the first organization changes.
+export const E2E_SECONDARY_ADMIN_EMAIL = "admin@secondary.test";
+export const E2E_SECONDARY_ADMIN_PASSWORD = "SuperSecret123!";
+export const E2E_SECONDARY_TEACHER_EMAIL = "teacher@secondary.test";
+export const E2E_SECONDARY_TEACHER_PASSWORD = "TeacherPass123!";
+export const E2E_SECONDARY_PARENT_EMAIL = "fadumo.warsame@example.test";
+export const E2E_SECONDARY_PARENT_PASSWORD = "ParentPass123!";
+export const E2E_SECONDARY_OTHER_PARENT_EMAIL = "hassan.noor@example.test";
+export const E2E_SECONDARY_OTHER_PARENT_PASSWORD = "ParentPass123!";
+
 async function seedDevAuthFixtures() {
   const org = await prisma.organization.findUniqueOrThrow({
     where: { id: "00000000-0000-0000-0000-000000000001" },
@@ -593,6 +606,202 @@ async function seedDevAuthFixtures() {
     update: {},
     create: { studentId: student.id, guardianId: guardian.id, relationship: "MOTHER", isPrimaryContact: true },
   });
+
+  await seedSecondaryQaFixtures();
+}
+
+// Dev/e2e only (same NODE_ENV guard as everything above). A second
+// organization with one SECONDARY school: Form 1 / Section A for 2027 with
+// Mathematics, Physics and Chemistry in the class, an admin, a teacher who
+// teaches ONLY Mathematics there, three enrolled students (no portal login -
+// the e2e suite creates those through the admin UI), two parents with logins
+// linked to one student each, and one unlinked parent record for the
+// "search an existing parent before creating one" flow.
+async function seedSecondaryQaFixtures() {
+  const org = await prisma.organization.upsert({
+    where: { id: "00000000-0000-0000-0000-000000000002" },
+    update: {},
+    create: { id: "00000000-0000-0000-0000-000000000002", name: "Ilays QA Organization" },
+  });
+
+  const school = await prisma.school.upsert({
+    where: { organizationId_name: { organizationId: org.id, name: "Ilays Secondary QA" } },
+    update: {},
+    create: { organizationId: org.id, name: "Ilays Secondary QA", type: "SECONDARY" },
+  });
+  const division = await prisma.division.upsert({
+    where: { schoolId_type: { schoolId: school.id, type: "SECONDARY" } },
+    update: {},
+    create: { schoolId: school.id, type: "SECONDARY" },
+  });
+
+  let year = await prisma.academicYear.findFirst({ where: { schoolId: school.id, name: "2027" } });
+  if (!year) {
+    year = await prisma.academicYear.create({
+      data: { schoolId: school.id, name: "2027", startDate: new Date("2027-01-01"), endDate: new Date("2027-12-31"), isCurrent: true },
+    });
+  }
+  await prisma.term.createMany({
+    data: [
+      { academicYearId: year.id, name: "Term 1", weight: 50 },
+      { academicYearId: year.id, name: "Term 2", weight: 50 },
+    ],
+    skipDuplicates: true,
+  });
+
+  const klass = await prisma.class.upsert({
+    where: { divisionId_level: { divisionId: division.id, level: 1 } },
+    update: {},
+    create: { divisionId: division.id, name: "Form 1", level: 1 },
+  });
+  const section = await prisma.section.upsert({
+    where: { classId_name: { classId: klass.id, name: "A" } },
+    update: {},
+    create: { classId: klass.id, name: "A", capacity: null },
+  });
+
+  const subjects: Record<string, { id: string }> = {};
+  for (const name of ["Mathematics", "Physics", "Chemistry"]) {
+    subjects[name] = await prisma.subject.upsert({
+      where: { schoolId_name: { schoolId: school.id, name } },
+      update: {},
+      create: { schoolId: school.id, name },
+    });
+    await prisma.classSubject.upsert({
+      where: { classId_subjectId: { classId: klass.id, subjectId: subjects[name].id } },
+      update: {},
+      create: { classId: klass.id, subjectId: subjects[name].id },
+    });
+  }
+
+  const schoolAdminRole = await prisma.role.findUniqueOrThrow({ where: { name: "SCHOOL_ADMIN" } });
+  const teacherRole = await prisma.role.findUniqueOrThrow({ where: { name: "TEACHER" } });
+  const parentRole = await prisma.role.findUniqueOrThrow({ where: { name: "PARENT" } });
+
+  await createActiveTestUser({
+    email: E2E_SECONDARY_ADMIN_EMAIL,
+    password: E2E_SECONDARY_ADMIN_PASSWORD,
+    organizationId: org.id,
+    roleId: schoolAdminRole.id,
+    schoolId: school.id,
+    label: "School Admin (Ilays Secondary QA)",
+  });
+
+  const teacherUser = await createActiveTestUser({
+    email: E2E_SECONDARY_TEACHER_EMAIL,
+    password: E2E_SECONDARY_TEACHER_PASSWORD,
+    organizationId: org.id,
+    roleId: teacherRole.id,
+    schoolId: school.id,
+    label: "Teacher (Ilays Secondary QA)",
+  });
+  const teacher = await prisma.teacher.upsert({
+    where: { userId: teacherUser.id },
+    update: {},
+    create: {
+      userId: teacherUser.id,
+      schoolId: school.id,
+      employeeNumber: "EMP-QA-0001",
+      teacherCode: "TCH-QA-0001",
+      firstName: "Abdi",
+      lastName: "Mohamud",
+    },
+  });
+  await prisma.teacherAssignment.upsert({
+    where: {
+      teacherId_sectionId_subjectId_academicYearId: {
+        teacherId: teacher.id,
+        sectionId: section.id,
+        subjectId: subjects["Mathematics"].id,
+        academicYearId: year.id,
+      },
+    },
+    update: {},
+    create: { teacherId: teacher.id, schoolId: school.id, academicYearId: year.id, sectionId: section.id, subjectId: subjects["Mathematics"].id },
+  });
+
+  // Student numbers are unique per school-year only; these are deliberately
+  // distinct from the first organization's so a Student Login ID (the
+  // student number) can never be ambiguous between the two fixtures.
+  const roster = [
+    { first: "Ayaan", last: "Warsame", dob: "2011-04-02", sex: "MALE" as const, number: "STU-2027-90001", roll: 1 },
+    { first: "Bilan", last: "Noor", dob: "2011-09-14", sex: "FEMALE" as const, number: "STU-2027-90002", roll: 2 },
+    { first: "Cali", last: "Jama", dob: "2010-12-30", sex: "MALE" as const, number: "STU-2027-90003", roll: 3 },
+  ];
+  const studentIds: Record<string, string> = {};
+  for (const r of roster) {
+    let student = await prisma.student.findFirst({
+      where: { organizationId: org.id, firstName: r.first, lastName: r.last, dateOfBirth: new Date(r.dob) },
+    });
+    if (!student) {
+      student = await prisma.student.create({
+        data: { organizationId: org.id, firstName: r.first, lastName: r.last, dateOfBirth: new Date(r.dob), sex: r.sex, legacyStudentNumber: `E2E-${r.number}` },
+      });
+    }
+    studentIds[r.first] = student.id;
+    const enrolled = await prisma.studentEnrollment.findFirst({
+      where: { studentId: student.id, schoolId: school.id, academicYearId: year.id },
+    });
+    if (!enrolled) {
+      await prisma.studentEnrollment.create({
+        data: {
+          studentId: student.id,
+          organizationId: org.id,
+          schoolId: school.id,
+          academicYearId: year.id,
+          classId: klass.id,
+          sectionId: section.id,
+          studentNumber: r.number,
+          rollNumber: r.roll,
+        },
+      });
+    }
+  }
+
+  const fadumoUser = await createActiveTestUser({
+    email: E2E_SECONDARY_PARENT_EMAIL,
+    password: E2E_SECONDARY_PARENT_PASSWORD,
+    organizationId: org.id,
+    roleId: parentRole.id,
+    schoolId: null,
+    label: "Parent (mother of Ayaan Warsame)",
+  });
+  const fadumo = await prisma.guardian.upsert({
+    where: { userId: fadumoUser.id },
+    update: {},
+    create: { userId: fadumoUser.id, firstName: "Fadumo", lastName: "Warsame", phone: "0622222222" },
+  });
+  await prisma.studentGuardian.upsert({
+    where: { studentId_guardianId: { studentId: studentIds["Ayaan"], guardianId: fadumo.id } },
+    update: {},
+    create: { studentId: studentIds["Ayaan"], guardianId: fadumo.id, relationship: "MOTHER", isPrimaryContact: true },
+  });
+
+  const hassanUser = await createActiveTestUser({
+    email: E2E_SECONDARY_OTHER_PARENT_EMAIL,
+    password: E2E_SECONDARY_OTHER_PARENT_PASSWORD,
+    organizationId: org.id,
+    roleId: parentRole.id,
+    schoolId: null,
+    label: "Parent (father of Bilan Noor)",
+  });
+  const hassan = await prisma.guardian.upsert({
+    where: { userId: hassanUser.id },
+    update: {},
+    create: { userId: hassanUser.id, firstName: "Hassan", lastName: "Noor", phone: "0633333333" },
+  });
+  await prisma.studentGuardian.upsert({
+    where: { studentId_guardianId: { studentId: studentIds["Bilan"], guardianId: hassan.id } },
+    update: {},
+    create: { studentId: studentIds["Bilan"], guardianId: hassan.id, relationship: "FATHER", isPrimaryContact: true },
+  });
+
+  // An existing parent record with no login and no children yet - what the
+  // "search an existing parent first" flow should find and reuse.
+  let farah = await prisma.guardian.findFirst({ where: { phone: "0644444444" } });
+  if (!farah) {
+    farah = await prisma.guardian.create({ data: { firstName: "Farah", lastName: "Jama", phone: "0644444444" } });
+  }
 }
 
 async function createActiveTestUser(opts: {

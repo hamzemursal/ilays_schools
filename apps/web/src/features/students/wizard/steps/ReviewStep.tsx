@@ -3,14 +3,8 @@ import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Avatar } from "@/components/ui/Avatar";
 import type { AcademicYear, ClassWithSections } from "@/lib/api";
+import { relationshipLabel } from "@/features/guardians/relationships";
 import type { WizardState } from "../types";
-
-const RELATIONSHIP_LABEL: Record<string, string> = {
-  FATHER: "Father",
-  MOTHER: "Mother",
-  GUARDIAN: "Guardian",
-  OTHER: "Other",
-};
 
 export function ReviewStep({
   state,
@@ -89,7 +83,7 @@ export function ReviewStep({
                 <div key={g.key} className="flex items-center justify-between text-sm">
                   <span className="text-foreground">
                     {g.firstName} {g.lastName}{" "}
-                    <span className="text-foreground-soft">({RELATIONSHIP_LABEL[g.relationship]})</span>
+                    <span className="text-foreground-soft">({relationshipLabel(g.relationship)})</span>
                   </span>
                   <div className="flex items-center gap-2">
                     {g.isPrimaryContact && <Badge tone="success">Primary</Badge>}

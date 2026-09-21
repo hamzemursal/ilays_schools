@@ -2,20 +2,17 @@
 
 import type { GuardianInput, GuardianRelationship } from "@/lib/api";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
-
-const RELATIONSHIPS: { value: GuardianRelationship; label: string }[] = [
-  { value: "FATHER", label: "Father" },
-  { value: "MOTHER", label: "Mother" },
-  { value: "GUARDIAN", label: "Guardian" },
-  { value: "OTHER", label: "Other" },
-];
+import { RelationshipOptions, firstAvailableRelationship, type TakenRelationships } from "../relationships";
 
 export function GuardianFieldSet({
   value,
   onChange,
+  taken,
 }: {
   value: GuardianInput;
   onChange: (next: GuardianInput) => void;
+  // Mother/Father already held by someone else for this student.
+  taken?: TakenRelationships;
 }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -45,14 +42,11 @@ export function GuardianFieldSet({
       </FormField>
       <FormField label="Relationship" required>
         <Select
+          aria-label="Relationship"
           value={value.relationship}
           onChange={(e) => onChange({ ...value, relationship: e.target.value as GuardianRelationship })}
         >
-          {RELATIONSHIPS.map((r) => (
-            <option key={r.value} value={r.value}>
-              {r.label}
-            </option>
-          ))}
+          <RelationshipOptions taken={taken} />
         </Select>
       </FormField>
       <label className="flex items-center gap-2 self-end pb-2 text-sm text-foreground-soft">
@@ -68,6 +62,6 @@ export function GuardianFieldSet({
   );
 }
 
-export function emptyGuardian(): GuardianInput {
-  return { firstName: "", lastName: "", relationship: "FATHER", isPrimaryContact: false };
+export function emptyGuardian(taken: TakenRelationships = {}): GuardianInput {
+  return { firstName: "", lastName: "", relationship: firstAvailableRelationship(taken), isPrimaryContact: false };
 }

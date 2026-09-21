@@ -206,3 +206,174 @@ describe("Results page — admin editing and correction", () => {
     expect(screen.getByRole("button", { name: "Undo Publish" })).toBeInTheDocument();
   });
 });
+
+function withContext(data: ResultsForSection, context: Partial<ResultsForSection["context"]>): ResultsForSection {
+  return { ...data, context: { ...data.context, ...context } };
+}
+
+describe("Results page — exam context is spelled out", () => {
+  const CONTEXT = { termName: "Term 1", passingMark: 20, examDate: "2027-03-01T00:00:00.000Z" };
+
+  it("shows Exam Name, Subject, Class, Section, Academic Year, Term, Exam Date, Maximum Marks, Pass Mark and Status", async () => {
+    await renderPage(TEACHER, withContext(results("DRAFT", [HODAN()]), CONTEXT));
+
+    const grid = screen.getByText("Exam Name").closest("dl") as HTMLElement;
+    const value = (label: string) => within(grid).getByText(label).nextElementSibling?.textContent;
+    expect(value("Exam Name")).toBe("Term 2 Exam");
+    expect(value("Subject")).toBe("Mathematics");
+    expect(value("Class")).toBe("Form 2");
+    expect(value("Section")).toBe("A");
+    expect(value("Academic Year")).toBe("2026-2027");
+    expect(value("Term")).toBe("Term 1");
+    expect(value("Exam Date")).toBe(new Date("2027-03-01T00:00:00.000Z").toLocaleDateString());
+    expect(value("Maximum Marks")).toBe("50");
+    expect(value("Pass Mark")).toBe("20");
+    expect(value("Status")).toBe("Draft");
+  });
+
+  it("says so plainly when there is no pass mark, term or date", async () => {
+    await renderPage(TEACHER, withContext(results("DRAFT", [HODAN()]), { termName: null, passingMark: null, examDate: null }));
+
+    const grid = screen.getByText("Exam Name").closest("dl") as HTMLElement;
+    const value = (label: string) => within(grid).getByText(label).nextElementSibling?.textContent;
+    expect(value("Pass Mark")).toBe("Not set");
+    expect(value("Term")).toBe("No term assigned");
+    expect(value("Exam Date")).toBe("Not set");
+  });
+
+  it("a teacher has no control over Maximum Marks or Pass Mark - the only inputs are student marks and Absent", async () => {
+    await renderPage(TEACHER, withContext(results("DRAFT", [HODAN(), AMINA()]), CONTEXT));
+
+    const inputs = screen.getAllByRole("spinbutton");
+    expect(inputs.map((i) => i.getAttribute("aria-label"))).toEqual(["Mark for Hodan Test", "Mark for Amina Test"]);
+    expect(screen.queryByLabelText(/maximum/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/pass mark/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/set by an Admin and can.t be changed here/)).toBeInTheDocument();
+  });
+});
+
+describe("Results page - mark validation is visible and enforced", () => {
+  it.each([
+    ["51", "Above the maximum of 50"],
+    ["-1", "A mark can't be negative"],
+    ["12.345", "Use at most 2 decimal places"],
+  ])("a mark of %s shows the message under that student's row and blocks Save and Submit", async (typed, message) => {
+    const user = userEvent.setup();
+    await renderPage(TEACHER, results("DRAFT", [HODAN(), AMINA()]));
+
+    await user.type(screen.getByLabelText("Mark for Amina Test"), typed);
+
+    const box = screen.getByLabelText("Mark for Amina Test");
+    expect(box).toHaveAttribute("aria-invalid", "true");
+    expect(within(box.parentElement as HTMLElement).getByRole("alert")).toHaveTextContent(message);
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Submit for Review" })).toBeDisabled();
+    expect(apiMock.enterMarks).not.toHaveBeenCalled();
+  });
+
+  it.each(["0", "50", "49.5", "12.25"])("%s is accepted (0 <= mark <= maximum, up to 2 decimals)", async (typed) => {
+    const user = userEvent.setup();
+    await renderPage(TEACHER, results("DRAFT", [AMINA()]));
+
+    await user.type(screen.getByLabelText("Mark for Amina Test"), typed);
+
+    expect(screen.getByLabelText("Mark for Amina Test")).not.toHaveAttribute("aria-invalid");
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeEnabled();
+  });
+
+  it("correcting the mark clears the error and re-enables Save", async () => {
+    const user = userEvent.setup();
+    await renderPage(TEACHER, results("DRAFT", [AMINA()]));
+    await user.type(screen.getByLabelText("Mark for Amina Test"), "99");
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeDisabled();
+
+    await user.clear(screen.getByLabelText("Mark for Amina Test"));
+    await user.type(screen.getByLabelText("Mark for Amina Test"), "45");
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeEnabled();
+  });
+
+  it("an ALREADY-SAVED mark above the maximum is flagged on load - this is what made unrelated saves fail", async () => {
+    await renderPage(TEACHER, results("DRAFT", [student("e1", "Hodan", 1, { marksObtained: "60", percentage: 120, hasMark: true }), AMINA()]));
+
+    const box = screen.getByLabelText("Mark for Hodan Test");
+    expect(box).toHaveAttribute("aria-invalid", "true");
+    expect(within(box.parentElement as HTMLElement).getByRole("alert")).toHaveTextContent("Above the maximum of 50");
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeDisabled();
+  });
+
+  it("a blank mark is Missing, not an error, and an Absent student's row is never validated as a mark", async () => {
+    await renderPage(TEACHER, results("DRAFT", [AMINA(), student("e3", "Hassan", 3, { isAbsent: true })]));
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeEnabled();
+  });
+
+  it("shows the server's own validation message exactly as returned, naming the student", async () => {
+    const user = userEvent.setup();
+    apiMock.enterMarks.mockRejectedValue(new ApiError("Hodan Test (#1): 45 is above the maximum of 40", 400));
+    await renderPage(TEACHER, results("DRAFT", [HODAN()]));
+
+    await user.clear(screen.getByLabelText("Mark for Hodan Test"));
+    await user.type(screen.getByLabelText("Mark for Hodan Test"), "45");
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Hodan Test (#1): 45 is above the maximum of 40")).toBeInTheDocument();
+  });
+
+  it("an admin is held to the same rule as a teacher", async () => {
+    const user = userEvent.setup();
+    await renderPage(ADMIN, results("NEEDS_CORRECTION", [HODAN()]));
+
+    await user.clear(screen.getByLabelText("Mark for Hodan Test"));
+    await user.type(screen.getByLabelText("Mark for Hodan Test"), "75");
+
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeDisabled();
+  });
+});
+
+describe("Results page - Submit for Review dialog", () => {
+  it("shows the exam context and Students / Completed marks / Absent / Missing marks (which add up)", async () => {
+    const user = userEvent.setup();
+    const data = withContext(
+      results("DRAFT", [HODAN(), student("e2", "Amina", 2, { isAbsent: true }), student("e4", "Bilan", 4, { marksObtained: "30", percentage: 60, hasMark: true })]),
+      { termName: "Term 1", passingMark: 20, examDate: "2027-03-01T00:00:00.000Z" },
+    );
+    apiMock.enterMarks.mockResolvedValue(data);
+    await renderPage(TEACHER, data);
+
+    await user.click(screen.getByRole("button", { name: "Submit for Review" }));
+    const dialog = await screen.findByRole("alertdialog");
+
+    const cell = (label: string) => within(dialog).getByText(label).nextElementSibling?.textContent;
+    expect(cell("Exam Name")).toBe("Term 2 Exam");
+    expect(cell("Subject")).toBe("Mathematics");
+    expect(cell("Class")).toBe("Form 2");
+    expect(cell("Section")).toBe("A");
+    expect(cell("Academic Year")).toBe("2026-2027");
+    expect(cell("Term")).toBe("Term 1");
+    expect(cell("Maximum Marks")).toBe("50");
+    expect(cell("Pass Mark")).toBe("20");
+    expect(cell("Students")).toBe("3");
+    expect(cell("Completed marks")).toBe("2");
+    expect(cell("Absent")).toBe("1");
+    expect(cell("Missing marks")).toBe("0");
+  });
+
+  it("missing marks block submission and are counted separately from absent", async () => {
+    const user = userEvent.setup();
+    const data = results("DRAFT", [HODAN(), AMINA(), student("e3", "Hassan", 3, { isAbsent: true })]);
+    apiMock.enterMarks.mockResolvedValue(data);
+    await renderPage(TEACHER, data);
+
+    await user.click(screen.getByRole("button", { name: "Submit for Review" }));
+    const dialog = await screen.findByRole("alertdialog");
+
+    const cell = (label: string) => within(dialog).getByText(label).nextElementSibling?.textContent;
+    expect(cell("Completed marks")).toBe("1");
+    expect(cell("Absent")).toBe("1");
+    expect(cell("Missing marks")).toBe("1");
+    expect(within(dialog).getByRole("button", { name: "Submit for Review" })).toBeDisabled();
+  });
+});

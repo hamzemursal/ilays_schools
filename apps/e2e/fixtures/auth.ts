@@ -30,7 +30,7 @@ function rememberSecret(email: string, secret: string) {
 
 export async function loginAt(page: Page, loginPath: string, email: string, password: string) {
   await page.goto(loginPath);
-  await page.getByPlaceholder(/you@school\.com|Student Login ID/i).fill(email);
+  await page.getByPlaceholder(/you@school\.com|Student Login ID|STU-\d{4}-\d{5}/i).fill(email);
   // By id, not label: the adjacent "Show password" toggle button's
   // aria-label contains "password", so any non-exact getByLabel("Password")
   // match is ambiguous between the input and that button.

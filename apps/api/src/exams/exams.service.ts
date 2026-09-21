@@ -134,6 +134,8 @@ export class ExamsService {
     // boundary. Deduplicated up front so a pair appearing twice (e.g. the
     // same subject shared by two selected classes, submitted once per
     // class by mistake) can't violate ExamSubject's own unique constraint.
+    this.assertPassMarkWithinMax(dto.maxMarks ?? 100, dto.passingMark);
+
     const pairs = dto.examSubjects ?? [];
     const uniquePairs = Array.from(new Map(pairs.map((p) => [`${p.classId}:${p.subjectId}`, p])).values());
 
@@ -159,7 +161,7 @@ export class ExamsService {
             academicYearId: dto.academicYearId,
             termId: dto.termId,
             name: dto.name,
-            type: dto.type,
+            type: dto.type ?? "OTHER",
             startDate: dto.startDate ? new Date(dto.startDate) : undefined,
             endDate: dto.endDate ? new Date(dto.endDate) : undefined,
             description: dto.description,
@@ -231,6 +233,8 @@ export class ExamsService {
     const subject = await this.prisma.subject.findFirst({ where: { id: dto.subjectId, schoolId } });
     if (!subject) throw new BadRequestException("That subject does not belong to this school");
 
+    this.assertPassMarkWithinMax(dto.maxMarks ?? 100, dto.passingMark);
+
     try {
       return await this.prisma.examSubject.create({
         data: {
@@ -238,6 +242,7 @@ export class ExamsService {
           classId: dto.classId,
           subjectId: dto.subjectId,
           maxMarks: dto.maxMarks ?? 100,
+          passingMark: dto.passingMark,
           examDate: dto.examDate ? new Date(dto.examDate) : undefined,
         },
         include: { class: true, subject: true },
@@ -250,10 +255,16 @@ export class ExamsService {
     }
   }
 
-  // The "Add subject" form only ever collects class/subject/maxMarks — this
-  // is the one way to set or fix examDate afterward (e.g. it was left blank
-  // when the subject was scheduled). Deliberately narrow: class, subject,
-  // and maxMarks stay fixed once results may already reference this row.
+  // The Admin's control over one exam subject after it exists: exam date,
+  // maximum marks and pass mark (route is results.approve - never a Teacher).
+  // Class and subject stay fixed once results may already reference this row.
+  //
+  // Maximum marks are what every percentage, term average and annual result
+  // is computed against, so changing them is guarded: never below a mark
+  // already entered, and never once results are Approved or Published (return
+  // or unpublish them first, which is itself audited). The pass mark is
+  // configuration only and can always be corrected, but never above the
+  // maximum.
   async updateExamSubject(
     actor: AuthenticatedUser,
     schoolId: string,
@@ -266,9 +277,21 @@ export class ExamsService {
     const examSubject = await this.prisma.examSubject.findFirst({ where: { id: examSubjectId, examId } });
     if (!examSubject) throw new NotFoundException("Exam subject not found in this exam");
 
+    const nextMax = dto.maxMarks ?? examSubject.maxMarks;
+    const nextPass = dto.passingMark === undefined ? examSubject.passingMark : dto.passingMark;
+    this.assertPassMarkWithinMax(nextMax, nextPass);
+
+    if (dto.maxMarks !== undefined && dto.maxMarks !== examSubject.maxMarks) {
+      await this.assertMaxMarksChangeAllowed(examSubjectId, dto.maxMarks);
+    }
+
     const updated = await this.prisma.examSubject.update({
       where: { id: examSubjectId },
-      data: { examDate: dto.examDate ? new Date(dto.examDate) : undefined },
+      data: {
+        examDate: dto.examDate ? new Date(dto.examDate) : undefined,
+        maxMarks: dto.maxMarks,
+        passingMark: dto.passingMark,
+      },
       include: { class: true, subject: true },
     });
 
@@ -280,10 +303,44 @@ export class ExamsService {
       module: AuditModuleName.ACADEMIC,
       resourceType: "ExamSubject",
       resourceId: examSubjectId,
-      after: { examDate: dto.examDate ?? null },
+      before: { maxMarks: examSubject.maxMarks, passingMark: examSubject.passingMark, examDate: examSubject.examDate },
+      after: {
+        examDate: dto.examDate ?? null,
+        ...(dto.maxMarks !== undefined ? { maxMarks: dto.maxMarks } : {}),
+        ...(dto.passingMark !== undefined ? { passingMark: dto.passingMark } : {}),
+      },
     });
 
     return updated;
+  }
+
+  // 0 <= passingMark <= maxMarks; having no pass mark at all is allowed.
+  private assertPassMarkWithinMax(maxMarks: number, passingMark: number | null | undefined) {
+    if (passingMark === undefined || passingMark === null) return;
+    if (passingMark < 0) throw new BadRequestException("Pass mark can't be negative");
+    if (passingMark > maxMarks) {
+      throw new BadRequestException(`Pass mark (${passingMark}) can't be higher than the maximum marks (${maxMarks})`);
+    }
+  }
+
+  private async assertMaxMarksChangeAllowed(examSubjectId: string, newMaxMarks: number) {
+    const finalized = await this.prisma.resultSubmission.count({
+      where: { examSubjectId, status: { in: ["APPROVED", "PUBLISHED"] } },
+    });
+    if (finalized > 0) {
+      throw new BadRequestException(
+        "Maximum marks can't be changed once results are approved or published - return or unpublish them first",
+      );
+    }
+
+    const highest = await this.prisma.result.aggregate({
+      where: { examSubjectId, isAbsent: false },
+      _max: { marksObtained: true },
+    });
+    const highestMark = highest._max.marksObtained === null ? null : Number(highest._max.marksObtained);
+    if (highestMark !== null && highestMark > newMaxMarks) {
+      throw new BadRequestException(`Maximum marks can't be lowered to ${newMaxMarks}: a student already has ${highestMark}`);
+    }
   }
 
   // Re-links an existing exam to one of its own academic year's two terms —
@@ -399,6 +456,8 @@ export class ExamsService {
         examId: examSubject.exam.id,
         examName: examSubject.exam.name,
         examType: examSubject.exam.type,
+        // The authoritative academic period; examType above is legacy metadata.
+        termName: examSubject.exam.term?.name ?? null,
         academicYearId: examSubject.exam.academicYearId,
         academicYearName: examSubject.exam.academicYear.name,
         schoolName: examSubject.exam.school.name,
@@ -407,6 +466,7 @@ export class ExamsService {
         sectionName: section?.name ?? "",
         subjectName: examSubject.subject.name,
         examDate: examSubject.examDate,
+        passingMark: examSubject.passingMark,
         teacherName: assignment ? `${assignment.teacher.firstName} ${assignment.teacher.lastName}` : null,
       },
       maxMarks: examSubject.maxMarks,
@@ -456,7 +516,7 @@ export class ExamsService {
         academicYearId: examSubject.exam.academicYearId,
         OR: [{ status: "ACTIVE" }, { results: { some: { examSubjectId } } }],
       },
-      select: { id: true, studentId: true, student: { select: { firstName: true, lastName: true } } },
+      select: { id: true, studentId: true, rollNumber: true, student: { select: { firstName: true, lastName: true } } },
     });
     const enrollmentById = new Map(validEnrollments.map((e) => [e.id, e]));
     const invalid = enrollmentIds.filter((id) => !enrollmentById.has(id));
@@ -464,16 +524,36 @@ export class ExamsService {
       throw new BadRequestException(`These enrollments aren't active in this section: ${invalid.join(", ")}`);
     }
 
+    // Every message names the student and the value, never a bare enrollment
+    // id: a teacher looking at a page of rows has to be able to see WHICH
+    // row is refused and why.
+    const who = (enrollmentId: string) => {
+      const e = enrollmentById.get(enrollmentId);
+      return e?.student ? `${e.student.firstName} ${e.student.lastName} (#${e.rollNumber})` : `Enrollment ${enrollmentId}`;
+    };
     for (const entry of dto.entries) {
       if (entry.isAbsent) {
         if (entry.marksObtained !== undefined && entry.marksObtained !== null) {
-          throw new BadRequestException(`Enrollment ${entry.enrollmentId} can't be both absent and have a mark`);
+          throw new BadRequestException(`${who(entry.enrollmentId)} can't be both absent and have a mark`);
         }
       } else if (entry.marksObtained === undefined || entry.marksObtained === null) {
-        throw new BadRequestException(`Enrollment ${entry.enrollmentId} needs a mark, or must be marked absent`);
+        throw new BadRequestException(`${who(entry.enrollmentId)} needs a mark, or must be marked absent`);
+      } else if (entry.marksObtained < 0) {
+        throw new BadRequestException(`${who(entry.enrollmentId)}: ${entry.marksObtained} is below 0 - a mark can't be negative`);
       } else if (entry.marksObtained > examSubject.maxMarks) {
+        // The page re-sends every row it shows, including marks that were
+        // saved earlier. If THIS row's already-saved value is the one above
+        // the maximum, say so - otherwise a teacher who typed nothing wrong
+        // is told about a value they never entered.
+        const [stored] = await this.prisma.result.findMany({
+          where: { examSubjectId, enrollmentId: entry.enrollmentId },
+          select: { marksObtained: true, isAbsent: true },
+        });
+        const alreadySaved = stored && !stored.isAbsent && Number(stored.marksObtained) === entry.marksObtained;
         throw new BadRequestException(
-          `Marks for enrollment ${entry.enrollmentId} exceed the max of ${examSubject.maxMarks}`,
+          alreadySaved
+            ? `${who(entry.enrollmentId)} already has a saved mark of ${entry.marksObtained}, which is above the maximum of ${examSubject.maxMarks}. Correct that mark to continue.`
+            : `${who(entry.enrollmentId)}: ${entry.marksObtained} is above the maximum of ${examSubject.maxMarks}`,
         );
       }
     }
@@ -1157,7 +1237,7 @@ export class ExamsService {
   private async getExamSubjectInSchoolOrThrow(schoolId: string, examSubjectId: string) {
     const examSubject = await this.prisma.examSubject.findFirst({
       where: { id: examSubjectId, exam: { schoolId } },
-      include: { exam: { include: { academicYear: true, school: true } }, class: true, subject: true },
+      include: { exam: { include: { academicYear: true, school: true, term: true } }, class: true, subject: true },
     });
     if (!examSubject) throw new NotFoundException("Exam subject not found in this school");
     return examSubject;

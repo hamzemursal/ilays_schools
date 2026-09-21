@@ -22,12 +22,13 @@ test("Admin creates an exam, Teacher submits results, Admin approves and publish
   // same pattern as "Add student"/"View School" elsewhere — match by text.
   await page.getByText("Create Exam", { exact: true }).click();
 
-  // Step 1 — Basic Information. Exam Type and Academic Year already default
-  // to a usable value (Mid-Term / the current year) — left untouched. Term is
-  // deliberately NEVER pre-selected (a default is how a Term 2 exam ends up
+  // Step 1 — Basic Information. Academic Year already defaults to a usable
+  // value (the current year) — left untouched. There is no Exam Type field:
+  // Term is the only academic period. Term is deliberately NEVER pre-selected (a default is how a Term 2 exam ends up
   // saved under Term 1), so it must be chosen: the seeded year always has
   // Term 1 and Term 2, after the "Select…" placeholder.
   await page.getByPlaceholder("e.g. Term 1 Exam 2027").fill(examName);
+  await expect(page.getByText("Exam Type")).toHaveCount(0);
   await page.locator("#examTermId").selectOption({ label: "Term 1 (50%)" });
   await page.getByRole("button", { name: "Next" }).click();
 

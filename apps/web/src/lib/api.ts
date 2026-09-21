@@ -566,7 +566,6 @@ export interface MyChildResult {
 export interface PortalResultRow {
   id: string;
   examName: string;
-  examType: string;
   subjectName: string;
   marksObtained: number;
   maxMarks: number;
@@ -596,8 +595,6 @@ export interface MyResultsReport {
     term1Percentage: number | null;
     term2Percentage: number | null;
     annualPercentage: number | null;
-    eligible: boolean | null;
-    passMark: number;
   };
 }
 
@@ -936,6 +933,8 @@ export interface ResultsSectionContext {
   examId: string;
   examName: string;
   examType: string;
+  // The authoritative academic period (Term 1 / Term 2); examType is legacy metadata.
+  termName?: string | null;
   academicYearId: string;
   academicYearName: string;
   schoolName: string;
@@ -944,6 +943,8 @@ export interface ResultsSectionContext {
   sectionName: string;
   subjectName: string;
   examDate: string | null;
+  // Set by an Admin; null when none was configured.
+  passingMark?: number | null;
   teacherName: string | null;
 }
 
@@ -2352,6 +2353,12 @@ export const api = {
     request<{ success: boolean }>(`/students/${studentId}`, { method: "DELETE", accessToken }),
   addGuardian: (accessToken: string, studentId: string, body: GuardianInput) =>
     request<GuardianRecord>(`/students/${studentId}/guardians`, { method: "POST", body, accessToken }),
+  // Reset (never create): only for a student who already has a login. Returns the one-time temporary password.
+  resetStudentPortalPassword: (accessToken: string, studentId: string) =>
+    request<{ loginId: string | null; temporaryPassword: string }>(`/students/${studentId}/portal-account/reset-password`, {
+      method: "POST",
+      accessToken,
+    }),
   createStudentPortalAccount: (accessToken: string, studentId: string) =>
     request<{ loginId: string; temporaryPassword: string }>(`/students/${studentId}/portal-account`, {
       method: "POST",
@@ -2383,6 +2390,12 @@ export const api = {
     request<{ studentId: string; guardianId: string }>(
       `/schools/${schoolId}/guardians/${guardianId}/children/${studentId}`,
       { method: "DELETE", accessToken },
+    ),
+  // Reset (never create): only for a parent who already has a login. Returns the one-time temporary password.
+  resetParentPortalPassword: (accessToken: string, schoolId: string, guardianId: string) =>
+    request<{ email: string; temporaryPassword: string }>(
+      `/schools/${schoolId}/guardians/${guardianId}/portal-account/reset-password`,
+      { method: "POST", accessToken },
     ),
   createParentPortalAccount: (accessToken: string, schoolId: string, guardianId: string, email?: string) =>
     request<{ email: string; acceptUrl: string }>(`/schools/${schoolId}/guardians/${guardianId}/portal-account`, {
@@ -2754,7 +2767,8 @@ export const api = {
       academicYearId: string;
       termId: string;
       name: string;
-      type: ExamType;
+      // Optional legacy metadata - Term is the academic period.
+      type?: ExamType;
       startDate?: string;
       endDate?: string;
       description?: string;
@@ -2775,7 +2789,7 @@ export const api = {
     accessToken: string,
     schoolId: string,
     examId: string,
-    body: { classId: string; subjectId: string; maxMarks?: number; examDate?: string },
+    body: { classId: string; subjectId: string; maxMarks?: number; passingMark?: number; examDate?: string },
   ) =>
     request<Exam["examSubjects"][number]>(`/schools/${schoolId}/exams/${examId}/subjects`, {
       method: "POST",
@@ -2787,7 +2801,8 @@ export const api = {
     schoolId: string,
     examId: string,
     examSubjectId: string,
-    body: { examDate?: string },
+    // Admin-only: examDate, maximum marks, pass mark (null clears the pass mark).
+    body: { examDate?: string; maxMarks?: number; passingMark?: number | null },
   ) =>
     request<Exam["examSubjects"][number]>(`/schools/${schoolId}/exams/${examId}/subjects/${examSubjectId}`, {
       method: "PATCH",

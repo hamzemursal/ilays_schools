@@ -13,6 +13,13 @@ export class CreateExamSubjectDto {
   @Max(1000)
   maxMarks?: number;
 
+  // Must not exceed maxMarks - checked in ExamsService.createExamSubject.
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1000)
+  passingMark?: number;
+
   @IsOptional()
   @IsDateString()
   examDate?: string;

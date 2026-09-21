@@ -17,6 +17,7 @@ import { SkeletonCards } from "@/components/ui/Skeleton";
 import { FormField, Select, Textarea } from "@/components/ui/FormControls";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { GuardianCard } from "@/features/guardians/components/GuardianCard";
+import { ResetPortalPasswordCard } from "@/features/portal-accounts/ResetPortalPasswordCard";
 import { GuardianForm } from "@/features/guardians/forms/GuardianForm";
 import { useToast } from "@/components/ui/Toast";
 import { TabBar } from "@/components/ui/TabBar";
@@ -321,6 +322,7 @@ export function StudentProfile({ studentId }: { studentId: string }) {
               accessToken={accessToken}
               schoolId={activeEnrollment?.school.id ?? student.enrollments[0]?.school.id ?? ""}
               studentId={student.id}
+              existingGuardians={student.guardians}
               onCancel={() => setAddingGuardian(false)}
               onAdded={(guardian: GuardianRecord) => {
                 setStudent((prev) => (prev ? { ...prev, guardians: [...prev.guardians, guardian] } : prev));
@@ -346,6 +348,16 @@ export function StudentProfile({ studentId }: { studentId: string }) {
 
       {canUpdate && !student.userId && accessToken && (
         <PortalAccountCard accessToken={accessToken} studentId={student.id} />
+      )}
+
+      {canUpdate && student.userId && accessToken && (
+        <ResetPortalPasswordCard
+          personName={`${student.firstName} ${student.lastName}`}
+          onReset={async () => {
+            const r = await studentsApi.resetPortalPassword(accessToken, student.id);
+            return { loginLabel: "Login ID", loginValue: r.loginId, temporaryPassword: r.temporaryPassword };
+          }}
+        />
       )}
 
       {canTransfer && activeEnrollment && accessToken && (

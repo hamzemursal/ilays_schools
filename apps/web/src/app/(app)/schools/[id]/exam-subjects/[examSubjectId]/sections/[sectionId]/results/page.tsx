@@ -13,6 +13,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Input } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { ResultsStatusBadge } from "@/features/exams/ExamStatusBadges";
+import { ExamContextGrid, type ExamContext } from "@/features/exams/ExamContextGrid";
+import { markError } from "@/features/exams/markValidation";
 import { SubmitResultsDialog } from "@/features/exams/SubmitResultsDialog";
 import { ReturnForCorrectionDialog } from "@/features/exams/ReturnForCorrectionDialog";
 import { ApproveResultsDialog } from "@/features/exams/ApproveResultsDialog";
@@ -72,8 +74,25 @@ export default function ResultsPage({
   const canReturnApproved = canApprove && data?.submission.status === "APPROVED";
   const canUnpublish = canApprove && data?.submission.status === "PUBLISHED";
 
+  // One message per row whose typed (or already-saved) mark is outside
+  // 0..maximum. Absent rows are a status, not a mark, so are never checked.
+  const rowErrors: Record<string, string> = {};
+  if (data) {
+    for (const s of data.students) {
+      if (absent[s.enrollmentId]) continue;
+      const message = markError(pending[s.enrollmentId] ?? "", data.maxMarks);
+      if (message) rowErrors[s.enrollmentId] = message;
+    }
+  }
+  const firstInvalid = data?.students.find((s) => rowErrors[s.enrollmentId]);
+  const hasRowErrors = firstInvalid !== undefined;
+
   async function save(): Promise<ResultsForSection | null> {
     if (!accessToken || !data) return null;
+    if (firstInvalid) {
+      setError(`${firstInvalid.firstName} ${firstInvalid.lastName} (#${firstInvalid.rollNumber}): ${rowErrors[firstInvalid.enrollmentId]}. Fix the highlighted mark before saving.`);
+      return null;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -179,6 +198,20 @@ export default function ResultsPage({
     }
   }
 
+  const examContext: ExamContext | null = data
+    ? {
+        examName: data.context.examName,
+        subjectName: data.context.subjectName,
+        className: data.context.className,
+        sectionName: data.context.sectionName,
+        academicYearName: data.context.academicYearName,
+        termName: data.context.termName,
+        examDate: data.context.examDate,
+        maxMarks: data.maxMarks,
+        passingMark: data.context.passingMark,
+      }
+    : null;
+
   const contextLine = data
     ? `${data.context.academicYearName} · ${data.context.examName} · ${data.context.className} · Section ${data.context.sectionName} · ${data.context.subjectName}`
     : undefined;
@@ -204,8 +237,8 @@ export default function ResultsPage({
           <>
             <Card padding="none">
               <CardHeader
-                title={data.context.examName}
-                description={data.context.examDate ? new Date(data.context.examDate).toLocaleDateString() : undefined}
+                title="Exam details"
+                description="Maximum marks and pass mark are set by an Admin and can't be changed here."
                 actions={
                   canApprove && (
                     <Link href={`/schools/${schoolId}/exam-subjects/${examSubjectId}/sections/${sectionId}/print`} target="_blank">
@@ -216,11 +249,13 @@ export default function ResultsPage({
                   )
                 }
               />
+              {examContext && (
+                <div className="border-t border-border p-5">
+                  <ExamContextGrid context={examContext} status={<ResultsStatusBadge status={data.submission.status} />} />
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-2 border-t border-border p-5">
-                <Badge tone="accent">{data.context.subjectName}</Badge>
-                <Badge tone="neutral">Out of {data.maxMarks}</Badge>
-                {data.context.teacherName && <Badge tone="neutral">{data.context.teacherName}</Badge>}
-                <ResultsStatusBadge status={data.submission.status} />
+                {data.context.teacherName && <Badge tone="neutral">Teacher: {data.context.teacherName}</Badge>}
                 <span className="ml-auto text-sm text-foreground-soft">
                   {data.completedCount} / {data.students.length} student(s) completed
                   {data.absentCount > 0 && ` (${data.absentCount} absent)`}
@@ -270,16 +305,24 @@ export default function ResultsPage({
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <Input
-                          type="number"
-                          min={0}
-                          max={data.maxMarks}
-                          value={absent[s.enrollmentId] ? "" : (pending[s.enrollmentId] ?? "")}
-                          disabled={!editable || !!absent[s.enrollmentId]}
-                          onChange={(e) => setPending((prev) => ({ ...prev, [s.enrollmentId]: e.target.value }))}
-                          className="w-24"
-                          aria-label={`Mark for ${s.firstName} ${s.lastName}`}
-                        />
+                        <div className="w-28">
+                          <Input
+                            type="number"
+                            min={0}
+                            max={data.maxMarks}
+                            value={absent[s.enrollmentId] ? "" : (pending[s.enrollmentId] ?? "")}
+                            disabled={!editable || !!absent[s.enrollmentId]}
+                            onChange={(e) => setPending((prev) => ({ ...prev, [s.enrollmentId]: e.target.value }))}
+                            className={`w-24 ${rowErrors[s.enrollmentId] ? "border-danger focus:border-danger" : ""}`}
+                            aria-label={`Mark for ${s.firstName} ${s.lastName}`}
+                            aria-invalid={rowErrors[s.enrollmentId] ? true : undefined}
+                          />
+                          {rowErrors[s.enrollmentId] && (
+                            <p role="alert" className="mt-1 text-xs text-danger">
+                              {rowErrors[s.enrollmentId]}
+                            </p>
+                          )}
+                        </div>
                         <label className="flex items-center gap-1.5 text-sm text-foreground-soft">
                           <input
                             type="checkbox"
@@ -309,10 +352,10 @@ export default function ResultsPage({
 
             {editable && data.students.length > 0 && (
               <div className="flex flex-wrap items-center gap-3">
-                <Button variant="outline" icon={<Save className="size-4" />} loading={saving} onClick={() => save()}>
+                <Button variant="outline" icon={<Save className="size-4" />} loading={saving} disabled={hasRowErrors} onClick={() => save()}>
                   Save Draft
                 </Button>
-                <Button icon={<Send className="size-4" />} onClick={openSubmitDialog}>
+                <Button icon={<Send className="size-4" />} disabled={hasRowErrors} onClick={openSubmitDialog}>
                   {data.submission.status === "NEEDS_CORRECTION" ? "Resubmit for Review" : "Submit for Review"}
                 </Button>
                 {savedMessage && (
@@ -362,12 +405,10 @@ export default function ResultsPage({
         <>
           <SubmitResultsDialog
             open={submitDialogOpen}
-            examName={data.context.examName}
-            className={data.context.className}
-            sectionName={data.context.sectionName}
-            subjectName={data.context.subjectName}
+            context={examContext!}
             studentCount={data.students.length}
-            completedCount={data.completedCount}
+            completedCount={data.completedCount - data.absentCount}
+            absentCount={data.absentCount}
             missingCount={data.missingCount}
             isResubmit={data.submission.status === "NEEDS_CORRECTION"}
             loading={submitting}

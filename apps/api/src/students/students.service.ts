@@ -9,6 +9,11 @@ import { StorageService } from "../storage/storage.service";
 import { AuditService } from "../audit/audit.service";
 import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
+import {
+  applyTemporaryPassword,
+  assertResettablePortalUser,
+  createTemporaryCredentials,
+} from "../auth/portal-password-reset";
 import { CreateStudentDto } from "./dto/create-student.dto";
 import { UpdateStudentDto } from "./dto/update-student.dto";
 import { EnrollmentInputDto } from "./dto/enrollment-input.dto";
@@ -630,5 +635,48 @@ export class StudentsService {
     }, { timeout: 30_000 });
 
     return { loginId: enrollment.studentNumber, temporaryPassword };
+  }
+
+  // Separate from createPortalAccount on purpose: this operates ONLY on the
+  // student's existing login (Student.userId) and refuses when there is none.
+  // It changes that one User's password hash and mustChangePassword flag and
+  // revokes its sessions - it creates no user, student, role, school link or
+  // guardian link and never touches any id or the permanent student number.
+  // The temporary password is returned once and never audited.
+  async resetPortalPassword(actor: AuthenticatedUser, studentId: string) {
+    const student = await this.assertAccessibleStudent(actor, studentId);
+    if (!student.userId) {
+      throw new NotFoundException("This student has no portal account yet - create one first");
+    }
+    const userId = student.userId;
+    await assertResettablePortalUser(this.prisma, userId, "STUDENT", student.organizationId);
+
+    // Same Login ID the student actually signs in with (see AuthService:
+    // the ACTIVE enrollment's studentNumber), so the admin can read it out.
+    const enrollments = [...student.enrollments].sort((a, b) => b.startDate.getTime() - a.startDate.getTime());
+    const enrollment = enrollments.find((e) => e.status === "ACTIVE") ?? enrollments[0] ?? null;
+
+    const { temporaryPassword, passwordHash } = await createTemporaryCredentials();
+
+    await this.prisma.$transaction(async (tx) => {
+      const { sessionsRevoked } = await applyTemporaryPassword(tx, userId, passwordHash);
+      await this.audit.record(
+        {
+          actor,
+          organizationId: student.organizationId,
+          schoolId: enrollment?.schoolId ?? null,
+          action: AuditAction.STUDENT_PORTAL_PASSWORD_RESET,
+          module: AuditModuleName.STUDENTS,
+          resourceType: "Student",
+          resourceId: studentId,
+          resourceName: `${student.firstName} ${student.lastName}`,
+          severity: "WARNING",
+          after: { mustChangePassword: true, sessionsRevoked },
+        },
+        tx,
+      );
+    }, { timeout: 30_000 });
+
+    return { loginId: enrollment?.studentNumber ?? null, temporaryPassword };
   }
 }

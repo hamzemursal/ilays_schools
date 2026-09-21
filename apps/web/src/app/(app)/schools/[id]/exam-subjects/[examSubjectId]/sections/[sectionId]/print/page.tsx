@@ -101,8 +101,9 @@ export default function PrintResultSheetPage({
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm sm:grid-cols-3">
-          <Field label="Exam" value={`${context.examName} (${context.examType})`} />
+          <Field label="Exam" value={context.examName} />
           <Field label="Academic Year" value={context.academicYearName} />
+          <Field label="Term" value={context.termName ?? "—"} />
           <Field label="Class" value={context.className} />
           <Field label="Section" value={context.sectionName} />
           <Field label="Subject" value={context.subjectName} />

@@ -264,3 +264,54 @@ describe("GuardianForm — cancel", () => {
     expect(onCancel).toHaveBeenCalled();
   });
 });
+
+describe("GuardianForm — a student has at most one Mother and one Father", () => {
+  const existing = (relationship: GuardianRecord["relationship"], firstName: string): GuardianRecord => ({
+    id: `g-${firstName}`, firstName, lastName: "Ali", phone: null, email: null, relationship, isPrimaryContact: false,
+  });
+
+  async function openLinkStep(existingGuardians: GuardianRecord[]) {
+    vi.useFakeTimers();
+    apiMock.searchGuardians.mockResolvedValue([searchResult()]);
+    renderForm({ existingGuardians });
+    fireEvent.change(screen.getByPlaceholderText("Search parent by name, phone, or email…"), { target: { value: "Ahmed" } });
+    await vi.advanceTimersByTimeAsync(500);
+    vi.useRealTimers();
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Select Parent" }));
+  }
+
+  it("with a Mother already linked, Mother is disabled (naming her) and the default moves to Father", async () => {
+    await openLinkStep([existing("MOTHER", "Amina")]);
+
+    const select = screen.getByLabelText("Relationship") as HTMLSelectElement;
+    expect(screen.getByRole("option", { name: "Mother — already assigned to Amina Ali" })).toBeDisabled();
+    expect(select.value).toBe("FATHER");
+  });
+
+  it("with both parents linked, only Guardian / Other relative remain, defaulting to Guardian", async () => {
+    await openLinkStep([existing("MOTHER", "Amina"), existing("FATHER", "Hassan")]);
+
+    expect(screen.getByRole("option", { name: /Mother — already assigned/ })).toBeDisabled();
+    expect(screen.getByRole("option", { name: /Father — already assigned/ })).toBeDisabled();
+    expect((screen.getByLabelText("Relationship") as HTMLSelectElement).value).toBe("GUARDIAN");
+    expect(screen.getByRole("option", { name: "Other relative" })).toBeEnabled();
+  });
+
+  it("a Guardian or Other relative never blocks anything (any number allowed)", async () => {
+    await openLinkStep([existing("GUARDIAN", "Ahmed"), existing("OTHER", "Uncle"), existing("OTHER", "Aunt")]);
+
+    expect(screen.getByRole("option", { name: "Mother" })).toBeEnabled();
+    expect(screen.getByRole("option", { name: "Father" })).toBeEnabled();
+  });
+
+  it("shows the server's refusal clearly if a second Mother still gets through to the API", async () => {
+    const user = userEvent.setup();
+    apiMock.addGuardian.mockRejectedValue(new ApiError("This student already has a Mother (Amina Ali). A student can have only one Mother; use Guardian or Other for additional relatives.", 409));
+    await openLinkStep([]);
+
+    await user.selectOptions(screen.getByLabelText("Relationship"), "MOTHER");
+    await user.click(screen.getByRole("button", { name: "Save / Link Parent" }));
+
+    expect(await screen.findByText(/already has a Mother \(Amina Ali\)/)).toBeInTheDocument();
+  });
+});

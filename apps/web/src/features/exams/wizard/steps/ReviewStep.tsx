@@ -6,14 +6,6 @@ import { Alert } from "@/components/ui/Alert";
 import type { AcademicYear, ClassWithSections, Subject } from "@/lib/api";
 import type { ExamWizardState } from "../types";
 
-const EXAM_TYPE_LABELS: Record<string, string> = {
-  QUIZ: "Quiz",
-  MIDTERM: "Mid-Term",
-  FINAL: "Final",
-  ASSIGNMENT: "Assignment",
-  OTHER: "Other",
-};
-
 function formatDate(value: string): string {
   if (!value) return "—";
   return new Date(value).toLocaleDateString();
@@ -49,7 +41,6 @@ export function ReviewStep({
         <CardHeader title="Exam" />
         <div className="grid grid-cols-1 gap-x-6 gap-y-3 p-5 text-sm sm:grid-cols-2">
           <Field label="Name" value={state.name} />
-          <Field label="Type" value={EXAM_TYPE_LABELS[state.type] ?? state.type} />
           <Field label="Academic Year" value={year?.name ?? "—"} />
           <Field label="Term" value={term?.name ?? "—"} />
           <Field label="Start Date" value={formatDate(state.startDate)} />

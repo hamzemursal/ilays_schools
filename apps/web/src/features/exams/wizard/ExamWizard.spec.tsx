@@ -112,6 +112,17 @@ describe("ExamWizard — Term 1 exam / Term 2 exam", () => {
     );
   });
 
+  it("does not send an Exam Type — the term is the only academic period saved", async () => {
+    const user = userEvent.setup();
+    renderWizard();
+    await screen.findByPlaceholderText("e.g. Term 1 Exam 2027");
+
+    await createExamForTerm(user, "Term 1 Exam", "term-1");
+
+    expect(apiMock.createExam.mock.calls[0][2]).not.toHaveProperty("type");
+    expect(apiMock.createExam.mock.calls[0][2].termId).toBe("term-1");
+  });
+
   it("Create another starts from a clean form: the previous Term (and name) are NOT kept", async () => {
     const user = userEvent.setup();
     renderWizard();

@@ -488,7 +488,7 @@ describe("GuardianPortalService.myChildResultsReport — linked child only, Term
 
     expect(report.terms[0]).toMatchObject({ name: "Term 1", percentage: 45 });
     expect(report.terms[1]).toMatchObject({ name: "Term 2", percentage: 40 });
-    expect(report.annual).toMatchObject({ annualPercentage: 42.5, eligible: false });
+    expect(report.annual).toEqual({ term1Percentage: 45, term2Percentage: 40, annualPercentage: 42.5 });
   });
 
   it("only asks the database for PUBLISHED results", async () => {

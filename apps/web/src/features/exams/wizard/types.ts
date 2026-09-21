@@ -1,8 +1,5 @@
-import type { ExamType } from "@/lib/api";
-
 export interface ExamWizardState {
   name: string;
-  type: ExamType;
   academicYearId: string;
   // Which of the selected year's exactly two terms this exam counts toward
   // — required so every new exam contributes to a real Term/Annual result;
@@ -26,7 +23,6 @@ export interface ExamWizardState {
 export function emptyExamWizardState(defaultAcademicYearId: string): ExamWizardState {
   return {
     name: "",
-    type: "MIDTERM",
     academicYearId: defaultAcademicYearId,
     termId: "",
     startDate: "",

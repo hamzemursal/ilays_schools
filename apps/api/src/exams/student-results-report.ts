@@ -1,16 +1,12 @@
 import { NotFoundException } from "@nestjs/common";
 import type { PrismaService } from "../prisma/prisma.service";
-import {
-  ELIGIBILITY_THRESHOLD,
-  combineTermPercentages,
-  percentageFromMarks,
-  publishedMarkedResultWhere,
-} from "./result-calculation";
+import { combineTermPercentages, percentageFromMarks, publishedMarkedResultWhere } from "./result-calculation";
 
+// Deliberately carries no exam type: the Term the row is grouped under is the
+// only academic period a student or parent should see.
 export interface PortalResultRow {
   id: string;
   examName: string;
-  examType: string;
   subjectName: string;
   marksObtained: number;
   maxMarks: number;
@@ -38,12 +34,13 @@ export interface PortalResultsReport {
   // school published disappears, but they are NOT part of any term average or
   // of the annual result (and are not a third term).
   otherResults: PortalResultRow[];
+  // Term 1 result, Term 2 result and the weighted Combined result only.
+  // Promotion eligibility is an Admin/promotion concept and is deliberately
+  // NOT part of what a student or parent is sent.
   annual: {
     term1Percentage: number | null;
     term2Percentage: number | null;
     annualPercentage: number | null;
-    eligible: boolean | null;
-    passMark: number;
   };
 }
 
@@ -96,7 +93,6 @@ export async function buildStudentResultsReport(
         row: {
           id: r.id,
           examName: r.examSubject.exam.name,
-          examType: r.examSubject.exam.type,
           subjectName: r.examSubject.subject.name,
           marksObtained,
           maxMarks,
@@ -132,10 +128,10 @@ export async function buildStudentResultsReport(
 
   // The annual result needs both terms configured; otherwise it is
   // undetermined (all null), exactly as ExamsService.getAnnualResult reports.
-  const annualParts =
+  const annualPercentage =
     term1.weight !== null && term2.weight !== null
-      ? combineTermPercentages(term1.percentage, term2.percentage, term1.weight, term2.weight)
-      : { annualPercentage: null, eligible: null };
+      ? combineTermPercentages(term1.percentage, term2.percentage, term1.weight, term2.weight).annualPercentage
+      : null;
 
   return {
     academicYear: { id: anchor.academicYearId, name: anchor.academicYear.name, isCurrent: anchor.academicYear.isCurrent },
@@ -145,9 +141,7 @@ export async function buildStudentResultsReport(
     annual: {
       term1Percentage: term1.weight !== null ? term1.percentage : null,
       term2Percentage: term2.weight !== null ? term2.percentage : null,
-      annualPercentage: annualParts.annualPercentage,
-      eligible: annualParts.eligible,
-      passMark: ELIGIBILITY_THRESHOLD,
+      annualPercentage,
     },
   };
 }

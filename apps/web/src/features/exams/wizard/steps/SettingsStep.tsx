@@ -16,10 +16,10 @@ export function examDateError(state: ExamWizardState): string | null {
 
 export function isSettingsValid(state: ExamWizardState): boolean {
   const max = Number(state.maxMarks);
-  if (!state.maxMarks.trim() || !Number.isFinite(max) || max <= 0) return false;
+  if (!state.maxMarks.trim() || !Number.isInteger(max) || max <= 0 || max > 1000) return false;
   if (state.passingMark.trim()) {
     const pass = Number(state.passingMark);
-    if (!Number.isFinite(pass) || pass < 0 || pass > max) return false;
+    if (!Number.isInteger(pass) || pass < 0 || pass > max) return false;
   }
   if (examDateError(state) !== null) return false;
   return true;
@@ -42,7 +42,7 @@ export function SettingsStep({ state, onChange }: { state: ExamWizardState; onCh
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FormField label="Maximum Mark" required>
-          <Input type="number" min={1} value={state.maxMarks} onChange={(e) => onChange({ maxMarks: e.target.value })} />
+          <Input type="number" min={1} max={1000} step={1} value={state.maxMarks} onChange={(e) => onChange({ maxMarks: e.target.value })} />
         </FormField>
 
         <FormField label="Passing Mark" hint="Optional — recorded for reference only" error={passingMarkError}>

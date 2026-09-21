@@ -115,7 +115,8 @@ model AcademicYear {
   billingPeriods BillingPeriod[]
   charges        Charge[]
 
-  terms Term[]
+  terms   Term[]
+  classes Class[]
 
   @@unique([schoolId, name])
   @@map("academic_years")
@@ -176,6 +177,20 @@ model Class {
   divisionId String
   division   Division @relation(fields: [divisionId], references: [id], onDelete: Cascade)
 
+  // Classes (and through them Sections) belong to ONE academic year: the same
+  // school has its own "Form 3" for 2025-2026 and another for 2026-2027, and
+  // a student's enrollment always points at the class of ITS year. Identity is
+  // School (via Division) + Academic Year + Level.
+  //
+  // Nullable ONLY during the staged rollout (Phase 5B-1): classes that predate
+  // the change are stamped by class_year_backfill() (see the
+  // 20260922000000_class_academic_year migration) and a later migration makes
+  // this column required once every writer sets it. NO ACTION (not RESTRICT):
+  // a year that still has classes cannot be deleted, yet deleting a whole
+  // school can cascade its years and classes away in one statement.
+  academicYearId String?
+  academicYear   AcademicYear? @relation(fields: [academicYearId], references: [id], onDelete: NoAction)
+
   name  String // "Class 7" or "Form 2"
   level Int // ordering + promotion target lookup: 1..8 (Primary) or 1..4 (Secondary)
 
@@ -188,8 +203,28 @@ model Class {
   examSubjects  ExamSubject[]
   feeStructures FeeStructure[]
 
-  @@unique([divisionId, level])
+  @@unique([divisionId, academicYearId, level])
+  @@index([academicYearId])
   @@map("classes")
+}
+
+// Audit + rollback log of the one-time class/year backfill (Phase 5B-1): every
+// row class_year_backfill() inserted or re-pointed is recorded with its old and
+// new value, so class_year_rollback() can undo exactly that run. Temporary:
+// dropped in a later cleanup migration once the backfill is final.
+model ClassYearBackfillChange {
+  id         Int      @id @default(autoincrement())
+  runId      String
+  action     String // INSERT | UPDATE | ROLLED_BACK
+  tableName  String
+  rowId      String
+  columnName String?
+  oldValue   String?
+  newValue   String?
+  createdAt  DateTime @default(now())
+
+  @@index([runId])
+  @@map("class_year_backfill_changes")
 }
 
 model Section {

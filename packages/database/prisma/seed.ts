@@ -464,11 +464,12 @@ async function seedDevAuthFixtures() {
     skipDuplicates: true,
   });
 
-  const klass = await prisma.class.upsert({
-    where: { divisionId_level: { divisionId: division.id, level: 1 } },
-    update: {},
-    create: { divisionId: division.id, name: "Class 1", level: 1 },
-  });
+  // A class belongs to one academic year (Class.academicYearId). The unique key
+  // includes a nullable column, which Prisma cannot use in upsert/where-unique,
+  // so find-then-create.
+  const klass =
+    (await prisma.class.findFirst({ where: { divisionId: division.id, academicYearId: academicYear.id, level: 1 } })) ??
+    (await prisma.class.create({ data: { divisionId: division.id, academicYearId: academicYear.id, name: "Class 1", level: 1 } }));
 
   const section = await prisma.section.upsert({
     where: { classId_name: { classId: klass.id, name: "A" } },
@@ -649,11 +650,9 @@ async function seedSecondaryQaFixtures() {
     skipDuplicates: true,
   });
 
-  const klass = await prisma.class.upsert({
-    where: { divisionId_level: { divisionId: division.id, level: 1 } },
-    update: {},
-    create: { divisionId: division.id, name: "Form 1", level: 1 },
-  });
+  const klass =
+    (await prisma.class.findFirst({ where: { divisionId: division.id, academicYearId: year.id, level: 1 } })) ??
+    (await prisma.class.create({ data: { divisionId: division.id, academicYearId: year.id, name: "Form 1", level: 1 } }));
   const section = await prisma.section.upsert({
     where: { classId_name: { classId: klass.id, name: "A" } },
     update: {},

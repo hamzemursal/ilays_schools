@@ -38,3 +38,18 @@ export async function createWithSequentialCode<T>(
   // last iteration. Only here to satisfy TypeScript's control-flow analysis.
   throw new Error("unreachable");
 }
+
+// The highest sequence number already used among `codes` for `prefix`
+// (e.g. "EMP-00007" and "EMP-0003" with prefix "EMP" -> 7), or 0 when there
+// are none. New codes must be based on THIS, never on a row count: deleting a
+// row makes count() drop below the highest code still in use, so count + 1
+// collides with an existing code — permanently, since the count never moves.
+export function highestSequenceOf(codes: Array<string | null | undefined>, prefix: string): number {
+  const pattern = new RegExp(`^${prefix}-(\\d+)$`);
+  let highest = 0;
+  for (const code of codes) {
+    const match = code ? pattern.exec(code) : null;
+    if (match) highest = Math.max(highest, Number(match[1]));
+  }
+  return highest;
+}

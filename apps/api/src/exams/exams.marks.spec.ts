@@ -72,7 +72,7 @@ function setup(actor: AuthenticatedUser = SCHOOL_ADMIN) {
     term: { findMany: jest.fn() },
     $transaction: jest.fn((arg: unknown) => Promise.all(arg as Promise<unknown>[])),
   };
-  const schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
+  const schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined), findOneAccessibleOrTeachingAtOrThrow: jest.fn().mockResolvedValue(undefined) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const documents = { tryGetPhotoUrl: jest.fn().mockResolvedValue(null) };
   const notifications = { notifyUser: jest.fn().mockResolvedValue(undefined), notifySchoolStaffWithPermission: jest.fn() };
@@ -170,7 +170,7 @@ describe("Teacher marks editing — strictly scoped to the teacher's own assignm
 
   it("cannot edit a school the actor isn't authorized for — school access is enforced first", async () => {
     const s = setup(TEACHER);
-    s.schools.findOneAccessibleOrThrow.mockRejectedValue(new NotFoundException("School not found"));
+    s.schools.findOneAccessibleOrTeachingAtOrThrow.mockRejectedValue(new NotFoundException("School not found"));
 
     await expect(save(s, [{ enrollmentId: "e1", marksObtained: 70 }])).rejects.toThrow("School not found");
     expect(s.prisma.result.upsert).not.toHaveBeenCalled();
@@ -221,10 +221,10 @@ describe("Admin marks correction — existing RBAC and school scope", () => {
 
   it("a School Admin is still restricted to their own school", async () => {
     const s = setup(SCHOOL_ADMIN);
-    s.schools.findOneAccessibleOrThrow.mockRejectedValue(new NotFoundException("School not found"));
+    s.schools.findOneAccessibleOrTeachingAtOrThrow.mockRejectedValue(new NotFoundException("School not found"));
 
     await expect(save(s, [{ enrollmentId: "e1", marksObtained: 90 }], OTHER_SCHOOL_ID)).rejects.toThrow("School not found");
-    expect(s.schools.findOneAccessibleOrThrow).toHaveBeenCalledWith(SCHOOL_ADMIN, OTHER_SCHOOL_ID);
+    expect(s.schools.findOneAccessibleOrTeachingAtOrThrow).toHaveBeenCalledWith(SCHOOL_ADMIN, OTHER_SCHOOL_ID);
     expect(s.prisma.result.upsert).not.toHaveBeenCalled();
   });
 
@@ -234,7 +234,7 @@ describe("Admin marks correction — existing RBAC and school scope", () => {
 
     await save(s, [{ enrollmentId: "e1", marksObtained: 65 }]);
 
-    expect(s.schools.findOneAccessibleOrThrow).toHaveBeenCalledWith(SUPER_ADMIN, SCHOOL_ID);
+    expect(s.schools.findOneAccessibleOrTeachingAtOrThrow).toHaveBeenCalledWith(SUPER_ADMIN, SCHOOL_ID);
     expect(s.prisma.result.upsert).toHaveBeenCalled();
     expect(s.audit.record).toHaveBeenCalledWith(expect.objectContaining({ actor: SUPER_ADMIN, action: "RESULTS_CORRECTED" }));
   });

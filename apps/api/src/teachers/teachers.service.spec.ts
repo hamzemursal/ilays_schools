@@ -443,7 +443,11 @@ describe("TeachersService.create", () => {
     prisma.section.findFirst.mockResolvedValue({ id: "sec-1" });
     prisma.subject.findFirst.mockResolvedValue({ id: "subj-1" });
     prisma.academicYear.findFirst.mockResolvedValue({ id: "year-1" });
-    prisma.teacher.count.mockResolvedValue(5);
+    // Numbers are based on the HIGHEST one in use (not a row count): this school's
+    // highest Employee Number and the organization's highest Teacher ID are both 5.
+    prisma.teacher.findMany.mockImplementation(({ where }: { where: { teacherCode?: unknown } }) =>
+      Promise.resolve(where.teacherCode ? [{ teacherCode: "TCH-00005" }] : [{ employeeNumber: "EMP-00005" }]),
+    );
     prisma.teacher.create.mockResolvedValue({ id: "teacher-1", firstName: "Amina", lastName: "Hassan", employeeNumber: "EMP-00006" });
     prisma.teacher.findUniqueOrThrow.mockResolvedValue({ id: "teacher-1", assignments: [] });
   });
@@ -466,7 +470,7 @@ describe("TeachersService.create", () => {
     );
   });
 
-  it("generates a permanent, organization-wide teacherCode from a fresh org-wide count", async () => {
+  it("generates a permanent, organization-wide teacherCode from the highest Teacher ID in use", async () => {
     await service.create(ACTOR, "school-1", dto());
     expect(prisma.teacher.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ teacherCode: "TCH-00006" }) }),
@@ -474,10 +478,15 @@ describe("TeachersService.create", () => {
   });
 
   it("retries with a fresh teacherCode when it collides under a concurrent create, without giving up on the first try", async () => {
-    // count() is called three times total: once by generateEmployeeNumber
-    // (school-scoped, value irrelevant here), then twice by
-    // createWithSequentialCode's org-wide teacherCode generation/retry.
-    prisma.teacher.count.mockResolvedValueOnce(0).mockResolvedValueOnce(5).mockResolvedValueOnce(6);
+    // The first Teacher ID lookup sees TCH-00005 (so tries TCH-00006); by the
+    // retry, the concurrent creator has taken TCH-00006, so the fresh lookup
+    // sees it and the retry moves on to TCH-00007.
+    let teacherCodeLookups = 0;
+    prisma.teacher.findMany.mockImplementation(({ where }: { where: { teacherCode?: unknown } }) => {
+      if (!where.teacherCode) return Promise.resolve([{ employeeNumber: "EMP-00005" }]);
+      teacherCodeLookups += 1;
+      return Promise.resolve(teacherCodeLookups === 1 ? [{ teacherCode: "TCH-00005" }] : [{ teacherCode: "TCH-00005" }, { teacherCode: "TCH-00006" }]);
+    });
     prisma.teacher.create
       .mockRejectedValueOnce(
         new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {

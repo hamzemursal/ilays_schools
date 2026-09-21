@@ -89,7 +89,10 @@ export class ExamsService {
   // and the frontend's own client-side filtering was never a substitute
   // for this.
   async listExams(actor: AuthenticatedUser, schoolId: string) {
-    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    // Teacher-aware gate: a teacher assigned at this school (but not a member
+    // of it) is admitted, and is then narrowed below to only the class +
+    // subject pairs they are assigned to at THIS school.
+    await this.schools.findOneAccessibleOrTeachingAtOrThrow(actor, schoolId);
 
     const exams = await this.prisma.exam.findMany({
       where: { schoolId },
@@ -200,7 +203,8 @@ export class ExamsService {
 
   // Same teacher-narrowing as listExams, for the single-exam view.
   async listExamSubjects(actor: AuthenticatedUser, schoolId: string, examId: string) {
-    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    // Same teacher-aware gate as listExams (the narrowing below is the authorization).
+    await this.schools.findOneAccessibleOrTeachingAtOrThrow(actor, schoolId);
     const exam = await this.getExamInSchoolOrThrow(schoolId, examId);
     const examSubjects = await this.prisma.examSubject.findMany({ where: { examId }, include: { class: true, subject: true } });
 
@@ -1042,7 +1046,9 @@ export class ExamsService {
   // paper submissions in their school(s) too — school-scoped isn't the same
   // as assignment-scoped.
   async listExamPapers(actor: AuthenticatedUser, filters: ExamPaperListFilters) {
-    const schoolIds = await this.resolveViewpointSchoolIds(actor, filters.schoolId);
+    // Teacher-callable (results.view) and narrowed to the teacher's own
+    // assignments below, so it uses the teacher-aware school gate.
+    const schoolIds = await this.resolveViewpointSchoolIds(actor, filters.schoolId, { teacherScoped: true });
 
     const where: Prisma.ResultSubmissionWhereInput = {
       AND: [
@@ -1110,9 +1116,17 @@ export class ExamsService {
     return filters.teacherId ? rows.filter((r) => r.teacherId === filters.teacherId) : rows;
   }
 
-  private async resolveViewpointSchoolIds(actor: AuthenticatedUser, schoolId?: string): Promise<string[] | undefined> {
+  // `teacherScoped` is opt-in and only for listings a teacher may legitimately
+  // call (they are narrowed to the teacher's own assignments afterwards). The
+  // admin-only review listing keeps the strict membership gate.
+  private async resolveViewpointSchoolIds(
+    actor: AuthenticatedUser,
+    schoolId?: string,
+    opts: { teacherScoped?: boolean } = {},
+  ): Promise<string[] | undefined> {
     if (schoolId) {
-      await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+      if (opts.teacherScoped) await this.schools.findOneAccessibleOrTeachingAtOrThrow(actor, schoolId);
+      else await this.schools.findOneAccessibleOrThrow(actor, schoolId);
       return [schoolId];
     }
     if (actor.schoolIds.length > 0) return actor.schoolIds;
@@ -1169,7 +1183,10 @@ export class ExamsService {
     subjectId: string,
     academicYearId: string,
   ) {
-    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    // Teacher-aware school gate: a teacher assigned at a school other than
+    // their home one is admitted here, and then held to the exact
+    // section + subject + year assignment check just below.
+    await this.schools.findOneAccessibleOrTeachingAtOrThrow(actor, schoolId);
 
     const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id } });
     if (teacher) {

@@ -8,7 +8,7 @@ import { DocumentsService } from "../documents/documents.service";
 import { StorageService } from "../storage/storage.service";
 import { AuditService } from "../audit/audit.service";
 import { AuditAction, AuditModuleName } from "../audit/audit-actions";
-import { createWithSequentialCode } from "../common/sequential-code.util";
+import { createWithSequentialCode, highestSequenceOf } from "../common/sequential-code.util";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateTeacherDto } from "./dto/create-teacher.dto";
 import { CreateTeacherAssignmentInputDto } from "./dto/create-teacher-assignment-input.dto";
@@ -337,7 +337,9 @@ export class TeachersService {
 
     try {
       return await createWithSequentialCode(
-        () => this.prisma.teacher.count(),
+        // The HIGHEST Teacher ID in use, not the row count — deleting a
+        // teacher must never make the next ID collide with an existing one.
+        () => this.highestTeacherCodeSequence(),
         "TCH",
         "teacherCode",
         (teacherCode) =>
@@ -395,6 +397,14 @@ export class TeachersService {
       );
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        // Say which uniqueness actually failed. The Teacher ID (teacherCode) and
+        // the Employee Number are independent, and only the latter is the
+        // admin's to fix — a Teacher ID clash is a transient allocation issue.
+        const target = error.meta?.target;
+        const columns = Array.isArray(target) ? target.join(",") : String(target ?? "");
+        if (columns.includes("teacherCode")) {
+          throw new ConflictException("Couldn't allocate a unique Teacher ID — please try again");
+        }
         throw new ConflictException("A teacher with this employee number already exists in this school");
       }
       throw error;
@@ -602,10 +612,25 @@ export class TeachersService {
 
   // Format: EMP-{sequence within this school}, e.g. "EMP-00006". Scoped per
   // school, same padding convention as StudentsService.generateStudentNumber.
+  // Based on the highest number in use, not the row count — see
+  // highestSequenceOf for why count + 1 breaks after any deletion.
   private async generateEmployeeNumber(schoolId: string): Promise<string> {
-    const count = await this.prisma.teacher.count({ where: { schoolId } });
-    const sequence = String(count + 1).padStart(5, "0");
+    const existing = await this.prisma.teacher.findMany({
+      where: { schoolId, employeeNumber: { startsWith: "EMP-" } },
+      select: { employeeNumber: true },
+    });
+    const sequence = String(highestSequenceOf(existing.map((t) => t.employeeNumber), "EMP") + 1).padStart(5, "0");
     return `EMP-${sequence}`;
+  }
+
+  // Teacher IDs are unique across the whole organization, so this looks at
+  // every teacher, not one school.
+  private async highestTeacherCodeSequence(): Promise<number> {
+    const existing = await this.prisma.teacher.findMany({
+      where: { teacherCode: { startsWith: "TCH-" } },
+      select: { teacherCode: true },
+    });
+    return highestSequenceOf(existing.map((t) => t.teacherCode), "TCH");
   }
 
   private async assertAssignmentBelongsToSchool(schoolId: string, a: CreateTeacherAssignmentInputDto) {

@@ -192,6 +192,41 @@ export class SchoolsService {
     return school;
   }
 
+  // The school gate for the few TEACHER-scoped actions (entering marks,
+  // viewing results, taking attendance). A teacher's UserSchool membership
+  // only covers their home school, yet a TeacherAssignment can put them in a
+  // section at any other school in the same organization — so for exactly
+  // these actions, "may I touch this school?" is answered by either
+  // membership (as always) OR holding a TeacherAssignment there.
+  //
+  // This grants nothing by itself: every caller still applies the real
+  // per-section check (teacher + section + subject + academic year), which is
+  // what actually authorizes the action. An admin with no Teacher profile has
+  // no assignments, so for them this is identical to
+  // findOneAccessibleOrThrow. The assignment lookup is pinned to the actor's
+  // own organization, so it can never cross organizations either.
+  async findOneAccessibleOrTeachingAtOrThrow(actor: AuthenticatedUser, id: string) {
+    try {
+      return await this.findOneAccessibleOrThrow(actor, id);
+    } catch (error) {
+      // Only "not a member of that school" falls through — anything else (e.g.
+      // an account with no organization) keeps failing exactly as before.
+      if (!(error instanceof NotFoundException)) throw error;
+    }
+
+    const assignment = await this.prisma.teacherAssignment.findFirst({
+      where: {
+        schoolId: id,
+        teacher: { userId: actor.id },
+        school: { organizationId: actor.organizationId! },
+      },
+      select: { id: true },
+    });
+    if (!assignment) throw new NotFoundException("School not found");
+
+    return this.prisma.school.findFirstOrThrow({ where: { id, organizationId: actor.organizationId! } });
+  }
+
   // Backs the clean-URL school segment (e.g. "/schools/xaafuun/..."). Tries
   // a real ID first — every existing UUID-based link keeps working
   // unchanged — and only falls back to a slug match if that misses. The

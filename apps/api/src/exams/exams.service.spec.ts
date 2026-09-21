@@ -97,7 +97,7 @@ function createMockPrisma(): MockPrisma {
 }
 
 function createService(prisma: MockPrisma) {
-  const schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
+  const schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined), findOneAccessibleOrTeachingAtOrThrow: jest.fn().mockResolvedValue(undefined) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const documents = {
     tryGetPhotoUrl: jest.fn().mockResolvedValue(null),
@@ -1403,7 +1403,7 @@ describe("ExamsService.updateExamTerm — repairing an exam saved under the wron
   let prisma: MockPrisma;
   let service: ExamsService;
   let audit: { record: jest.Mock };
-  let schools: { findOneAccessibleOrThrow: jest.Mock };
+  let schools: { findOneAccessibleOrThrow: jest.Mock; findOneAccessibleOrTeachingAtOrThrow: jest.Mock };
 
   const TERM1_EXAM = { id: "exam-1", name: "Term 2 Exam", schoolId: SCHOOL_ID, academicYearId: "year-1", termId: "term-1", term: { id: "term-1", name: "Term 1" } };
 

@@ -53,7 +53,9 @@ export class AttendanceService {
   // let the TeacherAssignment check below be the only thing that decides
   // access — sectionId alone already pins the check to one specific school.
   private async assertCanEditSection(actor: AuthenticatedUser, schoolId: string, sectionId: string) {
-    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    // Teacher-aware school gate (a teacher assigned at another school is
+    // admitted); the TeacherAssignment check below is what authorizes.
+    await this.schools.findOneAccessibleOrTeachingAtOrThrow(actor, schoolId);
 
     const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id } });
     if (!teacher) return;
@@ -81,7 +83,7 @@ export class AttendanceService {
     schoolId: string,
     sectionId: string,
   ): Promise<{ restrictToOwnRecords: boolean }> {
-    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    await this.schools.findOneAccessibleOrTeachingAtOrThrow(actor, schoolId);
 
     const teacher = await this.prisma.teacher.findFirst({ where: { userId: actor.id } });
     if (!teacher) return { restrictToOwnRecords: false };

@@ -50,7 +50,7 @@ describe("AttendanceService — future-date guard", () => {
     attendanceDraft: { upsert: jest.Mock; deleteMany: jest.Mock };
     $transaction: jest.Mock;
   };
-  let schools: { findOneAccessibleOrThrow: jest.Mock };
+  let schools: { findOneAccessibleOrThrow: jest.Mock; findOneAccessibleOrTeachingAtOrThrow: jest.Mock };
   let service: AttendanceService;
 
   beforeEach(() => {
@@ -62,7 +62,7 @@ describe("AttendanceService — future-date guard", () => {
       attendanceDraft: { upsert: jest.fn(), deleteMany: jest.fn() },
       $transaction: jest.fn().mockResolvedValue(undefined),
     };
-    schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
+    schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined), findOneAccessibleOrTeachingAtOrThrow: jest.fn().mockResolvedValue(undefined) };
     service = new AttendanceService(
       prisma as unknown as PrismaService,
       schools as unknown as SchoolsService,
@@ -129,7 +129,7 @@ describe("AttendanceService — session selection", () => {
     };
     service = new AttendanceService(
       prisma as unknown as PrismaService,
-      { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) } as unknown as SchoolsService,
+      { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined), findOneAccessibleOrTeachingAtOrThrow: jest.fn().mockResolvedValue(undefined) } as unknown as SchoolsService,
       {} as unknown as StudentsService,
       { record: jest.fn() } as unknown as AuditService,
       {} as unknown as DocumentsService,
@@ -195,7 +195,7 @@ describe("AttendanceService — session status (the top-of-page banner)", () => 
     };
     service = new AttendanceService(
       prisma as unknown as PrismaService,
-      { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) } as unknown as SchoolsService,
+      { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined), findOneAccessibleOrTeachingAtOrThrow: jest.fn().mockResolvedValue(undefined) } as unknown as SchoolsService,
       {} as unknown as StudentsService,
       { record: jest.fn() } as unknown as AuditService,
       {} as unknown as DocumentsService,
@@ -267,7 +267,7 @@ describe("AttendanceService — teacher authorization (school/section isolation)
     academicYear: { findFirst: jest.Mock };
     section: { findFirst: jest.Mock };
   };
-  let schools: { findOneAccessibleOrThrow: jest.Mock };
+  let schools: { findOneAccessibleOrThrow: jest.Mock; findOneAccessibleOrTeachingAtOrThrow: jest.Mock };
   let service: AttendanceService;
 
   beforeEach(() => {
@@ -279,7 +279,7 @@ describe("AttendanceService — teacher authorization (school/section isolation)
       academicYear: { findFirst: jest.fn().mockResolvedValue({ id: "year-current" }) },
       section: { findFirst: jest.fn().mockResolvedValue({ id: "section-1" }) },
     };
-    schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
+    schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined), findOneAccessibleOrTeachingAtOrThrow: jest.fn().mockResolvedValue(undefined) };
     service = new AttendanceService(
       prisma as unknown as PrismaService,
       schools as unknown as SchoolsService,
@@ -306,7 +306,7 @@ describe("AttendanceService — teacher authorization (school/section isolation)
     await expect(
       service.getSessionStatusForSectionAndDate(TEACHER_ACTOR, "school-1", "section-1", today()),
     ).resolves.toEqual({ MORNING: false, AFTERNOON: false });
-    expect(schools.findOneAccessibleOrThrow).toHaveBeenCalledWith(TEACHER_ACTOR, "school-1");
+    expect(schools.findOneAccessibleOrTeachingAtOrThrow).toHaveBeenCalledWith(TEACHER_ACTOR, "school-1");
   });
 
   // Regression for a real bug: the teacher profile lookup used to be
@@ -360,7 +360,7 @@ describe("AttendanceService — historical view vs. current editing (Phase 5)", 
     studentEnrollment: { findMany: jest.Mock };
     attendance: { findMany: jest.Mock; groupBy: jest.Mock };
   };
-  let schools: { findOneAccessibleOrThrow: jest.Mock };
+  let schools: { findOneAccessibleOrThrow: jest.Mock; findOneAccessibleOrTeachingAtOrThrow: jest.Mock };
   let service: AttendanceService;
 
   beforeEach(() => {
@@ -372,7 +372,7 @@ describe("AttendanceService — historical view vs. current editing (Phase 5)", 
       studentEnrollment: { findMany: jest.fn().mockResolvedValue([]) },
       attendance: { findMany: jest.fn().mockResolvedValue([]), groupBy: jest.fn().mockResolvedValue([]) },
     };
-    schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
+    schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined), findOneAccessibleOrTeachingAtOrThrow: jest.fn().mockResolvedValue(undefined) };
     service = new AttendanceService(
       prisma as unknown as PrismaService,
       schools as unknown as SchoolsService,
@@ -438,7 +438,7 @@ describe("AttendanceService.attendanceRatesForSchool — teacher narrowing (Phas
     academicYear: { findFirst: jest.Mock };
     attendance: { groupBy: jest.Mock };
   };
-  let schools: { findOneAccessibleOrThrow: jest.Mock };
+  let schools: { findOneAccessibleOrThrow: jest.Mock; findOneAccessibleOrTeachingAtOrThrow: jest.Mock };
   let service: AttendanceService;
 
   const YEAR = { id: "year-1", startDate: new Date("2027-01-01"), endDate: new Date("2027-12-31") };
@@ -450,7 +450,7 @@ describe("AttendanceService.attendanceRatesForSchool — teacher narrowing (Phas
       academicYear: { findFirst: jest.fn().mockResolvedValue(YEAR) },
       attendance: { groupBy: jest.fn().mockResolvedValue([]) },
     };
-    schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
+    schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined), findOneAccessibleOrTeachingAtOrThrow: jest.fn().mockResolvedValue(undefined) };
     service = new AttendanceService(
       prisma as unknown as PrismaService,
       schools as unknown as SchoolsService,

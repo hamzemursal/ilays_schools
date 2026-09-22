@@ -139,7 +139,7 @@ export default function AcademicStructurePage({ params }: { params: Promise<{ id
   );
 }
 
-function AcademicYearsSection({
+export function AcademicYearsSection({
   schoolId,
   accessToken,
   years,
@@ -152,31 +152,13 @@ function AcademicYearsSection({
   setYears: (fn: (prev: AcademicYear[]) => AcademicYear[]) => void;
   canManage: boolean;
 }) {
-  const [name, setName] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
   const { show } = useToast();
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   const [loadingImpactFor, setLoadingImpactFor] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AcademicYear | null>(null);
   const [deletionImpact, setDeletionImpact] = useState<AcademicYearDeletionImpact | null>(null);
   const [deleting, setDeleting] = useState(false);
-
-  async function onCreate(e: FormEvent) {
-    e.preventDefault();
-    setFormError(null);
-    try {
-      const year = await api.createAcademicYear(accessToken, schoolId, { name, startDate, endDate });
-      setYears((prev) => [year, ...prev]);
-      setName("");
-      setStartDate("");
-      setEndDate("");
-      show("Academic year added.");
-    } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Failed to create academic year");
-    }
-  }
 
   async function onSetCurrent(id: string) {
     const updated = await api.setCurrentAcademicYear(accessToken, schoolId, id);
@@ -215,6 +197,14 @@ function AcademicYearsSection({
 
   return (
     <div className="space-y-6">
+      {canManage && (
+        <div className="flex justify-end">
+          <Button icon={<Plus className="size-4" />} onClick={() => setShowCreateModal(true)}>
+            Create Academic Year
+          </Button>
+        </div>
+      )}
+
       {years.length === 0 ? (
         <EmptyState title="No academic years yet" description="Add one to start enrolling students." />
       ) : (
@@ -249,29 +239,114 @@ function AcademicYearsSection({
         }}
       />
 
-      {canManage && (
-        <Card>
-          <h3 className="text-sm font-semibold text-foreground">Add academic year</h3>
-          <p className="mt-0.5 text-sm text-foreground-soft">Create a new academic year for this school.</p>
-          <form onSubmit={onCreate} className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
-            <FormField label="Name">
-              <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="2027" />
-            </FormField>
-            <FormField label="Start">
-              <Input required type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-            </FormField>
-            <FormField label="End">
-              <Input required type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-            </FormField>
-            <div className="flex items-end">
-              <Button type="submit" className="w-full">
-                Add year
-              </Button>
-            </div>
-            {formError && <Alert tone="danger" className="sm:col-span-4">{formError}</Alert>}
-          </form>
-        </Card>
-      )}
+      <CreateAcademicYearModal
+        open={showCreateModal}
+        schoolId={schoolId}
+        accessToken={accessToken}
+        onCreated={(year) => {
+          setYears((prev) => [year, ...prev]);
+          setShowCreateModal(false);
+          show("Academic year added.");
+        }}
+        onClose={() => setShowCreateModal(false)}
+      />
+    </div>
+  );
+}
+
+// A clean modal for the existing create-year fields/validation/API — moved
+// out of the always-visible inline form at the bottom of the page so the
+// Years tab reads as a list first, with creation as a deliberate action.
+function CreateAcademicYearModal({
+  open,
+  schoolId,
+  accessToken,
+  onCreated,
+  onClose,
+}: {
+  open: boolean;
+  schoolId: string;
+  accessToken: string;
+  onCreated: (year: AcademicYear) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Reset the form fresh every time the modal opens — same render-time
+  // state-adjustment pattern ConfirmDialog uses for its own typed-confirm
+  // field, avoiding an extra render pass via an effect.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setName("");
+      setStartDate("");
+      setEndDate("");
+      setFormError(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+    setSaving(true);
+    try {
+      const year = await api.createAcademicYear(accessToken, schoolId, { name, startDate, endDate });
+      onCreated(year);
+    } catch (err) {
+      setFormError(err instanceof ApiError ? err.message : "Failed to create academic year");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/30 px-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-lg"
+      >
+        <h2 className="font-semibold text-foreground">Create Academic Year</h2>
+        <p className="mt-1 text-sm text-foreground-soft">Add a new academic year for this school.</p>
+
+        <form onSubmit={onSubmit} className="mt-4 space-y-3">
+          <FormField label="Academic Year Name" htmlFor="newYearName" required>
+            <Input id="newYearName" required autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="2027" />
+          </FormField>
+          <FormField label="Start Date" htmlFor="newYearStart" required>
+            <Input id="newYearStart" required type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          </FormField>
+          <FormField label="End Date" htmlFor="newYearEnd" required>
+            <Input id="newYearEnd" required type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          </FormField>
+          {formError && <Alert tone="danger">{formError}</Alert>}
+          <div className="mt-2 flex justify-end gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" loading={saving}>
+              Create Academic Year
+            </Button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -310,7 +385,11 @@ function AcademicYearCard({
   return (
     <Card padding="none" className={`overflow-hidden ${isCurrent ? "border-accent/30 bg-accent-soft/15 ring-1 ring-accent/15" : ""}`}>
       <div className="flex items-start justify-between gap-3 p-5">
-        <div className="flex min-w-0 items-start gap-3">
+        <Link
+          href={`/schools/${schoolId}/academic/years/${year.id}`}
+          className="flex min-w-0 flex-1 items-start gap-3"
+          aria-label={`Open ${year.name}`}
+        >
           <div
             className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${
               isCurrent ? "bg-accent text-white" : "bg-surface text-foreground-muted"
@@ -325,7 +404,7 @@ function AcademicYearCard({
               {new Date(year.startDate).toLocaleDateString()} – {new Date(year.endDate).toLocaleDateString()}
             </p>
           </div>
-        </div>
+        </Link>
         {canManage &&
           (deletingImpact ? (
             <div className="flex size-8 shrink-0 items-center justify-center" aria-label={`Loading actions for ${year.name}`}>

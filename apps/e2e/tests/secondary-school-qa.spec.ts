@@ -387,13 +387,26 @@ test("6. Student Portal: forced password change, then Term 1 / Term 2 / Annual r
   await expect(page.getByText(/Welcome back, Ayaan/)).toBeVisible();
 
   await page.goto("/student/results");
-  await expect(page.getByRole("heading", { name: "Annual result" })).toBeVisible();
-  await expectTermResults(page, {
-    term1: { exam: TERM1_EXAM, row: "45 / 50", result: "90.00%" },
-    term2: { exam: TERM2_EXAM, row: "30 / 50", result: "60.00%" },
-    annual: "75.00%", // (90 + 60) / 2, the year's own 50 / 50 weights
-    notThese: ["38 / 50", "40 / 50", "Bilan", "Cali"],
-  });
+  // The Student Portal's own three-card layout (Term 1 / Term 2 / Overall
+  // Average, side by side) — distinct from the Parent Portal's table-based
+  // ResultsReportView, which expectTermResults below still covers unchanged.
+  await expect(page.getByText("Overall Average")).toBeVisible();
+  const term1Card = page.locator("div.rounded-xl.overflow-hidden", { hasText: "Term 1 Results" });
+  const term2Card = page.locator("div.rounded-xl.overflow-hidden", { hasText: "Term 2 Results" });
+  await expect(term1Card).toContainText("45 / 50");
+  await expect(term1Card).not.toContainText("30 / 50");
+  await expect(term2Card).toContainText("30 / 50");
+  await expect(term2Card).not.toContainText("45 / 50");
+  await expect(page.getByText("Term 1 Average")).toBeVisible();
+  await expect(page.getByText("Term 2 Average")).toBeVisible();
+  await expect(page.getByText("90.00%").first()).toBeVisible();
+  await expect(page.getByText("60.00%").first()).toBeVisible();
+  await expect(page.getByText("75.00%")).toBeVisible(); // (90 + 60) / 2, the year's own 50 / 50 weights
+  await expect(page.getByText("Combines Term 1 and Term 2")).toBeVisible();
+  await expect(page.getByText(/Term 3|Mid-?Term/i)).toHaveCount(0);
+  for (const notThis of ["38 / 50", "40 / 50", "Bilan", "Cali"]) {
+    await expect(page.getByText(notThis)).toHaveCount(0);
+  }
   await shot(page, "student-results");
 
   // Attendance: the same two-session table, scoped to the student's own year.
@@ -468,13 +481,14 @@ test("8. Unpublished results are invisible to the Student and the Parent; publis
   await expect(contextValue(page, "Status")).not.toHaveText("Published");
   await signOut(page);
 
-  // Student: Term 2 is gone (Incomplete), Term 1 untouched. Never a 0.
+  // Student: Term 2 is gone (Not Published / Incomplete), Term 1 untouched. Never a 0.
   await loginAt(page, "/student/login", SECONDARY_STUDENT_NUMBERS.Ayaan, story.studentPassword!);
   await page.goto("/student/results");
-  await expect(page.getByText("No published results for Term 2 yet.")).toBeVisible();
-  const summary = page.getByRole("heading", { name: "Annual result" }).locator("xpath=ancestor::div[contains(@class,'rounded')][1]");
-  await expect(summary.getByText("90.00%", { exact: true })).toBeVisible();
-  await expect(summary.getByText("Incomplete", { exact: true })).toHaveCount(2); // Term 2 Result + Annual / Combined
+  await expect(page.getByText("Not Published")).toBeVisible();
+  await expect(page.getByText("No results available for Term 2 yet.")).toBeVisible();
+  await expect(page.getByText("90.00%").first()).toBeVisible(); // Term 1 is untouched
+  await expect(page.getByText("Incomplete")).toHaveCount(2); // Term 2's own average + its row inside Overall Average
+  await expect(page.getByText("-", { exact: true })).toBeVisible(); // Overall Average itself, until both terms are published again
   await expect(page.locator("body")).not.toContainText(TERM2_EXAM);
   await expect(page.locator("body")).not.toContainText(/(^|[^0-9.])0\.00%/); // Incomplete is never shown as 0%
   await shot(page, "student-results-term2-unpublished");
@@ -535,7 +549,8 @@ test("9. Admin resets an existing Student login and an existing Parent login - s
   await expect(page.getByText(/Welcome back, Ayaan/)).toBeVisible();
   // Same student, same results after the reset (identity preserved).
   await page.goto("/student/results");
-  await expect(page.getByRole("table").first()).toContainText(TERM1_EXAM);
+  await expect(page.getByText("Mathematics").first()).toBeVisible();
+  await expect(page.getByText("90.00%").first()).toBeVisible();
   await signOut(page);
 
   // ---------------- Parent ----------------

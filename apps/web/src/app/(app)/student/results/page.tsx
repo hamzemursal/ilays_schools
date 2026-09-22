@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SkeletonCards } from "@/components/ui/Skeleton";
-import { PortalResults } from "@/features/portal-results/PortalResults";
+import { StudentResultsView } from "@/features/student-portal/StudentResultsView";
 
 export default function StudentResultsPage() {
   const { accessToken } = useAuth();
@@ -31,5 +31,5 @@ function YearResults({ accessToken }: { accessToken: string }) {
     (academicYearId: string) => api.getMyStudentResultsReport(accessToken, academicYearId),
     [accessToken],
   );
-  return <PortalResults loadYears={loadYears} loadReport={loadReport} />;
+  return <StudentResultsView loadYears={loadYears} loadReport={loadReport} />;
 }

@@ -374,7 +374,11 @@ export interface DuplicateCandidate {
 }
 
 export type StudentStatus = "ACTIVE" | "COMPLETED" | "GRADUATED" | "TRANSFERRED" | "WITHDRAWN" | "ARCHIVED";
-export type EnrollmentStatus = "ACTIVE" | "PROMOTED" | "TRANSFERRED_OUT" | "COMPLETED" | "GRADUATED" | "WITHDRAWN";
+// Mirrors the backend's EnrollmentStatus enum exactly (packages/database/prisma/schema.prisma) —
+// RETAINED was missing here even though the backend has always been able to
+// return it (a student who doesn't advance a class stays in the same class
+// with a NEW enrollment for the new year; see PromotionsService.confirm).
+export type EnrollmentStatus = "ACTIVE" | "PROMOTED" | "RETAINED" | "TRANSFERRED_OUT" | "COMPLETED" | "GRADUATED" | "WITHDRAWN";
 
 export interface GuardianRecord {
   id: string;

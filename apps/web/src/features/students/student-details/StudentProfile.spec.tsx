@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { GuardianRecord, StudentDetail, StudentEnrollmentRecord, StudentTransferRecord } from "@/lib/api";
+import type { GuardianRecord, StudentAttendanceHistoryRecord, StudentDetail, StudentEnrollmentRecord, StudentTransferRecord } from "@/lib/api";
 import { ToastProvider } from "@/components/ui/Toast";
 import { StudentProfile } from "./StudentProfile";
 
@@ -39,6 +39,7 @@ const apiMock = vi.hoisted(() => ({
   listAcademicYears: vi.fn(),
   listClasses: vi.fn(),
   updateStudent: vi.fn(),
+  getStudentAttendanceHistory: vi.fn(),
 }));
 vi.mock("@/lib/api", () => ({ api: apiMock }));
 
@@ -125,6 +126,7 @@ beforeEach(() => {
   apiMock.listSectionTeacherAssignments.mockResolvedValue([]);
   apiMock.listAcademicYears.mockResolvedValue([]);
   apiMock.listClasses.mockResolvedValue([]);
+  apiMock.getStudentAttendanceHistory.mockResolvedValue([]);
   vi.spyOn(window, "print").mockImplementation(() => {});
 });
 
@@ -339,8 +341,9 @@ describe("StudentProfile — current enrollment & subjects", () => {
   });
 });
 
-describe("StudentProfile — enrollment history", () => {
-  it("renders every enrollment row", async () => {
+describe("StudentProfile — academic history", () => {
+  it("renders every enrollment as its own historical record on the Academic History tab", async () => {
+    const user = userEvent.setup();
     apiMock.getStudent.mockResolvedValue(
       student({
         enrollments: [
@@ -350,11 +353,22 @@ describe("StudentProfile — enrollment history", () => {
       }),
     );
     renderProfile();
-    // Role "cell" scopes to the history table — the Current Enrollment card
-    // above shows the same school name in a plain <p>, not a table cell.
-    await screen.findByRole("cell", { name: "Saamalay Primary School" });
-    expect(screen.getByText("Old School")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Academic History" }));
+
+    // The Overview tab (and its Current Enrollment card) is unmounted once
+    // another tab is active, so each school name is unambiguous here.
+    expect(await screen.findByText("Old School")).toBeInTheDocument();
+    expect(screen.getByText("Saamalay Primary School")).toBeInTheDocument();
     expect(screen.getByText("TRANSFERRED OUT")).toBeInTheDocument();
+  });
+
+  it("shows an empty state when the student has no enrollment at all", async () => {
+    const user = userEvent.setup();
+    apiMock.getStudent.mockResolvedValue(student({ enrollments: [] }));
+    renderProfile();
+    await user.click(await screen.findByRole("button", { name: "Academic History" }));
+
+    expect(await screen.findByText("No enrollment history yet")).toBeInTheDocument();
   });
 });
 
@@ -372,16 +386,19 @@ describe("StudentProfile — transfers", () => {
     };
   }
 
-  it("shows no transfer history section when there are none", async () => {
+  it("shows an empty state on the Transfers tab when there are none", async () => {
+    const user = userEvent.setup();
     apiMock.getStudent.mockResolvedValue(student());
     renderProfile();
-    await screen.findByText("Hodan Ali");
-    expect(screen.queryByText("Transfer history")).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Transfers" }));
+    expect(await screen.findByText("No transfers recorded")).toBeInTheDocument();
   });
 
   it("renders a completed transfer with its reason and destination", async () => {
+    const user = userEvent.setup();
     apiMock.getStudent.mockResolvedValue(student({ transfers: [transfer()] }));
     renderProfile();
+    await user.click(await screen.findByRole("button", { name: "Transfers" }));
     expect(await screen.findByText("Transfer history")).toBeInTheDocument();
     expect(screen.getByText("New School")).toBeInTheDocument();
     expect(screen.getByText("Family relocation")).toBeInTheDocument();
@@ -389,8 +406,10 @@ describe("StudentProfile — transfers", () => {
   });
 
   it("shows 'destination pending' when there's no toEnrollment yet", async () => {
+    const user = userEvent.setup();
     apiMock.getStudent.mockResolvedValue(student({ transfers: [transfer({ toEnrollment: null, status: "REQUESTED" })] }));
     renderProfile();
+    await user.click(await screen.findByRole("button", { name: "Transfers" }));
     expect(await screen.findByText("destination pending")).toBeInTheDocument();
   });
 });
@@ -561,5 +580,77 @@ describe("StudentProfile — transfer request", () => {
     // Matches both the toast ("Transfer requested.") and the inline success
     // alert ("Transfer requested — the destination school's admin...").
     expect((await screen.findAllByText(/Transfer requested/)).length).toBeGreaterThan(0);
+  });
+});
+
+describe("StudentProfile — Attendance tab", () => {
+  function attendanceRecord(overrides: Partial<StudentAttendanceHistoryRecord> = {}): StudentAttendanceHistoryRecord {
+    return {
+      id: "att-1",
+      date: "2027-02-01",
+      status: "PRESENT",
+      note: null,
+      enrollment: { academicYear: { id: "year-1", name: "2027" }, class: { name: "Class 1" }, section: { name: "A" } },
+      ...overrides,
+    };
+  }
+
+  it("hides the Attendance tab without attendance.view", async () => {
+    apiMock.getStudent.mockResolvedValue(student());
+    renderProfile();
+    await screen.findByText("Hodan Ali");
+    expect(screen.queryByRole("button", { name: "Attendance" })).not.toBeInTheDocument();
+    expect(apiMock.getStudentAttendanceHistory).not.toHaveBeenCalled();
+  });
+
+  it("shows the Attendance tab and real records with attendance.view", async () => {
+    const user = userEvent.setup();
+    authMock.mockReturnValue({ accessToken: "token-1", user: { permissions: ["attendance.view"] } });
+    apiMock.getStudent.mockResolvedValue(student());
+    apiMock.getStudentAttendanceHistory.mockResolvedValue([attendanceRecord(), attendanceRecord({ id: "att-2", status: "ABSENT" })]);
+    renderProfile();
+    await user.click(await screen.findByRole("button", { name: "Attendance" }));
+
+    expect(await screen.findByText("Attendance Rate")).toBeInTheDocument();
+    expect(screen.getByText("50%")).toBeInTheDocument();
+  });
+
+  it("feeds the current year's real attendance rate into the Overview summary tile", async () => {
+    authMock.mockReturnValue({ accessToken: "token-1", user: { permissions: ["attendance.view"] } });
+    apiMock.getStudent.mockResolvedValue(student());
+    apiMock.getStudentAttendanceHistory.mockResolvedValue([attendanceRecord(), attendanceRecord({ id: "att-2", status: "PRESENT" })]);
+    renderProfile();
+    expect(await screen.findByText("Attendance (this year)")).toBeInTheDocument();
+    expect(await screen.findByText("100%")).toBeInTheDocument();
+  });
+
+  it("shows an empty state when nothing has been recorded", async () => {
+    const user = userEvent.setup();
+    authMock.mockReturnValue({ accessToken: "token-1", user: { permissions: ["attendance.view"] } });
+    apiMock.getStudent.mockResolvedValue(student());
+    apiMock.getStudentAttendanceHistory.mockResolvedValue([]);
+    renderProfile();
+    await user.click(await screen.findByRole("button", { name: "Attendance" }));
+    expect(await screen.findByText("No attendance recorded yet")).toBeInTheDocument();
+  });
+});
+
+describe("StudentProfile — current enrollment Division field", () => {
+  it("shows the real Division once resolved from the school's class list", async () => {
+    apiMock.getStudent.mockResolvedValue(student());
+    apiMock.listClasses.mockResolvedValue([
+      { id: "class-1", name: "Class 1", level: 1, division: { id: "div-1", type: "PRIMARY" }, sections: [], _count: { classSubjects: 0 } },
+    ]);
+    renderProfile();
+    expect(await screen.findByText("Primary")).toBeInTheDocument();
+    expect(apiMock.listClasses).toHaveBeenCalledWith("token-1", "school-1", "year-1");
+  });
+
+  it("shows a dash instead of guessing when the class can't be resolved", async () => {
+    apiMock.getStudent.mockResolvedValue(student());
+    apiMock.listClasses.mockResolvedValue([]);
+    renderProfile();
+    await screen.findByText("Current enrollment");
+    expect(screen.getByText("—")).toBeInTheDocument();
   });
 });

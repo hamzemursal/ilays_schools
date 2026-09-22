@@ -2,12 +2,35 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeftRight, BookOpen, Cake, KeyRound, Pencil, Plus, Trash2, User } from "lucide-react";
+import {
+  ArrowLeftRight,
+  BookOpen,
+  Cake,
+  GraduationCap,
+  KeyRound,
+  Layers,
+  Pencil,
+  Percent,
+  Plus,
+  Trash2,
+  User,
+} from "lucide-react";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type ClassSubjectRecord, type GuardianRecord, type SectionTeacherAssignment, type StudentDetail } from "@/lib/api";
+import {
+  api,
+  type ClassSubjectRecord,
+  type DivisionType,
+  type GuardianRecord,
+  type SectionTeacherAssignment,
+  type StudentAttendanceHistoryRecord,
+  type StudentDetail,
+} from "@/lib/api";
 import { studentsApi } from "../api";
 import { PhotoUpload } from "../components/PhotoUpload";
 import { EditStudentForm } from "./EditStudentForm";
+import { AcademicHistoryTimeline } from "./AcademicHistoryTimeline";
+import { TransferHistoryList } from "./TransferHistoryList";
+import { StudentAttendanceHistory, currentYearAttendanceRate } from "./StudentAttendanceHistory";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -21,10 +44,13 @@ import { ResetPortalPasswordCard } from "@/features/portal-accounts/ResetPortalP
 import { GuardianForm } from "@/features/guardians/forms/GuardianForm";
 import { useToast } from "@/components/ui/Toast";
 import { TabBar } from "@/components/ui/TabBar";
+import { StatTile } from "@/features/student-portal/StatTile";
 import { StudentFeesTab } from "@/features/finance/student-ledger/StudentFeesTab";
 
-const TABS = ["Overview", "Fees & Payments"] as const;
-type Tab = (typeof TABS)[number];
+const DIVISION_LABEL: Record<DivisionType, string> = { PRIMARY: "Primary", SECONDARY: "Secondary" };
+
+const ALL_TABS = ["Overview", "Academic History", "Attendance", "Transfers", "Fees & Payments"] as const;
+type Tab = (typeof ALL_TABS)[number];
 
 const STATUS_TONE: Record<StudentDetail["currentStatus"], "success" | "accent" | "neutral" | "warning"> = {
   ACTIVE: "success",
@@ -54,6 +80,18 @@ export function StudentProfile({ studentId }: { studentId: string }) {
   const [deleting, setDeleting] = useState(false);
   const [tab, setTab] = useState<Tab>("Overview");
 
+  // The CURRENT enrollment's Division (Primary/Secondary) — Class carries no
+  // division field of its own on this route, so it's cross-referenced from
+  // the school's own class list for that academic year (the same read
+  // Academic → Classes already uses). Best-effort only: shown when it
+  // resolves, silently omitted otherwise — never guessed from the class name.
+  const [divisionType, setDivisionType] = useState<DivisionType | null>(null);
+
+  // Real attendance history, fetched once here (not only inside the
+  // Attendance tab) so the Overview's attendance-rate tile has real data too
+  // — never a second, separately-computed number.
+  const [attendance, setAttendance] = useState<StudentAttendanceHistoryRecord[] | null>(null);
+
   // Same idea for "Print Profile" (?print=1) — the browser's own print
   // dialog is the whole feature; no dedicated print page/template needed.
   useEffect(() => {
@@ -77,6 +115,38 @@ export function StudentProfile({ studentId }: { studentId: string }) {
       .catch(() => setPhotoUrl(null));
   }, [accessToken, studentId]);
 
+  const activeEnrollment = student?.enrollments.find((e) => e.status === "ACTIVE");
+  const canViewAttendance = user?.permissions.includes("attendance.view") ?? false;
+
+  useEffect(() => {
+    if (!accessToken || !canViewAttendance) return;
+    api
+      .getStudentAttendanceHistory(accessToken, studentId)
+      .then(setAttendance)
+      .catch(() => setAttendance([]));
+  }, [accessToken, studentId, canViewAttendance]);
+
+  useEffect(() => {
+    if (!accessToken || !activeEnrollment) {
+      setDivisionType(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .listClasses(accessToken, activeEnrollment.school.id, activeEnrollment.academicYear.id)
+      .then((classes) => {
+        if (cancelled) return;
+        setDivisionType(classes.find((c) => c.id === activeEnrollment.class.id)?.division.type ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setDivisionType(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken, activeEnrollment?.school.id, activeEnrollment?.academicYear.id, activeEnrollment?.class.id]);
+
   async function onDelete() {
     if (!accessToken || !student) return;
     setDeleting(true);
@@ -96,7 +166,6 @@ export function StudentProfile({ studentId }: { studentId: string }) {
   if (error) return <Alert tone="danger">{error}</Alert>;
   if (!student) return <SkeletonCards count={3} />;
 
-  const activeEnrollment = student.enrollments.find((e) => e.status === "ACTIVE");
   const canUpdate = user?.permissions.includes("students.update") ?? false;
   const canDelete = user?.permissions.includes("students.archive") ?? false;
   const canManageGuardians = user?.permissions.includes("guardians.manage") ?? false;
@@ -107,7 +176,13 @@ export function StudentProfile({ studentId }: { studentId: string }) {
   // "Teachers should NOT see student financial information by default" rule.
   const canViewFees = user?.permissions.includes("finance.ledger.view") ?? false;
   const canRecordPayments = user?.permissions.includes("payments.record") ?? false;
-  const visibleTabs = TABS.filter((t) => t !== "Fees & Payments" || canViewFees);
+  const visibleTabs = ALL_TABS.filter((t) => {
+    if (t === "Fees & Payments") return canViewFees;
+    if (t === "Attendance") return canViewAttendance;
+    return true;
+  });
+
+  const attendanceRate = attendance && activeEnrollment ? currentYearAttendanceRate(attendance, activeEnrollment.academicYear.id) : null;
 
   return (
     <div className="space-y-5">
@@ -142,6 +217,14 @@ export function StudentProfile({ studentId }: { studentId: string }) {
                 <span className="font-mono text-xs text-foreground-muted">#{activeEnrollment.studentNumber}</span>
               )}
             </div>
+            {/* The current school / class / section, right under the name —
+                so the single most important fact ("where is this student
+                right now") never requires scrolling to the card below. */}
+            {activeEnrollment && (
+              <p className="mt-1.5 text-sm text-foreground-soft">
+                {activeEnrollment.school.name} · {activeEnrollment.class.name} — Section {activeEnrollment.section.name} · Roll #{activeEnrollment.rollNumber}
+              </p>
+            )}
           </div>
           {(canUpdate || canDelete) && !editing && (
             <div className="flex gap-2">
@@ -175,12 +258,8 @@ export function StudentProfile({ studentId }: { studentId: string }) {
         onCancel={() => setShowDeleteConfirm(false)}
       />
 
-      {visibleTabs.length > 1 && <TabBar tabs={visibleTabs} active={tab} onChange={setTab} />}
-
-      {tab === "Fees & Payments" && canViewFees && accessToken ? (
-        <StudentFeesTab accessToken={accessToken} studentId={student.id} canRecordPayments={canRecordPayments} />
-      ) : (
-        <>
+      {/* Editing the student's own biographical details isn't tied to any
+          one tab, so it's available no matter which tab is active. */}
       {editing && accessToken && (
         <EditStudentForm
           accessToken={accessToken}
@@ -194,176 +273,142 @@ export function StudentProfile({ studentId }: { studentId: string }) {
         />
       )}
 
-      {activeEnrollment && (
-        <Card>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground-muted">Current enrollment</h2>
-          <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <Field label="School" value={activeEnrollment.school.name} />
-            <Field label="Class" value={activeEnrollment.class.name} />
-            <Field label="Section" value={activeEnrollment.section.name} />
-            <Field label="Roll #" value={String(activeEnrollment.rollNumber)} />
-          </div>
-        </Card>
-      )}
+      {visibleTabs.length > 1 && <TabBar tabs={visibleTabs} active={tab} onChange={setTab} />}
 
-      {activeEnrollment && accessToken && (
-        <SubjectsAndTeachersCard
-          key={`${activeEnrollment.class.id}:${activeEnrollment.section.id}:${activeEnrollment.academicYear.id}`}
-          accessToken={accessToken}
-          schoolId={activeEnrollment.school.id}
-          classId={activeEnrollment.class.id}
-          sectionId={activeEnrollment.section.id}
-          academicYearId={activeEnrollment.academicYear.id}
-        />
-      )}
-
-      <Card padding="none">
-        <CardHeader title="Enrollment history" />
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
-              <tr>
-                <th className="px-5 py-2.5">School</th>
-                <th className="px-5 py-2.5">Year</th>
-                <th className="px-5 py-2.5">Class / Section</th>
-                <th className="px-5 py-2.5">Roll #</th>
-                <th className="px-5 py-2.5">Status</th>
-                <th className="px-5 py-2.5">Dates</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {student.enrollments.map((e) => (
-                <tr key={e.id}>
-                  <td className="px-5 py-3 text-foreground">{e.school.name}</td>
-                  <td className="px-5 py-3 text-foreground-soft">{e.academicYear.name}</td>
-                  <td className="px-5 py-3 text-foreground-soft">
-                    {e.class.name} · {e.section.name}
-                  </td>
-                  <td className="px-5 py-3 text-foreground-soft">{e.rollNumber}</td>
-                  <td className="px-5 py-3">
-                    <Badge tone={e.status === "ACTIVE" ? "success" : "neutral"}>{e.status.replace("_", " ")}</Badge>
-                  </td>
-                  <td className="px-5 py-3 text-foreground-soft">
-                    {new Date(e.startDate).toLocaleDateString()}
-                    {e.endDate ? ` – ${new Date(e.endDate).toLocaleDateString()}` : ""}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      {student.transfers.length > 0 && (
-        <Card padding="none">
-          <CardHeader title="Transfer history" />
-          <div className="divide-y divide-border">
-            {student.transfers.map((t) => (
-              <div key={t.id} className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
-                <div className="min-w-0">
-                  <p className="text-sm text-foreground">
-                    <span className="font-medium">{t.fromEnrollment.school.name}</span>
-                    <span className="text-foreground-muted">
-                      {" "}
-                      ({t.fromEnrollment.class.name} · {t.fromEnrollment.section.name}, {t.fromEnrollment.academicYear.name})
-                    </span>
-                    <span className="text-foreground-muted"> → </span>
-                    {t.toEnrollment ? (
-                      <>
-                        <span className="font-medium">{t.toEnrollment.school.name}</span>
-                        <span className="text-foreground-muted">
-                          {" "}
-                          ({t.toEnrollment.class.name} · {t.toEnrollment.section.name}, {t.toEnrollment.academicYear.name})
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-foreground-muted">destination pending</span>
-                    )}
-                  </p>
-                  {t.reason && <p className="mt-1 text-sm text-foreground-soft">{t.reason}</p>}
-                  <p className="mt-1 text-xs text-foreground-muted">
-                    {new Date(t.transferDate ?? t.createdAt).toLocaleDateString()}
-                  </p>
+      {tab === "Overview" && (
+        <>
+          {activeEnrollment && (
+            <div data-testid="current-enrollment-card">
+              <Card>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground-muted">Current enrollment</h2>
+                <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                  <Field label="School" value={activeEnrollment.school.name} />
+                  <Field label="Academic Year" value={activeEnrollment.academicYear.name} />
+                  <Field label="Division" value={divisionType ? DIVISION_LABEL[divisionType] : "—"} />
+                  <Field label="Class" value={activeEnrollment.class.name} />
+                  <Field label="Section" value={activeEnrollment.section.name} />
+                  <Field label="Roll #" value={String(activeEnrollment.rollNumber)} />
+                  <Field label="Enrollment Status" value={activeEnrollment.status.replace(/_/g, " ")} />
+                  <Field label="Student Number" value={activeEnrollment.studentNumber} />
                 </div>
-                <Badge
-                  tone={
-                    t.status === "EXECUTED"
-                      ? "success"
-                      : t.status === "REJECTED" || t.status === "CANCELLED"
-                        ? "danger"
-                        : t.status === "APPROVED"
-                          ? "accent"
-                          : "warning"
-                  }
-                >
-                  {t.status}
-                </Badge>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
+              </Card>
+            </div>
+          )}
 
-      <Card padding="none">
-        <CardHeader
-          title="Parent / guardian"
-          actions={
-            canManageGuardians &&
-            !addingGuardian && (
-              <Button size="sm" variant="outline" icon={<Plus className="size-4" />} onClick={() => setAddingGuardian(true)}>
-                Add guardian
-              </Button>
-            )
-          }
-        />
-        <div className="space-y-3 p-5">
-          {addingGuardian && accessToken && (
-            <GuardianForm
+          {activeEnrollment && (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StatTile icon={GraduationCap} label="Academic Year" value={activeEnrollment.academicYear.name} tone="accent" />
+              <StatTile icon={Layers} label="Enrollments on file" value={student.enrollments.length} tone="accent" />
+              {canViewAttendance && (
+                <StatTile
+                  icon={Percent}
+                  label="Attendance (this year)"
+                  value={attendanceRate !== null ? `${attendanceRate}%` : "—"}
+                  tone={attendanceRate === null ? "accent" : attendanceRate >= 90 ? "success" : attendanceRate >= 75 ? "warning" : "danger"}
+                />
+              )}
+              <StatTile
+                icon={ArrowLeftRight}
+                label="Transfers on file"
+                value={student.transfers.length}
+                tone={student.transfers.length > 0 ? "warning" : "accent"}
+              />
+            </div>
+          )}
+
+          {activeEnrollment && accessToken && (
+            <SubjectsAndTeachersCard
+              key={`${activeEnrollment.class.id}:${activeEnrollment.section.id}:${activeEnrollment.academicYear.id}`}
               accessToken={accessToken}
-              schoolId={activeEnrollment?.school.id ?? student.enrollments[0]?.school.id ?? ""}
-              studentId={student.id}
-              existingGuardians={student.guardians}
-              onCancel={() => setAddingGuardian(false)}
-              onAdded={(guardian: GuardianRecord) => {
-                setStudent((prev) => (prev ? { ...prev, guardians: [...prev.guardians, guardian] } : prev));
-                setAddingGuardian(false);
-                show("Guardian added.");
+              schoolId={activeEnrollment.school.id}
+              classId={activeEnrollment.class.id}
+              sectionId={activeEnrollment.section.id}
+              academicYearId={activeEnrollment.academicYear.id}
+            />
+          )}
+
+          <Card padding="none">
+            <CardHeader
+              title="Parent / guardian"
+              actions={
+                canManageGuardians &&
+                !addingGuardian && (
+                  <Button size="sm" variant="outline" icon={<Plus className="size-4" />} onClick={() => setAddingGuardian(true)}>
+                    Add guardian
+                  </Button>
+                )
+              }
+            />
+            <div className="space-y-3 p-5">
+              {addingGuardian && accessToken && (
+                <GuardianForm
+                  accessToken={accessToken}
+                  schoolId={activeEnrollment?.school.id ?? student.enrollments[0]?.school.id ?? ""}
+                  studentId={student.id}
+                  existingGuardians={student.guardians}
+                  onCancel={() => setAddingGuardian(false)}
+                  onAdded={(guardian: GuardianRecord) => {
+                    setStudent((prev) => (prev ? { ...prev, guardians: [...prev.guardians, guardian] } : prev));
+                    setAddingGuardian(false);
+                    show("Guardian added.");
+                  }}
+                />
+              )}
+              {student.guardians.length === 0 && !addingGuardian ? (
+                <EmptyState icon={User} title="No guardians on file" description="Add a parent or guardian for this student." />
+              ) : (
+                student.guardians.map((g) => (
+                  <GuardianCard
+                    key={g.id}
+                    guardian={g}
+                    schoolId={activeEnrollment?.school.id ?? student.enrollments[0]?.school.id}
+                    canViewProfile={canViewGuardianProfile}
+                  />
+                ))
+              )}
+            </div>
+          </Card>
+
+          {canUpdate && !student.userId && accessToken && (
+            <PortalAccountCard accessToken={accessToken} studentId={student.id} />
+          )}
+
+          {canUpdate && student.userId && accessToken && (
+            <ResetPortalPasswordCard
+              personName={`${student.firstName} ${student.lastName}`}
+              onReset={async () => {
+                const r = await studentsApi.resetPortalPassword(accessToken, student.id);
+                return { loginLabel: "Login ID", loginValue: r.loginId, temporaryPassword: r.temporaryPassword };
               }}
             />
           )}
-          {student.guardians.length === 0 && !addingGuardian ? (
-            <EmptyState icon={User} title="No guardians on file" description="Add a parent or guardian for this student." />
-          ) : (
-            student.guardians.map((g) => (
-              <GuardianCard
-                key={g.id}
-                guardian={g}
-                schoolId={activeEnrollment?.school.id ?? student.enrollments[0]?.school.id}
-                canViewProfile={canViewGuardianProfile}
-              />
-            ))
+
+          {canTransfer && activeEnrollment && accessToken && (
+            <TransferRequestCard accessToken={accessToken} studentId={student.id} fromSchoolName={activeEnrollment.school.name} />
           )}
-        </div>
-      </Card>
-
-      {canUpdate && !student.userId && accessToken && (
-        <PortalAccountCard accessToken={accessToken} studentId={student.id} />
-      )}
-
-      {canUpdate && student.userId && accessToken && (
-        <ResetPortalPasswordCard
-          personName={`${student.firstName} ${student.lastName}`}
-          onReset={async () => {
-            const r = await studentsApi.resetPortalPassword(accessToken, student.id);
-            return { loginLabel: "Login ID", loginValue: r.loginId, temporaryPassword: r.temporaryPassword };
-          }}
-        />
-      )}
-
-      {canTransfer && activeEnrollment && accessToken && (
-        <TransferRequestCard accessToken={accessToken} studentId={student.id} fromSchoolName={activeEnrollment.school.name} />
-      )}
         </>
+      )}
+
+      {tab === "Academic History" && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground-muted">Enrollment history</h2>
+          <AcademicHistoryTimeline enrollments={student.enrollments} />
+        </div>
+      )}
+
+      {tab === "Attendance" &&
+        canViewAttendance &&
+        (attendance === null ? <SkeletonCards count={3} /> : <StudentAttendanceHistory records={attendance} />)}
+
+      {tab === "Transfers" && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground-muted">Transfer history</h2>
+          <TransferHistoryList transfers={student.transfers} />
+        </div>
+      )}
+
+      {tab === "Fees & Payments" && canViewFees && accessToken && (
+        <StudentFeesTab accessToken={accessToken} studentId={student.id} canRecordPayments={canRecordPayments} />
       )}
     </div>
   );

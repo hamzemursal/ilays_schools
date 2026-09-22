@@ -24,10 +24,11 @@ import { SkeletonCards } from "@/components/ui/Skeleton";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { BulkActionBar } from "@/components/ui/BulkActionBar";
 import { useToast } from "@/components/ui/Toast";
+import { ActionsMenu, type ActionsMenuItem } from "@/components/ui/ActionsMenu";
 import { runBulkAction, summarizeBulkResult } from "@/lib/bulkAction";
 import { ExamTermControl } from "@/features/exams/ExamTermControl";
 import { ExamSubjectMarksEditor, marksConfigError } from "@/features/exams/ExamSubjectMarksEditor";
-import { Check, ChevronRight, GraduationCap, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { CalendarDays, Check, CheckCircle2, ChevronRight, GraduationCap, Pencil, Plus, Search, Trash2 } from "lucide-react";
 
 const TABS = ["Years", "Classes & sections", "Subjects", "Exams"] as const;
 type Tab = (typeof TABS)[number];
@@ -213,50 +214,23 @@ function AcademicYearsSection({
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {years.length === 0 ? (
         <EmptyState title="No academic years yet" description="Add one to start enrolling students." />
       ) : (
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {years.map((y) => (
-            <Card key={y.id} padding="sm">
-              <div className="flex items-center justify-between p-2">
-                <div>
-                  <p className="font-medium text-foreground">{y.name}</p>
-                  <p className="text-sm text-foreground-soft">
-                    {new Date(y.startDate).toLocaleDateString()} – {new Date(y.endDate).toLocaleDateString()}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {y.isCurrent ? (
-                    <Badge tone="success">Current</Badge>
-                  ) : (
-                    canManage && (
-                      <Button size="sm" variant="ghost" onClick={() => onSetCurrent(y.id)}>
-                        Set current
-                      </Button>
-                    )
-                  )}
-                  {canManage && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<Trash2 className="size-4 text-danger" />}
-                      loading={loadingImpactFor === y.id}
-                      onClick={() => onClickDelete(y)}
-                      aria-label={`Delete ${y.name}`}
-                    />
-                  )}
-                </div>
-              </div>
-              <TermWeightsEditor
-                schoolId={schoolId}
-                accessToken={accessToken}
-                year={y}
-                canManage={canManage}
-                onSaved={(updated) => setYears((prev) => prev.map((yr) => (yr.id === updated.id ? updated : yr)))}
-              />
-            </Card>
+            <AcademicYearCard
+              key={y.id}
+              schoolId={schoolId}
+              accessToken={accessToken}
+              year={y}
+              canManage={canManage}
+              deletingImpact={loadingImpactFor === y.id}
+              onSetCurrent={() => onSetCurrent(y.id)}
+              onDelete={() => onClickDelete(y)}
+              onWeightsSaved={(updated) => setYears((prev) => prev.map((yr) => (yr.id === updated.id ? updated : yr)))}
+            />
           ))}
         </div>
       )}
@@ -278,7 +252,8 @@ function AcademicYearsSection({
       {canManage && (
         <Card>
           <h3 className="text-sm font-semibold text-foreground">Add academic year</h3>
-          <form onSubmit={onCreate} className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
+          <p className="mt-0.5 text-sm text-foreground-soft">Create a new academic year for this school.</p>
+          <form onSubmit={onCreate} className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
             <FormField label="Name">
               <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="2027" />
             </FormField>
@@ -298,6 +273,71 @@ function AcademicYearsSection({
         </Card>
       )}
     </div>
+  );
+}
+
+// One academic year as a self-contained card. The current year gets a
+// quietly highlighted card and a green "Current Year" badge with no
+// competing action button; every other year reads "Previous Year" and keeps
+// "Set as Current Year" one tap away in its own (...) menu instead of a
+// permanent button competing for attention on every card in the grid.
+function AcademicYearCard({
+  schoolId,
+  accessToken,
+  year,
+  canManage,
+  deletingImpact,
+  onSetCurrent,
+  onDelete,
+  onWeightsSaved,
+}: {
+  schoolId: string;
+  accessToken: string;
+  year: AcademicYear;
+  canManage: boolean;
+  deletingImpact: boolean;
+  onSetCurrent: () => void;
+  onDelete: () => void;
+  onWeightsSaved: (updated: AcademicYear) => void;
+}) {
+  const isCurrent = year.isCurrent;
+
+  const menuItems: ActionsMenuItem[] = [
+    ...(isCurrent ? [] : [{ label: "Set as Current Year", icon: CheckCircle2, onClick: onSetCurrent }]),
+    { label: "Delete", icon: Trash2, tone: "danger" as const, onClick: onDelete },
+  ];
+
+  return (
+    <Card padding="none" className={`overflow-hidden ${isCurrent ? "border-accent/30 bg-accent-soft/15 ring-1 ring-accent/15" : ""}`}>
+      <div className="flex items-start justify-between gap-3 p-5">
+        <div className="flex min-w-0 items-start gap-3">
+          <div
+            className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${
+              isCurrent ? "bg-accent text-white" : "bg-surface text-foreground-muted"
+            }`}
+          >
+            <CalendarDays className="size-5" />
+          </div>
+          <div className="min-w-0">
+            <Badge tone={isCurrent ? "success" : "neutral"}>{isCurrent ? "Current Year" : "Previous Year"}</Badge>
+            <p className="mt-1.5 truncate text-lg font-semibold text-foreground">{year.name}</p>
+            <p className="text-sm text-foreground-soft">
+              {new Date(year.startDate).toLocaleDateString()} – {new Date(year.endDate).toLocaleDateString()}
+            </p>
+          </div>
+        </div>
+        {canManage &&
+          (deletingImpact ? (
+            <div className="flex size-8 shrink-0 items-center justify-center" aria-label={`Loading actions for ${year.name}`}>
+              <span className="size-4 animate-spin rounded-full border-2 border-border border-t-accent" aria-hidden />
+            </div>
+          ) : (
+            <ActionsMenu label={`Actions for ${year.name}`} items={menuItems} />
+          ))}
+      </div>
+
+      <TermWeightsEditor schoolId={schoolId} accessToken={accessToken} year={year} canManage={canManage} onSaved={onWeightsSaved} />
+    </Card>
   );
 }
 
@@ -360,7 +400,7 @@ export function TermWeightsEditor({
   }
 
   return (
-    <div className="mt-3 border-t border-border p-2 pt-3">
+    <div className="border-t border-border px-5 py-4">
       {!editing ? (
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone="accent">Term 1 — {term1.weight}%</Badge>

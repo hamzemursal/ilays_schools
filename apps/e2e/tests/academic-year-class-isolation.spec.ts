@@ -21,11 +21,12 @@ test("a class and section created in a non-current academic year remain reachabl
   await expect(page.getByRole("button", { name: "Years" })).toBeVisible();
 
   // --- Add a genuinely PREVIOUS academic year (2025, well before the
-  // seeded "2027" which is current) via the real Add Academic Year form. ---
-  await page.getByPlaceholder("2027").fill("2025");
-  await page.locator('input[type="date"]').nth(0).fill("2025-01-01");
-  await page.locator('input[type="date"]').nth(1).fill("2025-12-31");
-  await page.getByRole("button", { name: "Add year" }).click();
+  // seeded "2027" which is current) via the real Create Academic Year modal. ---
+  await page.getByRole("button", { name: "Create Academic Year" }).click();
+  await page.getByLabel("Academic Year Name", { exact: false }).fill("2025");
+  await page.getByLabel("Start Date", { exact: false }).fill("2025-01-01");
+  await page.getByLabel("End Date", { exact: false }).fill("2025-12-31");
+  await page.getByRole("dialog").getByRole("button", { name: "Create Academic Year" }).click();
   await expect(page.getByText("Academic year added.")).toBeVisible();
 
   // --- Classes & sections tab, switch to the new 2025 year. ---

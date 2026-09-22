@@ -18,7 +18,7 @@ export default function PromotionsPage({ params }: { params: Promise<{ id: strin
         description="Move a section's students to the next class, or mark them complete/graduated, at year end."
         breadcrumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Promotions" }]}
       />
-      <div className="mx-auto max-w-3xl p-4 sm:p-6">
+      <div className="mx-auto max-w-6xl p-4 sm:p-6">
         <PromotionWizard schoolId={schoolId} />
       </div>
     </div>

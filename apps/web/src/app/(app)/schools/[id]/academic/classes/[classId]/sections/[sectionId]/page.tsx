@@ -141,7 +141,11 @@ function SectionWorkspacePageInner({
   // everything year-scoped below reloads whenever yearId changes instead.
   useEffect(() => {
     if (!accessToken) return;
-    Promise.all([api.listClasses(accessToken, schoolId), api.listSections(accessToken, schoolId, classId), api.listAcademicYears(accessToken, schoolId)])
+    Promise.all([
+      api.listClasses(accessToken, schoolId, yearId || initialYearId || undefined),
+      api.listSections(accessToken, schoolId, classId),
+      api.listAcademicYears(accessToken, schoolId),
+    ])
       .then(([classes, sections, y]) => {
         const foundClass = classes.find((c) => c.id === classId);
         const foundSection = sections.find((s) => s.id === sectionId);

@@ -184,7 +184,7 @@ function ClassDetailPageInner({
     if (!accessToken) return;
     try {
       const [classes, subs, y, allSubj] = await Promise.all([
-        api.listClasses(accessToken, schoolId),
+        api.listClasses(accessToken, schoolId, yearId || initialYearId || undefined),
         api.listClassSubjects(accessToken, schoolId, classId),
         api.listAcademicYears(accessToken, schoolId),
         api.listSubjects(accessToken, schoolId),

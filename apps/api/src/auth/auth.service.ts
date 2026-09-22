@@ -6,6 +6,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import { resolveAuthenticatedUser } from "./resolve-authenticated-user";
+import { MFA_LOGIN_ENFORCED } from "./mfa-policy";
 
 const ACCESS_TOKEN_TTL = "15m";
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -108,7 +109,9 @@ export class AuthService {
     // short-lived MFA challenge instead. Nothing is logged as LOGIN yet;
     // completeMfaLogin() below is where that actually happens once the
     // second factor checks out.
-    if (user.totpEnabledAt) {
+    // Gated by MFA_LOGIN_ENFORCED (see mfa-policy.ts) — while disabled, a
+    // TOTP-enabled account still logs straight in with password alone.
+    if (MFA_LOGIN_ENFORCED && user.totpEnabledAt) {
       const mfaToken = await this.jwt.signAsync(
         { sub: user.id, type: "mfa_pending" },
         { secret: process.env.JWT_MFA_SECRET, expiresIn: MFA_TOKEN_TTL },

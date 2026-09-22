@@ -12,6 +12,11 @@ test("Super Admin logs in and reaches the org dashboard", async ({ page }) => {
   await loginAt(page, "/super-admin/login", SUPER_ADMIN.email, SUPER_ADMIN.password);
   await expect(page).toHaveURL(/\/dashboard/);
   await expect(page.getByText("SUPER_ADMIN")).toBeVisible();
+  // SUPER_ADMIN is normally hard-gated into mandatory 2FA enrollment before
+  // reaching anything else (see ROLES_REQUIRING_2FA) — with
+  // MFA_LOGIN_ENFORCED = false (apps/api/src/auth/mfa-policy.ts), that
+  // screen must never appear during a normal login.
+  await expect(page.getByText("Set up two-factor authentication")).toHaveCount(0);
 });
 
 test("Teacher logs in and reaches the dashboard", async ({ page }) => {

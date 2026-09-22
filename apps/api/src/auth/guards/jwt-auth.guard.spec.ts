@@ -50,7 +50,7 @@ function makeContext(headers: Record<string, string> = {}) {
   return { context, request };
 }
 
-describe("JwtAuthGuard", () => {
+describe("JwtAuthGuard (MFA_LOGIN_ENFORCED = false)", () => {
   let jwt: { verifyAsync: jest.Mock };
   let prisma: { user: { findUnique: jest.Mock } };
   let reflector: { getAllAndOverride: jest.Mock };
@@ -156,35 +156,30 @@ describe("JwtAuthGuard", () => {
     });
   });
 
-  // --- The mustSetup2FA enforcement ---------------------------------------
+  // --- The mustSetup2FA enforcement (MFA_LOGIN_ENFORCED = false) ---------
+  //
+  // With the policy disabled (see ../mfa-policy.ts), no role is forced into
+  // TOTP enrollment — the "if re-enabled" version of this same gate,
+  // proving the original enforcement logic is still correct underneath the
+  // flag, lives in jwt-auth.guard.mfa-enforced.spec.ts.
 
-  it("blocks a SUPER_ADMIN with no 2FA enabled from a normal protected route", async () => {
-    const { context } = makeContext({ authorization: "Bearer good-token" });
-    reflector.getAllAndOverride.mockImplementation(reflectorReading({ [ALLOW_TOTP_SETUP_REQUIRED_KEY]: undefined }));
-    jwt.verifyAsync.mockResolvedValue({ sub: "user-1" });
-    prisma.user.findUnique.mockResolvedValue(makeUser({ roleName: "SUPER_ADMIN", totpEnabledAt: null }));
-
-    await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
-    await expect(guard.canActivate(context)).rejects.toThrow("Two-factor authentication must be set up before continuing");
-  });
-
-  it("blocks an ORGANIZATION_ADMIN with no 2FA enabled the same way", async () => {
-    const { context } = makeContext({ authorization: "Bearer good-token" });
-    reflector.getAllAndOverride.mockImplementation(reflectorReading({ [ALLOW_TOTP_SETUP_REQUIRED_KEY]: undefined }));
-    jwt.verifyAsync.mockResolvedValue({ sub: "user-1" });
-    prisma.user.findUnique.mockResolvedValue(makeUser({ roleName: "ORGANIZATION_ADMIN", totpEnabledAt: null }));
-
-    await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
-  });
-
-  it("still allows a SUPER_ADMIN with no 2FA to reach a route marked @AllowTotpSetupRequired()", async () => {
+  it("does not block a SUPER_ADMIN with no 2FA enabled, while MFA_LOGIN_ENFORCED is false", async () => {
     const { context, request } = makeContext({ authorization: "Bearer good-token" });
-    reflector.getAllAndOverride.mockImplementation(reflectorReading({ [ALLOW_TOTP_SETUP_REQUIRED_KEY]: true }));
+    reflector.getAllAndOverride.mockReturnValue(undefined);
     jwt.verifyAsync.mockResolvedValue({ sub: "user-1" });
     prisma.user.findUnique.mockResolvedValue(makeUser({ roleName: "SUPER_ADMIN", totpEnabledAt: null }));
 
     await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(request.user).toMatchObject({ id: "user-1", roles: ["SUPER_ADMIN"] });
+  });
+
+  it("does not block an ORGANIZATION_ADMIN with no 2FA enabled either, while MFA_LOGIN_ENFORCED is false", async () => {
+    const { context } = makeContext({ authorization: "Bearer good-token" });
+    reflector.getAllAndOverride.mockReturnValue(undefined);
+    jwt.verifyAsync.mockResolvedValue({ sub: "user-1" });
+    prisma.user.findUnique.mockResolvedValue(makeUser({ roleName: "ORGANIZATION_ADMIN", totpEnabledAt: null }));
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
   });
 
   it("does not block a SUPER_ADMIN who already has 2FA enabled", async () => {
@@ -205,7 +200,9 @@ describe("JwtAuthGuard", () => {
     await expect(guard.canActivate(context)).resolves.toBe(true);
   });
 
-  it("checks mustChangePassword before mustSetup2FA — a SUPER_ADMIN needing both gets the password error first", async () => {
+  // mustChangePassword is unrelated to 2FA and must keep being enforced
+  // regardless of the MFA_LOGIN_ENFORCED policy.
+  it("still blocks a mustChangePassword SUPER_ADMIN even though the 2FA gate itself is disabled", async () => {
     const { context } = makeContext({ authorization: "Bearer good-token" });
     reflector.getAllAndOverride.mockImplementation(
       reflectorReading({ [ALLOW_PASSWORD_CHANGE_REQUIRED_KEY]: undefined }),

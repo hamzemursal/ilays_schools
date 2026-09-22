@@ -60,11 +60,24 @@ export async function loginAt(page: Page, loginPath: string, email: string, pass
     return;
   }
 
+  // A secret remembered from an earlier run doesn't guarantee the
+  // Authentication code screen is showing NOW — MFA_LOGIN_ENFORCED
+  // (apps/api/src/auth/mfa-policy.ts) can disable the login-time challenge
+  // even for an account that genuinely has 2FA enabled, so check the field
+  // is actually there before trying to fill it, the same way the
+  // mandatory-setup branch above already checks for its own screen.
   const knownSecret = readSecrets()[email];
   if (knownSecret) {
-    const code = await generate({ secret: knownSecret });
-    await page.getByPlaceholder("123456").fill(code);
-    await page.getByRole("button", { name: "Verify" }).click();
+    const codeField = page.getByPlaceholder("123456");
+    const challengeShown = await codeField
+      .waitFor({ state: "visible", timeout: 3000 })
+      .then(() => true)
+      .catch(() => false);
+    if (challengeShown) {
+      const code = await generate({ secret: knownSecret });
+      await codeField.fill(code);
+      await page.getByRole("button", { name: "Verify" }).click();
+    }
   }
 }
 

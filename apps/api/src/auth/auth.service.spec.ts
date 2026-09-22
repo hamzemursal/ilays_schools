@@ -5,10 +5,13 @@ import { PrismaService } from "../prisma/prisma.service";
 import { JwtService } from "@nestjs/jwt";
 import { AuditService } from "../audit/audit.service";
 
-// Only login()'s new TOTP branch is covered here — the rest of AuthService
+// Only login()'s TOTP branch is covered here — the rest of AuthService
 // (refresh/logout/acceptInvite/changeMyPassword) had no prior test coverage
-// and isn't part of what changed for 2FA.
-describe("AuthService.login — TOTP branch", () => {
+// and isn't part of what changed for 2FA. This file exercises the CURRENT
+// default policy (MFA_LOGIN_ENFORCED = false, see ./mfa-policy.ts); see
+// auth.service.mfa-enforced.spec.ts for the same branch with the policy
+// mocked back to true.
+describe("AuthService.login — TOTP branch (MFA_LOGIN_ENFORCED = false)", () => {
   let prisma: {
     user: { findUnique: jest.Mock; findUniqueOrThrow: jest.Mock };
     studentEnrollment: { findMany: jest.Mock };
@@ -60,7 +63,11 @@ describe("AuthService.login — TOTP branch", () => {
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: "LOGIN" }));
   });
 
-  it("returns an MFA challenge instead of real tokens for an account with 2FA enabled", async () => {
+  // MFA_LOGIN_ENFORCED is false by default (see ./mfa-policy.ts) — an
+  // account with 2FA enabled still logs straight in with password alone.
+  // The "if it were re-enabled" version of this same scenario is covered by
+  // auth.service.mfa-enforced.spec.ts, which mocks the policy back to true.
+  it("issues real tokens directly for an account with 2FA enabled too, while MFA_LOGIN_ENFORCED is false", async () => {
     prisma.user.findUnique.mockResolvedValue({
       id: "user-1",
       email: "admin@example.com",
@@ -74,16 +81,12 @@ describe("AuthService.login — TOTP branch", () => {
 
     const result = await service.login("admin@example.com", "correct-password");
 
-    expect(result).toEqual({ mfaRequired: true, mfaToken: "signed.jwt.token" });
-    // Signed with a distinct secret/claim from the real access token — see
-    // the JWT_MFA_SECRET comment on MfaChallenge for why this matters.
-    expect(jwt.signAsync).toHaveBeenCalledWith(
-      { sub: "user-1", type: "mfa_pending" },
-      expect.objectContaining({ secret: process.env.JWT_MFA_SECRET }),
-    );
-    // No LOGIN audit event yet — see completeMfaLogin for where it actually fires.
-    expect(audit.record).not.toHaveBeenCalledWith(expect.objectContaining({ action: "LOGIN" }));
-    expect(prisma.refreshToken.create).not.toHaveBeenCalled();
+    expect("mfaRequired" in result).toBe(false);
+    if (!("mfaRequired" in result)) {
+      expect(result.accessToken).toBe("signed.jwt.token");
+    }
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: "LOGIN" }));
+    expect(prisma.refreshToken.create).toHaveBeenCalled();
   });
 
   it("still rejects a wrong password even when 2FA is enabled", async () => {

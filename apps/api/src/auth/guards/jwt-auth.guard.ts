@@ -12,6 +12,7 @@ import { ALLOW_PASSWORD_CHANGE_REQUIRED_KEY } from "../decorators/allow-password
 import { ALLOW_TOTP_SETUP_REQUIRED_KEY } from "../decorators/allow-totp-setup-required.decorator";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { AuthenticatedUser } from "../types/authenticated-user";
+import { MFA_LOGIN_ENFORCED } from "../mfa-policy";
 
 // Part K's "Optional TOTP 2FA, required for Super/Org Admins" — these two
 // roles are the only ones the mustSetup2FA gate below ever fires for. Every
@@ -76,7 +77,9 @@ export class JwtAuthGuard implements CanActivate {
     // Same shape as the mustChangePassword gate above, checked after it —
     // a Super/Org Admin who also happens to need a password change deals
     // with that first. Mirrors AppShell's matching frontend gate.
-    if (roles.some((r) => ROLES_REQUIRING_2FA.includes(r)) && !user.totpEnabledAt) {
+    // Gated by MFA_LOGIN_ENFORCED (see mfa-policy.ts) — while disabled, no
+    // role is forced into TOTP enrollment to keep using the app.
+    if (MFA_LOGIN_ENFORCED && roles.some((r) => ROLES_REQUIRING_2FA.includes(r)) && !user.totpEnabledAt) {
       const exempt = this.reflector.getAllAndOverride<boolean>(ALLOW_TOTP_SETUP_REQUIRED_KEY, [
         context.getHandler(),
         context.getClass(),

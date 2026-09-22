@@ -9,6 +9,7 @@ import { Public } from "./decorators/public.decorator";
 import { AllowPasswordChangeRequired } from "./decorators/allow-password-change-required.decorator";
 import { AllowTotpSetupRequired } from "./decorators/allow-totp-setup-required.decorator";
 import { ROLES_REQUIRING_2FA } from "./guards/jwt-auth.guard";
+import { MFA_LOGIN_ENFORCED } from "./mfa-policy";
 import { CurrentUser } from "./decorators/current-user.decorator";
 import { PrismaService } from "../prisma/prisma.service";
 import { DocumentsService } from "../documents/documents.service";
@@ -141,7 +142,9 @@ export class AuthController {
       mustChangePassword: self.mustChangePassword,
       // Same "required for Super/Org Admins" audience as JwtAuthGuard's own
       // enforcement — this is what AppShell's matching frontend gate reads.
-      mustSetup2FA: user.roles.some((r) => ROLES_REQUIRING_2FA.includes(r)) && !self.totpEnabledAt,
+      // Gated by MFA_LOGIN_ENFORCED (see mfa-policy.ts), kept consistent
+      // with the guard's own check above it.
+      mustSetup2FA: MFA_LOGIN_ENFORCED && user.roles.some((r) => ROLES_REQUIRING_2FA.includes(r)) && !self.totpEnabledAt,
     };
   }
 

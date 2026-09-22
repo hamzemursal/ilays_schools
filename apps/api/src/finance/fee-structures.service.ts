@@ -4,6 +4,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { CreateFeeStructureDto } from "./dto/create-fee-structure.dto";
+import { assertClassInYear } from "../academic/class-year";
 
 @Injectable()
 export class FeeStructuresService {
@@ -30,6 +31,8 @@ export class FeeStructuresService {
     if (dto.classId) {
       const cls = await this.prisma.class.findFirst({ where: { id: dto.classId, division: { schoolId } } });
       if (!cls) throw new BadRequestException("That class does not belong to this school");
+      // A class fee is for one academic year: the class must be that year's.
+      assertClassInYear(cls, year.id, year.name);
     }
 
     try {

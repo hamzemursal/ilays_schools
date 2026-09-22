@@ -90,7 +90,17 @@ describe("StudentLifecycleService.previewForm1Transition", () => {
   it("rejects a toClassId that isn't a level-1 class in this school's Secondary division", async () => {
     prisma.class.findFirst.mockResolvedValue(null);
     await expect(service.previewForm1Transition(ACTOR, "school-1", dto())).rejects.toThrow(
-      "Target class must be a level-1 (Form 1) class in this school's Secondary division",
+      "Target class must be a level-1 (Form 1) class of 2028 in this school's Secondary division",
+    );
+  });
+
+  it("looks the destination Form 1 up by level, Secondary division AND the destination academic year", async () => {
+    prisma.studentEnrollment.findMany.mockResolvedValue([]);
+    await service.previewForm1Transition(ACTOR, "school-1", dto());
+    expect(prisma.class.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "class-form1", level: 1, academicYearId: "year-2", division: { schoolId: "school-1", type: "SECONDARY" } },
+      }),
     );
   });
 

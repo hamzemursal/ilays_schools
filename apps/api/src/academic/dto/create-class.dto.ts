@@ -17,6 +17,11 @@ export class CreateClassDto {
   @IsUUID()
   divisionId!: string;
 
+  // The academic year this class belongs to. Required: "Form 3" of 2026-2027
+  // and "Form 3" of 2025-2026 are different classes.
+  @IsUUID()
+  academicYearId!: string;
+
   @IsString()
   @MinLength(1)
   name!: string;

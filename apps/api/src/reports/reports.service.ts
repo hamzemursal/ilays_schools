@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
+import { classYearReadWhere } from "../academic/class-year";
 
 @Injectable()
 export class ReportsService {
@@ -17,7 +18,8 @@ export class ReportsService {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
 
     const classes = await this.prisma.class.findMany({
-      where: { division: { schoolId } },
+      // Only the selected academic year's classes (plus any still-unstamped legacy ones).
+      where: { division: { schoolId }, ...classYearReadWhere(academicYearId) },
       include: {
         sections: {
           include: { _count: { select: { enrollments: { where: { academicYearId, status: "ACTIVE" } } } } },
@@ -47,7 +49,7 @@ export class ReportsService {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
 
     const sections = await this.prisma.section.findMany({
-      where: { class: { division: { schoolId } } },
+      where: { class: { division: { schoolId }, ...classYearReadWhere(academicYearId) } },
       include: { class: true },
     });
 

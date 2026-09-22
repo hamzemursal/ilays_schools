@@ -6,6 +6,7 @@ import { AuditService } from "../audit/audit.service";
 import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { PromoteSectionDto } from "./dto/promote-section.dto";
+import { assertClassInYear } from "../academic/class-year";
 
 type NaturalOutcome = "PROMOTED" | "COMPLETED" | "GRADUATED";
 
@@ -48,42 +49,70 @@ export class PromotionsService {
     private readonly audit: AuditService,
   ) {}
 
-  private async resolvePlan(schoolId: string, sectionId: string) {
+  // The plan for promoting ONE section's cohort of `fromAcademicYearId` into
+  // `toYear`. Classes are academic-year scoped, so:
+  //   * the source section's class must belong to the year being promoted from;
+  //   * PROMOTED students move into the class one level up IN THE DESTINATION
+  //     year (nextClass);
+  //   * RETAINED students stay on the SAME level but in the DESTINATION year
+  //     (retainedClass) - never back on the old year's class;
+  //   * a class that does not exist in the destination year is reported, never
+  //     silently replaced by an old-year one.
+  // toYear is null only for a preview when the school has no later year yet.
+  private async resolvePlan(
+    schoolId: string,
+    sectionId: string,
+    fromAcademicYearId: string,
+    toYear: { id: string; name: string } | null,
+  ) {
     const section = await this.prisma.section.findFirst({
       where: { id: sectionId, class: { division: { schoolId } } },
       include: { class: { include: { division: true } } },
     });
     if (!section) throw new NotFoundException("Section not found in this school");
+    assertClassInYear(section.class, fromAcademicYearId);
 
     const divisionType = section.class.division.type;
     const isFinalClass = section.class.level >= FINAL_LEVEL_BY_DIVISION[divisionType];
 
-    // Only the division's real final class can finish it. Every other class
-    // MUST have a next class set up — if it doesn't, that's an incomplete
-    // school structure the Admin needs to fix first, not a graduation.
-    const nextClass = isFinalClass
-      ? null
-      : await this.prisma.class.findFirst({
-          where: { divisionId: section.class.divisionId, level: section.class.level + 1 },
+    let nextClass: { id: string; name: string; academicYearId: string | null } | null = null;
+    let retainedClass: { id: string; name: string; academicYearId: string | null } | null = null;
+    if (toYear) {
+      retainedClass = await this.prisma.class.findFirst({
+        where: { divisionId: section.class.divisionId, level: section.class.level, academicYearId: toYear.id },
+      });
+      // Only the division's real final class can finish it. Every other class
+      // MUST have a next class set up in the destination year - if it doesn't,
+      // that's an incomplete structure the Admin needs to fix first, not a
+      // graduation.
+      if (!isFinalClass) {
+        nextClass = await this.prisma.class.findFirst({
+          where: { divisionId: section.class.divisionId, level: section.class.level + 1, academicYearId: toYear.id },
         });
-    if (!isFinalClass && !nextClass) {
-      const nextName = `${divisionType === "PRIMARY" ? "Class" : "Form"} ${section.class.level + 1}`;
-      throw new BadRequestException(
-        `${section.class.name} can't be promoted yet — ${nextName} has not been created in this school. Create ${nextName} (with its sections) first.`,
-      );
+        if (!nextClass) {
+          const nextName = `${divisionType === "PRIMARY" ? "Class" : "Form"} ${section.class.level + 1}`;
+          throw new BadRequestException(
+            `${section.class.name} can't be promoted yet - ${nextName} has not been created for ${toYear.name}. Create ${nextName} (with its sections) in that academic year first.`,
+          );
+        }
+        assertClassInYear(nextClass, toYear.id, toYear.name);
+      }
+      if (retainedClass) assertClassInYear(retainedClass, toYear.id, toYear.name);
     }
 
-    const naturalOutcome: NaturalOutcome = nextClass ? "PROMOTED" : divisionType === "PRIMARY" ? "COMPLETED" : "GRADUATED";
+    const naturalOutcome: NaturalOutcome = !isFinalClass ? "PROMOTED" : divisionType === "PRIMARY" ? "COMPLETED" : "GRADUATED";
 
-    return { section, currentClass: section.class, nextClass, naturalOutcome };
+    return { section, currentClass: section.class, nextClass, retainedClass, naturalOutcome };
   }
 
-  private async sectionsWithCapacity(classId: string): Promise<SectionWithCapacity[]> {
+  // A capacity is only ever compared with the ACTIVE roster of the DESTINATION
+  // academic year.
+  private async sectionsWithCapacity(classId: string, academicYearId: string): Promise<SectionWithCapacity[]> {
     const sections = await this.prisma.section.findMany({ where: { classId } });
     return Promise.all(
       sections.map(async (s) => {
         const currentActive = await this.prisma.studentEnrollment.count({
-          where: { sectionId: s.id, status: "ACTIVE" },
+          where: { sectionId: s.id, academicYearId, status: "ACTIVE" },
         });
         // null capacity means unlimited — available has no ceiling either.
         return {
@@ -105,9 +134,42 @@ export class PromotionsService {
   // graduate); ineligible students are suggested RETAINED; a student with an
   // Incomplete annual result gets no suggestion at all — the Admin must
   // decide explicitly rather than the system guessing at missing data.
-  async preview(actor: AuthenticatedUser, schoolId: string, sectionId: string, fromAcademicYearId: string) {
+  // toAcademicYearId is optional: without it the next LATER academic year of
+  // the school is used, and if there is none the preview still shows each
+  // student's results but offers no destination sections.
+  async preview(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    sectionId: string,
+    fromAcademicYearId: string,
+    toAcademicYearId?: string,
+  ) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    const { currentClass, nextClass, naturalOutcome } = await this.resolvePlan(schoolId, sectionId);
+
+    const fromYear = await this.prisma.academicYear.findFirst({ where: { id: fromAcademicYearId, schoolId } });
+    if (!fromYear) throw new BadRequestException("That academic year does not belong to this school");
+
+    let toYear: { id: string; name: string } | null;
+    if (toAcademicYearId) {
+      const year = await this.prisma.academicYear.findFirst({ where: { id: toAcademicYearId, schoolId } });
+      if (!year) throw new BadRequestException("That academic year does not belong to this school");
+      if (year.id === fromYear.id || year.startDate <= fromYear.startDate) {
+        throw new BadRequestException("The destination academic year must be a later year than the one being promoted from");
+      }
+      toYear = year;
+    } else {
+      toYear = await this.prisma.academicYear.findFirst({
+        where: { schoolId, startDate: { gt: fromYear.startDate } },
+        orderBy: { startDate: "asc" },
+      });
+    }
+
+    const { currentClass, nextClass, retainedClass, naturalOutcome } = await this.resolvePlan(
+      schoolId,
+      sectionId,
+      fromAcademicYearId,
+      toYear,
+    );
 
     const enrollments = await this.prisma.studentEnrollment.findMany({
       where: { sectionId, academicYearId: fromAcademicYearId, status: "ACTIVE" },
@@ -139,24 +201,34 @@ export class PromotionsService {
       }),
     );
 
-    const [currentClassSections, nextClassSections] = await Promise.all([
-      this.sectionsWithCapacity(currentClass.id),
-      nextClass ? this.sectionsWithCapacity(nextClass.id) : Promise.resolve([]),
+    const warnings: string[] = [];
+    if (!toYear) warnings.push("There is no later academic year yet. Create the destination academic year first - Promotion never creates one.");
+    else if (!retainedClass) {
+      warnings.push(`${currentClass.name} has not been created for ${toYear.name}, so students cannot be retained until it is.`);
+    }
+
+    // currentClassSections is the pool for RETAINED students (the same level,
+    // in the DESTINATION year); nextClassSections the pool for PROMOTED ones.
+    const [retainedClassSections, nextClassSections] = await Promise.all([
+      toYear && retainedClass ? this.sectionsWithCapacity(retainedClass.id, toYear.id) : Promise.resolve([]),
+      toYear && nextClass ? this.sectionsWithCapacity(nextClass.id, toYear.id) : Promise.resolve([]),
     ]);
 
     return {
       naturalOutcome,
       currentClass: { id: currentClass.id, name: currentClass.name },
       nextClass: nextClass ? { id: nextClass.id, name: nextClass.name } : null,
-      currentClassSections,
+      retainedClass: retainedClass ? { id: retainedClass.id, name: retainedClass.name } : null,
+      targetAcademicYear: toYear ? { id: toYear.id, name: toYear.name } : null,
+      currentClassSections: retainedClassSections,
       nextClassSections,
+      warnings,
       students,
     };
   }
 
   async confirm(actor: AuthenticatedUser, schoolId: string, sectionId: string, dto: PromoteSectionDto) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    const { currentClass, nextClass, naturalOutcome } = await this.resolvePlan(schoolId, sectionId);
 
     // Promotion never creates an academic year — the Admin must have already
     // created the destination year (and prepared its classes/sections).
@@ -173,6 +245,15 @@ export class PromotionsService {
     if (toAcademicYear.id === fromAcademicYear.id || toAcademicYear.startDate <= fromAcademicYear.startDate) {
       throw new BadRequestException("The destination academic year must be a later year than the one being promoted from");
     }
+
+    // Source class must be of the year being promoted; PROMOTED targets come
+    // from the destination year's next level, RETAINED from its same level.
+    const { currentClass, nextClass, retainedClass, naturalOutcome } = await this.resolvePlan(
+      schoolId,
+      sectionId,
+      dto.fromAcademicYearId,
+      toAcademicYear,
+    );
 
     if (dto.assignments.length === 0) {
       throw new BadRequestException("At least one student assignment is required");
@@ -192,8 +273,10 @@ export class PromotionsService {
     }
     const enrollmentById = new Map(enrollments.map((e) => [e.id, e]));
 
-    const [currentClassSectionIds, nextClassSectionIds] = await Promise.all([
-      this.prisma.section.findMany({ where: { classId: currentClass.id } }).then((s) => new Set(s.map((x) => x.id))),
+    const [retainedSectionIds, nextClassSectionIds] = await Promise.all([
+      retainedClass
+        ? this.prisma.section.findMany({ where: { classId: retainedClass.id } }).then((s) => new Set(s.map((x) => x.id)))
+        : Promise.resolve(new Set<string>()),
       nextClass
         ? this.prisma.section.findMany({ where: { classId: nextClass.id } }).then((s) => new Set(s.map((x) => x.id)))
         : Promise.resolve(new Set<string>()),
@@ -220,8 +303,15 @@ export class PromotionsService {
         }
         incomingBySection.set(a.targetSectionId, (incomingBySection.get(a.targetSectionId) ?? 0) + 1);
       } else if (a.outcome === "RETAINED") {
-        if (!a.targetSectionId || !currentClassSectionIds.has(a.targetSectionId)) {
-          throw new BadRequestException(`A valid section in ${currentClass.name} is required to retain this student`);
+        if (!retainedClass) {
+          throw new BadRequestException(
+            `${currentClass.name} has not been created for ${toAcademicYear.name}. Create it (with its sections) in that academic year before retaining students.`,
+          );
+        }
+        if (!a.targetSectionId || !retainedSectionIds.has(a.targetSectionId)) {
+          throw new BadRequestException(
+            `A valid section in ${retainedClass.name} (${toAcademicYear.name}) is required to retain this student`,
+          );
         }
         incomingBySection.set(a.targetSectionId, (incomingBySection.get(a.targetSectionId) ?? 0) + 1);
       }
@@ -245,8 +335,9 @@ export class PromotionsService {
     for (const [targetSectionId, incoming] of incomingBySection) {
       const section = await this.prisma.section.findUniqueOrThrow({ where: { id: targetSectionId } });
       if (section.capacity !== null) {
+        // Only the DESTINATION academic year's roster counts against capacity.
         const currentActive = await this.prisma.studentEnrollment.count({
-          where: { sectionId: targetSectionId, status: "ACTIVE" },
+          where: { sectionId: targetSectionId, academicYearId: dto.toAcademicYearId, status: "ACTIVE" },
         });
         if (currentActive + incoming > section.capacity) {
           throw new BadRequestException(
@@ -303,7 +394,8 @@ export class PromotionsService {
 
           let toEnrollmentId: string | null = null;
           if (a.outcome === "PROMOTED" || a.outcome === "RETAINED") {
-            const targetClassId = a.outcome === "PROMOTED" ? nextClass!.id : currentClass.id;
+            // Never the old year's class: both come from the destination year.
+            const targetClassId = a.outcome === "PROMOTED" ? nextClass!.id : retainedClass!.id;
             const roll = await nextRollFor(a.targetSectionId!);
             const created = await tx.studentEnrollment.create({
               data: {
@@ -369,7 +461,7 @@ export class PromotionsService {
               module: AuditModuleName.PROMOTIONS,
               resourceType: "PromotionBatch",
               resourceId: batch.id,
-              after: { outcome: "RETAINED", studentCount: retainedCount, class: currentClass.name },
+              after: { outcome: "RETAINED", studentCount: retainedCount, class: currentClass.name, toAcademicYear: toAcademicYear.name },
             },
             tx,
           );

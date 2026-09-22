@@ -66,8 +66,9 @@ export class ClassesController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("schoolId") schoolId: string,
     @Param("identifier") identifier: string,
+    @Query("academicYearId") academicYearId?: string,
   ) {
-    return this.classes.resolveIdentifierOrThrow(user, schoolId, identifier);
+    return this.classes.resolveIdentifierOrThrow(user, schoolId, identifier, academicYearId);
   }
 
   @RequirePermissions("academic.view")

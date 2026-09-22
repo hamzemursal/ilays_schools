@@ -78,8 +78,9 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     (async () => {
       try {
         const school = await api.resolveSchool(accessToken, schoolSlug);
-        const cls = await api.resolveClass(accessToken, school.id, classSlugParam);
+        // The year first: a class slug names one class per academic year.
         const year = yearFromUrl ? await api.resolveAcademicYear(accessToken, school.id, yearFromUrl) : null;
+        const cls = await api.resolveClass(accessToken, school.id, classSlugParam, year?.id);
         if (!cancelled) {
           setResolved({ schoolId: school.id, schoolName: school.name, classId: cls.id, yearId: year?.id ?? null });
         }

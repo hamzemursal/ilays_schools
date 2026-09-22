@@ -83,11 +83,25 @@ const YEAR_ROWS: Record<string, { id: string; name: string; startDate: Date }> =
   "year-2": { id: "year-2", name: "2026-2027", startDate: new Date("2026-09-01") },
 };
 function mockYears(prisma: MockPrisma) {
-  prisma.academicYear.findFirst.mockImplementation((args: { where: { id: string } }) => Promise.resolve(YEAR_ROWS[args.where.id] ?? null));
+  prisma.academicYear.findFirst.mockImplementation((args: { where: { id?: string; startDate?: unknown } }) =>
+    Promise.resolve(args.where.id ? (YEAR_ROWS[args.where.id] ?? null) : args.where.startDate ? YEAR_ROWS["year-2"] : null),
+  );
 }
 
 function classRow(name: string, level: number, type: "PRIMARY" | "SECONDARY") {
-  return { id: `class-${name}`, name, level, divisionId: `div-${type}`, division: { type } };
+  return { id: `class-${name}`, name, level, divisionId: `div-${type}`, academicYearId: "year-1", division: { type } };
+}
+
+// The same class of the DESTINATION academic year (year-2): classes are year-scoped.
+function inYear2(cls: ReturnType<typeof classRow>) {
+  return { ...cls, id: `${cls.id}-y2`, academicYearId: "year-2" };
+}
+
+// Destination classes are looked up by level + year: the same level (RETAINED)
+// and one level up (PROMOTED, absent when `next` is null).
+function destinationLookup(cls: ReturnType<typeof classRow>, next: ReturnType<typeof classRow> | null) {
+  return (args: { where: { level: number } }) =>
+    Promise.resolve(args.where.level === cls.level ? inYear2(cls) : args.where.level === cls.level + 1 && next ? inYear2(next) : null);
 }
 
 function sectionRow(cls: ReturnType<typeof classRow>) {
@@ -95,8 +109,9 @@ function sectionRow(cls: ReturnType<typeof classRow>) {
 }
 
 function arrangePreview(prisma: MockPrisma, cls: ReturnType<typeof classRow>, next: ReturnType<typeof classRow> | null) {
+  mockYears(prisma);
   prisma.section.findFirst.mockResolvedValue(sectionRow(cls));
-  prisma.class.findFirst.mockResolvedValue(next);
+  prisma.class.findFirst.mockImplementation(destinationLookup(cls, next));
   prisma.studentEnrollment.findMany.mockResolvedValue([]);
   prisma.section.findMany.mockResolvedValue([]);
   prisma.studentEnrollment.count.mockResolvedValue(0);
@@ -123,7 +138,7 @@ describe("PromotionsService — class progression (Form 1→4 then Graduate, Cla
     const result = await service.preview(ACTOR, "school-1", "section-1", "year-1");
 
     expect(result.naturalOutcome).toBe("PROMOTED");
-    expect(result.nextClass).toEqual({ id: `class-${nextName}`, name: nextName });
+    expect(result.nextClass).toEqual({ id: `class-${nextName}-y2`, name: nextName });
   });
 
   it("Form 4 (the Secondary final class) → Graduate/Alumni", async () => {
@@ -147,7 +162,7 @@ describe("PromotionsService — class progression (Form 1→4 then Graduate, Cla
     arrangePreview(prisma, classRow("Form 2", 2, "SECONDARY"), null);
 
     await expect(service.preview(ACTOR, "school-1", "section-1", "year-1")).rejects.toThrow(
-      "Form 2 can't be promoted yet — Form 3 has not been created in this school",
+      "Form 2 can't be promoted yet - Form 3 has not been created for 2026-2027",
     );
   });
 
@@ -161,7 +176,7 @@ describe("PromotionsService — class progression (Form 1→4 then Graduate, Cla
     arrangePreview(prisma, classRow("Class 3", 3, "PRIMARY"), null);
 
     await expect(service.preview(ACTOR, "school-1", "section-1", "year-1")).rejects.toThrow(
-      "Class 3 can't be promoted yet — Class 4 has not been created in this school",
+      "Class 3 can't be promoted yet - Class 4 has not been created for 2026-2027",
     );
   });
 
@@ -186,7 +201,8 @@ describe("PromotionsService — class progression (Form 1→4 then Graduate, Cla
 
     expect(result.naturalOutcome).toBe("GRADUATED");
     expect(result.nextClass).toBeNull();
-    expect(prisma.class.findFirst).not.toHaveBeenCalled();
+    // The final class never looks for a next class - only the same level is looked up (for RETAINED).
+    expect(prisma.class.findFirst).not.toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ level: 5 }) }));
   });
 });
 
@@ -199,12 +215,13 @@ describe("PromotionsService.confirm — Phase 1 promotion rules", () => {
   function arrangeConfirm(cls: ReturnType<typeof classRow>, next: ReturnType<typeof classRow> | null) {
     mockYears(prisma);
     prisma.section.findFirst.mockResolvedValue(sectionRow(cls));
-    prisma.class.findFirst.mockResolvedValue(next);
+    prisma.class.findFirst.mockImplementation(destinationLookup(cls, next));
     prisma.studentEnrollment.findMany.mockResolvedValue([
       { id: "enr-1", studentId: "student-1", organizationId: "org-1", studentNumber: "STU-1" },
     ]);
+    // "cur-a" belongs to the retained (same level, destination-year) class, "next-a" to the next level's.
     prisma.section.findMany.mockImplementation(({ where }: { where: { classId: string } }) =>
-      Promise.resolve(where.classId === cls.id ? [{ id: "cur-a" }] : [{ id: "next-a" }]),
+      Promise.resolve(where.classId === inYear2(cls).id ? [{ id: "cur-a" }] : [{ id: "next-a" }]),
     );
     prisma.section.findUniqueOrThrow.mockImplementation(({ where }: { where: { id: string } }) =>
       Promise.resolve({ id: where.id, name: where.id, capacity: null }),
@@ -275,7 +292,7 @@ describe("PromotionsService.confirm — Phase 1 promotion rules", () => {
         studentId: "student-1",
         studentNumber: "STU-1",
         academicYearId: "year-2",
-        classId: "class-Form 3",
+        classId: "class-Form 3-y2",
         sectionId: "next-a",
         rollNumber: 7,
         status: "ACTIVE",
@@ -303,7 +320,7 @@ describe("PromotionsService.confirm — Phase 1 promotion rules", () => {
         studentId: "student-1",
         studentNumber: "STU-1",
         academicYearId: "year-2",
-        classId: "class-Form 2",
+        classId: "class-Form 2-y2",
         sectionId: "cur-a",
         rollNumber: 7,
         status: "ACTIVE",
@@ -390,7 +407,7 @@ describe("PromotionsService.confirm — Phase 1 promotion rules", () => {
       dto({ assignments: [{ enrollmentId: "enr-1", outcome: "RETAINED", targetSectionId: "cur-a" }] }),
     );
     expect(prisma.studentEnrollment.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ classId: "class-Form 4", academicYearId: "year-2", status: "ACTIVE" }),
+      data: expect.objectContaining({ classId: "class-Form 4-y2", academicYearId: "year-2", status: "ACTIVE" }),
     });
   });
 

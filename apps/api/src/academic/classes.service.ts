@@ -13,6 +13,7 @@ import { AssignSubjectDto } from "./dto/assign-subject.dto";
 import { BulkTransferClassDto } from "./dto/bulk-transfer-class.dto";
 import { isRestrictedForeignKeyError } from "../common/prisma-errors";
 import { parseClassSlug } from "../common/slug";
+import { assertClassInYear, assertClassStamped, classYearReadWhere, resolveSchoolYear } from "./class-year";
 
 const CLASS_INCLUDE = {
   division: true,
@@ -28,14 +29,17 @@ export class ClassesService {
     private readonly audit: AuditService,
   ) {}
 
-  // Class/Section are permanent structures reused every year (see schema
-  // comments) — academicYearId here only narrows the *enrollment count*
-  // shown per section to one year's roster, never which classes/sections
-  // exist at all.
+  // Classes are academic-year scoped: this lists ONE year's classes - the
+  // requested year, or the school's current year when none is given (latest
+  // year if there is no current one). Classes that are still unstamped (before
+  // the year backfill) are listed too so nothing vanishes from a screen.
+  // academicYearId also narrows the per-section enrollment count to that
+  // year's full roster; with no explicit year the count stays "ACTIVE now".
   async list(actor: AuthenticatedUser, schoolId: string, academicYearId?: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    const year = await resolveSchoolYear(this.prisma, schoolId, academicYearId);
     return this.prisma.class.findMany({
-      where: { division: { schoolId } },
+      where: { division: { schoolId }, ...(year ? classYearReadWhere(year.id) : {}) },
       include: {
         division: true,
         sections: {
@@ -65,6 +69,12 @@ export class ClassesService {
     const division = await this.prisma.division.findFirst({ where: { id: dto.divisionId, schoolId } });
     if (!division) throw new BadRequestException("That division does not belong to this school");
 
+    // A class is always created FOR an academic year: identity is division +
+    // year + level, so "Form 3" of 2026-2027 is a different class from
+    // "Form 3" of 2025-2026.
+    const year = await resolveSchoolYear(this.prisma, schoolId, dto.academicYearId);
+    if (!year) throw new BadRequestException("That academic year does not belong to this school");
+
     const sectionNames = new Set<string>();
     for (const s of dto.sections ?? []) {
       const key = s.name.trim().toLowerCase();
@@ -82,7 +92,7 @@ export class ClassesService {
     try {
       return await this.prisma.$transaction(async (tx) => {
         const cls = await tx.class.create({
-          data: { divisionId: dto.divisionId, name: dto.name, level: dto.level },
+          data: { divisionId: dto.divisionId, academicYearId: year.id, name: dto.name, level: dto.level },
         });
 
         for (const s of dto.sections ?? []) {
@@ -97,7 +107,7 @@ export class ClassesService {
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-        throw new ConflictException("A class with this level already exists in this division");
+        throw new ConflictException(`${dto.name} (level ${dto.level}) already exists for ${year.name} in this division`);
       }
       throw error;
     }
@@ -105,7 +115,9 @@ export class ClassesService {
 
   async update(actor: AuthenticatedUser, schoolId: string, classId: string, dto: UpdateClassDto) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    await this.getClassInSchoolOrThrow(schoolId, classId);
+    // The class's academic year can never be edited (enrollments, exams and
+    // fees are tied to it); only name/level/division change here.
+    const existing = await this.getStampedClassInSchoolOrThrow(schoolId, classId);
 
     if (dto.divisionId) {
       const division = await this.prisma.division.findFirst({ where: { id: dto.divisionId, schoolId } });
@@ -120,7 +132,9 @@ export class ClassesService {
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-        throw new ConflictException("A class with this level already exists in this division");
+        throw new ConflictException(
+          `A class with level ${dto.level ?? existing.level} already exists in this academic year for this division`,
+        );
       }
       throw error;
     }
@@ -154,15 +168,24 @@ export class ClassesService {
     return cls;
   }
 
-  // Backs the clean-URL class segment (e.g. "secondary-1"). schoolId here
-  // is already a real, resolved id by the time this runs — the caller
-  // resolves the school segment first — so findOneAccessibleOrThrow has
-  // already run for it. This only adds a second lookup strategy on top of
-  // the existing by-id one: a class row that isn't found by id falls back
-  // to (division.type, level), which is what the slug actually encodes.
-  // Either way the result is still scoped to this exact schoolId, so a
-  // slug can never resolve to another school's class.
-  async resolveIdentifierOrThrow(actor: AuthenticatedUser, schoolId: string, identifier: string) {
+  // For every WRITE on a class or its sections/subjects: a class that has no
+  // academic year yet (legacy, before class_year_backfill) is refused.
+  private async getStampedClassInSchoolOrThrow(schoolId: string, classId: string) {
+    const cls = await this.getClassInSchoolOrThrow(schoolId, classId);
+    assertClassStamped(cls);
+    return cls;
+  }
+
+  // Backs the clean-URL class segment. schoolId here is already a real,
+  // resolved id by the time this runs - the caller resolves the school
+  // segment first - so findOneAccessibleOrThrow has already run for it.
+  // A real id always wins. A "{division}-{level}" slug no longer names ONE
+  // class (every academic year has its own), so it is resolved through a year:
+  //   * an explicit academicYearId -> that year's class (404 if none);
+  //   * otherwise the CURRENT year's class, else a still-unstamped legacy
+  //     class, else the LATEST year that has one.
+  // Either way the result stays scoped to this exact school.
+  async resolveIdentifierOrThrow(actor: AuthenticatedUser, schoolId: string, identifier: string, academicYearId?: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
 
     const byId = await this.prisma.class.findFirst({ where: { id: identifier, division: { schoolId } } });
@@ -171,11 +194,25 @@ export class ClassesService {
     const parsed = parseClassSlug(identifier);
     if (!parsed) throw new NotFoundException("Class not found in this school");
 
-    const bySlug = await this.prisma.class.findFirst({
+    const candidates = await this.prisma.class.findMany({
       where: { level: parsed.level, division: { schoolId, type: parsed.divisionType } },
+      include: { academicYear: { select: { id: true, isCurrent: true, startDate: true } } },
     });
-    if (!bySlug) throw new NotFoundException("Class not found in this school");
-    return bySlug;
+
+    let chosen: (typeof candidates)[number] | undefined;
+    if (academicYearId) {
+      const year = await resolveSchoolYear(this.prisma, schoolId, academicYearId);
+      chosen = candidates.find((c) => c.academicYearId === year!.id) ?? candidates.find((c) => c.academicYearId === null);
+    } else {
+      chosen =
+        candidates.find((c) => c.academicYear?.isCurrent) ??
+        candidates.find((c) => c.academicYearId === null) ??
+        [...candidates].sort((a, b) => (b.academicYear?.startDate.getTime() ?? 0) - (a.academicYear?.startDate.getTime() ?? 0))[0];
+    }
+    if (!chosen) throw new NotFoundException("Class not found in this school");
+
+    const { academicYear: _year, ...cls } = chosen;
+    return cls;
   }
 
   async listSections(actor: AuthenticatedUser, schoolId: string, classId: string, academicYearId?: string) {
@@ -194,7 +231,7 @@ export class ClassesService {
 
   async createSection(actor: AuthenticatedUser, schoolId: string, classId: string, dto: CreateSectionDto) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    await this.getClassInSchoolOrThrow(schoolId, classId);
+    await this.getStampedClassInSchoolOrThrow(schoolId, classId);
 
     try {
       return await this.prisma.section.create({
@@ -217,7 +254,7 @@ export class ClassesService {
     dto: UpdateSectionDto,
   ) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    await this.getClassInSchoolOrThrow(schoolId, classId);
+    await this.getStampedClassInSchoolOrThrow(schoolId, classId);
 
     const section = await this.prisma.section.findFirst({ where: { id: sectionId, classId } });
     if (!section) throw new NotFoundException("Section not found in this class");
@@ -253,7 +290,7 @@ export class ClassesService {
   // deleted once it has never had a student enrolled in it.
   async removeSection(actor: AuthenticatedUser, schoolId: string, classId: string, sectionId: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    await this.getClassInSchoolOrThrow(schoolId, classId);
+    await this.getStampedClassInSchoolOrThrow(schoolId, classId);
 
     const section = await this.prisma.section.findFirst({ where: { id: sectionId, classId } });
     if (!section) throw new NotFoundException("Section not found in this class");
@@ -359,7 +396,7 @@ export class ClassesService {
 
   async assignSubject(actor: AuthenticatedUser, schoolId: string, classId: string, dto: AssignSubjectDto) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    await this.getClassInSchoolOrThrow(schoolId, classId);
+    await this.getStampedClassInSchoolOrThrow(schoolId, classId);
 
     const subject = await this.prisma.subject.findFirst({ where: { id: dto.subjectId, schoolId } });
     if (!subject) throw new BadRequestException("That subject does not belong to this school");
@@ -374,7 +411,7 @@ export class ClassesService {
 
   async unassignSubject(actor: AuthenticatedUser, schoolId: string, classId: string, subjectId: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    await this.getClassInSchoolOrThrow(schoolId, classId);
+    await this.getStampedClassInSchoolOrThrow(schoolId, classId);
 
     await this.prisma.classSubject.deleteMany({ where: { classId, subjectId } });
     return { success: true };
@@ -396,6 +433,7 @@ export class ClassesService {
 
     const academicYear = await this.prisma.academicYear.findFirst({ where: { id: academicYearId, schoolId } });
     if (!academicYear) throw new BadRequestException("That academic year does not belong to this school");
+    assertClassInYear(cls, academicYear.id, academicYear.name);
 
     let sectionName: string | null = null;
     if (fromSectionId) {
@@ -466,8 +504,12 @@ export class ClassesService {
       where: { id: dto.academicYearId, schoolId },
     });
     if (!academicYear) throw new BadRequestException("That academic year does not belong to this school");
+    // Same-year reorganization only: both classes must belong to the selected
+    // academic year (an unstamped legacy class is refused).
+    assertClassInYear(sourceClass, academicYear.id, academicYear.name);
 
     const toClass = await this.getClassInSchoolOrThrow(schoolId, dto.toClassId);
+    assertClassInYear(toClass, academicYear.id, academicYear.name);
     // Primary <-> Secondary is a real academic transition, not a same-year
     // reorganization — Student Lifecycle (Primary Completion, Form 1
     // Transition) exists specifically to handle it, with its own records

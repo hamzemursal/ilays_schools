@@ -14,6 +14,7 @@ import { CreateTeacherDto } from "./dto/create-teacher.dto";
 import { CreateTeacherAssignmentInputDto } from "./dto/create-teacher-assignment-input.dto";
 import { UpdateTeacherDto } from "./dto/update-teacher.dto";
 import { UpdateMyTeacherProfileDto } from "./dto/update-my-teacher-profile.dto";
+import { assertClassInYear } from "../academic/class-year";
 
 // Includes the school a given assignment is actually AT — never assume
 // that's the same as the teacher's own home school (Teacher.schoolId);
@@ -636,6 +637,7 @@ export class TeachersService {
   private async assertAssignmentBelongsToSchool(schoolId: string, a: CreateTeacherAssignmentInputDto) {
     const section = await this.prisma.section.findFirst({
       where: { id: a.sectionId, class: { division: { schoolId } } },
+      include: { class: true },
     });
     if (!section) throw new BadRequestException("That section does not belong to this school");
 
@@ -652,5 +654,8 @@ export class TeachersService {
 
     const academicYear = await this.prisma.academicYear.findFirst({ where: { id: a.academicYearId, schoolId } });
     if (!academicYear) throw new BadRequestException("That academic year does not belong to this school");
+
+    // A teaching assignment is for one academic year: the section's class must be that year's.
+    assertClassInYear(section.class, academicYear.id, academicYear.name);
   }
 }

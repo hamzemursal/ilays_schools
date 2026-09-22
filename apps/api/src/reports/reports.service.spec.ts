@@ -55,7 +55,8 @@ describe("ReportsService.enrollmentByClass", () => {
     await service.enrollmentByClass(ACTOR, "school-1", "year-1");
 
     const args = prisma.class.findMany.mock.calls[0][0];
-    expect(args.where).toEqual({ division: { schoolId: "school-1" } });
+    // Only the selected academic year's classes (plus still-unstamped legacy ones).
+    expect(args.where).toEqual({ division: { schoolId: "school-1" }, OR: [{ academicYearId: "year-1" }, { academicYearId: null }] });
     expect(args.include.sections.include._count.select.enrollments.where).toEqual({ academicYearId: "year-1", status: "ACTIVE" });
   });
 
@@ -182,5 +183,22 @@ describe("ReportsService.attendanceByClass", () => {
     const result = await service.attendanceByClass(ACTOR, "school-1", "year-1");
 
     expect(result).toEqual([{ sectionId: "sec-a", sectionName: "A", className: "Class 1", total: 0, present: 0, absent: 0, late: 0, excused: 0 }]);
+  });
+});
+
+
+describe("ReportsService.attendanceByClass — only the selected year's sections", () => {
+  it("filters the sections to the selected academic year (plus unstamped legacy classes)", async () => {
+    const prisma = createMockPrisma();
+    prisma.section.findMany.mockResolvedValue([]);
+    prisma.attendance.groupBy.mockResolvedValue([]);
+    prisma.studentEnrollment.findMany.mockResolvedValue([]);
+    const { service } = createService(prisma);
+
+    await service.attendanceByClass(ACTOR, "school-1", "year-1");
+
+    expect(prisma.section.findMany.mock.calls[0][0].where).toEqual({
+      class: { division: { schoolId: "school-1" }, OR: [{ academicYearId: "year-1" }, { academicYearId: null }] },
+    });
   });
 });

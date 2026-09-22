@@ -24,7 +24,7 @@ type MockPrisma = {
   section: { findFirst: jest.Mock; findMany: jest.Mock };
   academicYear: { findFirst: jest.Mock };
   class: { findFirst: jest.Mock };
-  studentEnrollment: { count: jest.Mock; update: jest.Mock; create: jest.Mock; aggregate: jest.Mock };
+  studentEnrollment: { count: jest.Mock; update: jest.Mock; updateMany: jest.Mock; create: jest.Mock; aggregate: jest.Mock };
   user: { findMany: jest.Mock };
   $transaction: jest.Mock;
 };
@@ -37,7 +37,7 @@ function createMockPrisma(): MockPrisma {
     section: { findFirst: jest.fn(), findMany: jest.fn() },
     academicYear: { findFirst: jest.fn() },
     class: { findFirst: jest.fn() },
-    studentEnrollment: { count: jest.fn(), update: jest.fn(), create: jest.fn(), aggregate: jest.fn() },
+    studentEnrollment: { count: jest.fn(), update: jest.fn(), updateMany: jest.fn(), create: jest.fn(), aggregate: jest.fn() },
     user: { findMany: jest.fn().mockResolvedValue([]) },
   };
   prisma.$transaction = jest.fn((cb: (tx: unknown) => unknown) => cb(prisma));
@@ -200,7 +200,7 @@ describe("TransfersService.approve", () => {
       fromEnrollment: enrollment(),
       toEnrollment: null,
     });
-    prisma.section.findFirst.mockResolvedValue({ id: "section-2", name: "B", capacity: null, class: { name: "Class 2" } });
+    prisma.section.findFirst.mockResolvedValue({ id: "section-2", name: "B", capacity: null, class: { name: "Class 2", academicYearId: "year-2" } });
     prisma.academicYear.findFirst.mockResolvedValue({ id: "year-2", name: "2027" });
     prisma.studentEnrollment.create.mockResolvedValue({ id: "new-enr-1" });
     prisma.studentEnrollment.aggregate.mockResolvedValue({ _max: { rollNumber: null } });
@@ -241,18 +241,42 @@ describe("TransfersService.approve", () => {
   });
 
   it("rejects when the destination section is at capacity", async () => {
-    prisma.section.findFirst.mockResolvedValueOnce({ id: "section-2", name: "B", capacity: 5, class: { name: "Class 2" } });
+    prisma.section.findFirst.mockResolvedValueOnce({ id: "section-2", name: "B", capacity: 5, class: { name: "Class 2", academicYearId: "year-2" } });
     prisma.studentEnrollment.count.mockResolvedValueOnce(5);
     await expect(service.approve(ACTOR, "transfer-1", dto())).rejects.toThrow(
       "Section B is at capacity (5)",
     );
   });
 
-  it("closes out the source enrollment as TRANSFERRED_OUT and creates a new ACTIVE one at the destination", async () => {
+  it("refuses a destination class of a DIFFERENT academic year than the destination year chosen", async () => {
+    prisma.section.findFirst.mockResolvedValueOnce({ id: "section-2", name: "B", capacity: null, class: { name: "Form 1", academicYearId: "year-1" } });
+
+    await expect(service.approve(ACTOR, "transfer-1", dto())).rejects.toThrow(/Form 1 belongs to a different academic year/);
+    expect(prisma.studentEnrollment.create).not.toHaveBeenCalled();
+    expect(prisma.studentEnrollment.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses a destination class with no academic year yet (unstamped legacy class)", async () => {
+    prisma.section.findFirst.mockResolvedValueOnce({ id: "section-2", name: "B", capacity: null, class: { name: "Form 1", academicYearId: null } });
+
+    await expect(service.approve(ACTOR, "transfer-1", dto())).rejects.toThrow(/has no academic year yet/);
+    expect(prisma.studentEnrollment.create).not.toHaveBeenCalled();
+  });
+
+  it("counts capacity against the destination academic year's ACTIVE roster only", async () => {
+    prisma.section.findFirst.mockResolvedValueOnce({ id: "section-2", name: "B", capacity: 5, class: { name: "Class 2", academicYearId: "year-2" } });
     await service.approve(ACTOR, "transfer-1", dto());
-    expect(prisma.studentEnrollment.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "enr-1" }, data: expect.objectContaining({ status: "TRANSFERRED_OUT" }) }),
-    );
+    expect(prisma.studentEnrollment.count).toHaveBeenCalledWith({ where: { sectionId: "section-2", academicYearId: "year-2", status: "ACTIVE" } });
+  });
+
+  it("closes out the source enrollment as TRANSFERRED_OUT ONLY while it is ACTIVE, and creates a new ACTIVE one at the destination", async () => {
+    await service.approve(ACTOR, "transfer-1", dto());
+    // updateMany + status: ACTIVE means a COMPLETED (Class 8) or GRADUATED source is never rewritten.
+    expect(prisma.studentEnrollment.updateMany).toHaveBeenCalledWith({
+      where: { id: "enr-1", status: "ACTIVE" },
+      data: expect.objectContaining({ status: "TRANSFERRED_OUT" }),
+    });
+    expect(prisma.studentEnrollment.update).not.toHaveBeenCalled();
     expect(prisma.studentEnrollment.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ schoolId: "school-2", status: "ACTIVE" }) }),
     );
@@ -467,7 +491,7 @@ describe("TransfersService.confirmBulkTransfer", () => {
   beforeEach(() => {
     prisma = createMockPrisma();
     ({ service } = createService(prisma));
-    prisma.class.findFirst.mockResolvedValue({ id: "class-2", name: "Class 2" });
+    prisma.class.findFirst.mockResolvedValue({ id: "class-2", name: "Class 2", academicYearId: "year-2" });
     prisma.academicYear.findFirst.mockResolvedValue({ id: "year-2", name: "2027" });
     prisma.section.findMany.mockResolvedValue([{ id: "section-2", name: "B", capacity: null, classId: "class-2" }]);
     prisma.student.findMany.mockResolvedValue([
@@ -495,6 +519,30 @@ describe("TransfersService.confirmBulkTransfer", () => {
     await expect(service.confirmBulkTransfer(ACTOR, "school-1", dto())).rejects.toThrow(
       "Target class does not belong to the destination school",
     );
+  });
+
+  it("refuses a target class of a DIFFERENT academic year than the destination year chosen", async () => {
+    prisma.class.findFirst.mockResolvedValue({ id: "class-2", name: "Form 1", academicYearId: "year-1" });
+
+    await expect(service.confirmBulkTransfer(ACTOR, "school-1", dto())).rejects.toThrow(/Form 1 belongs to a different academic year/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses a target class with no academic year yet (unstamped legacy class)", async () => {
+    prisma.class.findFirst.mockResolvedValue({ id: "class-2", name: "Form 1", academicYearId: null });
+
+    await expect(service.confirmBulkTransfer(ACTOR, "school-1", dto())).rejects.toThrow(/has no academic year yet/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("only an ACTIVE origin enrollment becomes TRANSFERRED_OUT; a COMPLETED / GRADUATED one is never rewritten", async () => {
+    await service.confirmBulkTransfer(ACTOR, "school-1", dto());
+
+    expect(prisma.studentEnrollment.updateMany).toHaveBeenCalledWith({
+      where: { id: "enr-1", status: "ACTIVE" },
+      data: expect.objectContaining({ status: "TRANSFERRED_OUT" }),
+    });
+    expect(prisma.studentEnrollment.update).not.toHaveBeenCalled();
   });
 
   it("rejects the same student being assigned twice", async () => {

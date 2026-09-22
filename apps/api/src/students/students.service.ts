@@ -17,6 +17,7 @@ import {
 import { CreateStudentDto } from "./dto/create-student.dto";
 import { UpdateStudentDto } from "./dto/update-student.dto";
 import { EnrollmentInputDto } from "./dto/enrollment-input.dto";
+import { assertClassInYear } from "../academic/class-year";
 
 type Tx = Prisma.TransactionClient;
 
@@ -103,6 +104,7 @@ export class StudentsService {
 
     const section = await tx.section.findFirst({
       where: { id: input.sectionId, classId: input.classId, class: { division: { schoolId: active.schoolId } } },
+      include: { class: true },
     });
     if (!section) throw new BadRequestException("That section does not belong to the specified class in this school");
 
@@ -110,6 +112,8 @@ export class StudentsService {
       where: { id: input.academicYearId, schoolId: active.schoolId },
     });
     if (!academicYear) throw new BadRequestException("That academic year does not belong to this school");
+    // An enrollment always points at the class of ITS OWN academic year.
+    assertClassInYear(section.class, academicYear.id, academicYear.name);
 
     // Only re-check capacity when actually moving into a different
     // section/year — staying put (e.g. just fixing the roll number) never
@@ -401,6 +405,7 @@ export class StudentsService {
 
     const section = await this.prisma.section.findFirst({
       where: { id: dto.enrollment.sectionId, classId: dto.enrollment.classId, class: { division: { schoolId } } },
+      include: { class: true },
     });
     if (!section) throw new BadRequestException("That section does not belong to the specified class in this school");
 
@@ -408,6 +413,8 @@ export class StudentsService {
       where: { id: dto.enrollment.academicYearId, schoolId },
     });
     if (!academicYear) throw new BadRequestException("That academic year does not belong to this school");
+    // An enrollment always points at the class of ITS OWN academic year.
+    assertClassInYear(section.class, academicYear.id, academicYear.name);
 
     const dateOfBirth = new Date(dto.dateOfBirth);
 

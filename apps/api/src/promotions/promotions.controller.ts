@@ -16,9 +16,10 @@ export class PromotionsController {
     @Param("schoolId") schoolId: string,
     @Param("sectionId") sectionId: string,
     @Query("fromAcademicYearId") fromAcademicYearId?: string,
+    @Query("toAcademicYearId") toAcademicYearId?: string,
   ) {
     if (!fromAcademicYearId) throw new BadRequestException("fromAcademicYearId query param is required");
-    return this.promotions.preview(user, schoolId, sectionId, fromAcademicYearId);
+    return this.promotions.preview(user, schoolId, sectionId, fromAcademicYearId, toAcademicYearId);
   }
 
   @RequirePermissions("promotions.execute")

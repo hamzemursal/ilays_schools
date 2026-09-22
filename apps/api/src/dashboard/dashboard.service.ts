@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
+import { classYearReadWhere } from "../academic/class-year";
 
 @Injectable()
 export class DashboardService {
@@ -18,9 +19,11 @@ export class DashboardService {
       ? years.find((y) => y.id === academicYearId)
       : (years.find((y) => y.isCurrent) ?? years[0]);
 
+    // Classes and sections are counted for the selected academic year only.
+    const classWhere = { division: { schoolId }, ...(year ? classYearReadWhere(year.id) : {}) };
     const [classCount, sectionCount, subjectCount, teacherActive, teacherInactive] = await Promise.all([
-      this.prisma.class.count({ where: { division: { schoolId } } }),
-      this.prisma.section.count({ where: { class: { division: { schoolId } } } }),
+      this.prisma.class.count({ where: classWhere }),
+      this.prisma.section.count({ where: { class: classWhere } }),
       this.prisma.subject.count({ where: { schoolId } }),
       this.prisma.teacher.count({ where: { schoolId, status: "ACTIVE" } }),
       this.prisma.teacher.count({ where: { schoolId, status: { not: "ACTIVE" } } }),

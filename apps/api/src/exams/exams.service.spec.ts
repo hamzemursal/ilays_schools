@@ -202,7 +202,7 @@ describe("ExamsService.createExam — pair validation, dedup, and conflicts", ()
   });
 
   it("deduplicates repeated (classId, subjectId) pairs before validating them", async () => {
-    prisma.classSubject.findMany.mockResolvedValue([{ classId: "class-1", subjectId: "subject-1" }]);
+    prisma.classSubject.findMany.mockResolvedValue([{ classId: "class-1", subjectId: "subject-1", class: { name: "Form 1", academicYearId: "year-1" } }]);
     prisma.$transaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
       cb({
         exam: { create: jest.fn().mockResolvedValue({ id: "exam-1" }), findUniqueOrThrow: jest.fn().mockResolvedValue({ id: "exam-1" }) },
@@ -220,6 +220,24 @@ describe("ExamsService.createExam — pair validation, dedup, and conflicts", ()
     expect(prisma.classSubject.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ OR: [{ classId: "class-1", subjectId: "subject-1" }] }) }),
     );
+  });
+
+  it("refuses an exam pair whose class belongs to a different academic year than the exam's", async () => {
+    prisma.classSubject.findMany.mockResolvedValue([{ classId: "class-1", subjectId: "subject-1", class: { name: "Form 1", academicYearId: "year-2" } }]);
+
+    await expect(
+      service.createExam(ADMIN_ACTOR, SCHOOL_ID, dto([{ classId: "class-1", subjectId: "subject-1" }])),
+    ).rejects.toThrow(/Form 1 belongs to a different academic year/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses an exam pair whose class has no academic year yet", async () => {
+    prisma.classSubject.findMany.mockResolvedValue([{ classId: "class-1", subjectId: "subject-1", class: { name: "Form 1", academicYearId: null } }]);
+
+    await expect(
+      service.createExam(ADMIN_ACTOR, SCHOOL_ID, dto([{ classId: "class-1", subjectId: "subject-1" }])),
+    ).rejects.toThrow(/has no academic year yet/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("rejects a pair that isn't a real ClassSubject relationship", async () => {
@@ -253,10 +271,11 @@ describe("ExamsService.createExamSubject — scoping and conflicts", () => {
   beforeEach(() => {
     prisma = createMockPrisma();
     ({ service } = createService(prisma));
-    prisma.exam.findFirst.mockResolvedValue({ id: "exam-1", schoolId: SCHOOL_ID });
+    prisma.exam.findFirst.mockResolvedValue({ id: "exam-1", schoolId: SCHOOL_ID, academicYearId: "year-1" });
   });
 
   const dto: CreateExamSubjectDto = { classId: "class-1", subjectId: "subject-1" };
+  const classOfYear = (academicYearId: string | null) => ({ id: "class-1", name: "Form 1", academicYearId });
 
   it("rejects a class that does not belong to this school", async () => {
     prisma.class.findFirst.mockResolvedValue(null);
@@ -266,15 +285,29 @@ describe("ExamsService.createExamSubject — scoping and conflicts", () => {
   });
 
   it("rejects a subject that does not belong to this school", async () => {
-    prisma.class.findFirst.mockResolvedValue({ id: "class-1" });
+    prisma.class.findFirst.mockResolvedValue(classOfYear("year-1"));
     prisma.subject.findFirst.mockResolvedValue(null);
     await expect(service.createExamSubject(ADMIN_ACTOR, SCHOOL_ID, "exam-1", dto)).rejects.toThrow(
       "That subject does not belong to this school",
     );
   });
 
+  it("refuses a class of a DIFFERENT academic year than the exam's", async () => {
+    prisma.class.findFirst.mockResolvedValue(classOfYear("year-2"));
+
+    await expect(service.createExamSubject(ADMIN_ACTOR, SCHOOL_ID, "exam-1", dto)).rejects.toThrow(/Form 1 belongs to a different academic year/);
+    expect(prisma.examSubject.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a class that has no academic year yet (unstamped legacy class)", async () => {
+    prisma.class.findFirst.mockResolvedValue(classOfYear(null));
+
+    await expect(service.createExamSubject(ADMIN_ACTOR, SCHOOL_ID, "exam-1", dto)).rejects.toThrow(/has no academic year yet/);
+    expect(prisma.examSubject.create).not.toHaveBeenCalled();
+  });
+
   it("translates a P2002 violation into a ConflictException naming the real cause", async () => {
-    prisma.class.findFirst.mockResolvedValue({ id: "class-1" });
+    prisma.class.findFirst.mockResolvedValue(classOfYear("year-1"));
     prisma.subject.findFirst.mockResolvedValue({ id: "subject-1" });
     prisma.examSubject.create.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError("Unique constraint failed", { code: "P2002", clientVersion: "5.0.0" }),

@@ -442,10 +442,10 @@ describe("TeachersService.create", () => {
   beforeEach(() => {
     prisma = createMockPrisma();
     ({ service } = createService(prisma));
-    prisma.section.findFirst.mockResolvedValue({ id: "sec-1", classId: "class-1" });
+    prisma.section.findFirst.mockResolvedValue({ id: "sec-1", classId: "class-1", class: { name: "Form 1", academicYearId: "year-1" } });
     prisma.subject.findFirst.mockResolvedValue({ id: "subj-1" });
     prisma.classSubject.findFirst.mockResolvedValue({ classId: "class-1", subjectId: "subj-1" });
-    prisma.academicYear.findFirst.mockResolvedValue({ id: "year-1" });
+    prisma.academicYear.findFirst.mockResolvedValue({ id: "year-1", name: "2025-2026" });
     // Numbers are based on the HIGHEST one in use (not a row count): this school's
     // highest Employee Number and the organization's highest Teacher ID are both 5.
     prisma.teacher.findMany.mockImplementation(({ where }: { where: { teacherCode?: unknown } }) =>
@@ -535,6 +535,22 @@ describe("TeachersService.create", () => {
     ).rejects.toThrow("That academic year does not belong to this school");
   });
 
+  it("refuses a section whose class belongs to a DIFFERENT academic year than the assignment's", async () => {
+    prisma.section.findFirst.mockResolvedValue({ id: "sec-1", classId: "class-1", class: { name: "Form 1", academicYearId: "year-2" } });
+    await expect(
+      service.create(ACTOR, "school-1", dto({ assignments: [{ academicYearId: "year-1", sectionId: "sec-1", subjectId: "subj-1" }] })),
+    ).rejects.toThrow(/Form 1 belongs to a different academic year/);
+    expect(prisma.teacher.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a section whose class has no academic year yet (unstamped legacy class)", async () => {
+    prisma.section.findFirst.mockResolvedValue({ id: "sec-1", classId: "class-1", class: { name: "Form 1", academicYearId: null } });
+    await expect(
+      service.create(ACTOR, "school-1", dto({ assignments: [{ academicYearId: "year-1", sectionId: "sec-1", subjectId: "subj-1" }] })),
+    ).rejects.toThrow(/has no academic year yet/);
+    expect(prisma.teacher.create).not.toHaveBeenCalled();
+  });
+
   it("creates one TeacherAssignment per requested assignment", async () => {
     await service.create(
       ACTOR,
@@ -565,10 +581,10 @@ describe("TeachersService.addAssignment / removeAssignment", () => {
   beforeEach(() => {
     prisma = createMockPrisma();
     ({ service } = createService(prisma));
-    prisma.section.findFirst.mockResolvedValue({ id: "sec-1", classId: "class-1" });
+    prisma.section.findFirst.mockResolvedValue({ id: "sec-1", classId: "class-1", class: { name: "Form 1", academicYearId: "year-1" } });
     prisma.subject.findFirst.mockResolvedValue({ id: "subj-1" });
     prisma.classSubject.findFirst.mockResolvedValue({ classId: "class-1", subjectId: "subj-1" });
-    prisma.academicYear.findFirst.mockResolvedValue({ id: "year-1" });
+    prisma.academicYear.findFirst.mockResolvedValue({ id: "year-1", name: "2025-2026" });
   });
 
   function dto(): CreateTeacherAssignmentInputDto {

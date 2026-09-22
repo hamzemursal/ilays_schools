@@ -15,6 +15,7 @@ import { UpdateExamTermDto } from "./dto/update-exam-term.dto";
 import { EnterMarksDto } from "./dto/enter-marks.dto";
 import { ReturnForCorrectionDto } from "./dto/return-for-correction.dto";
 import { UnpublishResultsDto } from "./dto/unpublish-results.dto";
+import { assertClassInYear } from "../academic/class-year";
 
 export interface ExamPaperListFilters {
   schoolId?: string;
@@ -145,12 +146,16 @@ export class ExamsService {
           OR: uniquePairs.map((p) => ({ classId: p.classId, subjectId: p.subjectId })),
           class: { division: { schoolId } },
         },
+        include: { class: { select: { name: true, academicYearId: true } } },
       });
       const validKeys = new Set(validRelations.map((r) => `${r.classId}:${r.subjectId}`));
       const invalid = uniquePairs.filter((p) => !validKeys.has(`${p.classId}:${p.subjectId}`));
       if (invalid.length > 0) {
         throw new BadRequestException("One or more selected subjects are not assigned to their selected class");
       }
+      // An exam belongs to one academic year, so every class it covers must be
+      // that year's class.
+      for (const r of validRelations) assertClassInYear(r.class, dto.academicYearId, year.name);
     }
 
     try {
@@ -225,10 +230,11 @@ export class ExamsService {
 
   async createExamSubject(actor: AuthenticatedUser, schoolId: string, examId: string, dto: CreateExamSubjectDto) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    await this.getExamInSchoolOrThrow(schoolId, examId);
+    const exam = await this.getExamInSchoolOrThrow(schoolId, examId);
 
     const cls = await this.prisma.class.findFirst({ where: { id: dto.classId, division: { schoolId } } });
     if (!cls) throw new BadRequestException("That class does not belong to this school");
+    assertClassInYear(cls, exam.academicYearId);
 
     const subject = await this.prisma.subject.findFirst({ where: { id: dto.subjectId, schoolId } });
     if (!subject) throw new BadRequestException("That subject does not belong to this school");

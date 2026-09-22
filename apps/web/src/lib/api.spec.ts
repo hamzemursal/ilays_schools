@@ -95,3 +95,49 @@ describe("api transport (request/downloadFile/uploadFile via api.* methods)", ()
     expect(url).toContain("search=ali");
   });
 });
+
+// Classes belong to one academic year: the class calls carry it.
+describe("api — academic-year scoped classes", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, {}));
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const lastUrl = () => String(fetchMock.mock.calls[0][0]);
+
+  it("createClass sends the academic year in the body", async () => {
+    await api.createClass("t", "school-1", { divisionId: "d1", academicYearId: "y26", name: "Form 3", level: 3 });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body as string)).toMatchObject({ divisionId: "d1", academicYearId: "y26", name: "Form 3", level: 3 });
+  });
+
+  it("resolveClass adds the academic year only when one is given", async () => {
+    await api.resolveClass("t", "school-1", "secondary-3", "y26");
+    expect(lastUrl()).toContain("/schools/school-1/classes/by-identifier/secondary-3?academicYearId=y26");
+
+    fetchMock.mockClear();
+    await api.resolveClass("t", "school-1", "secondary-3");
+    expect(lastUrl()).toMatch(/by-identifier\/secondary-3$/);
+  });
+
+  it("previewPromotion adds the destination year only when one is given", async () => {
+    await api.previewPromotion("t", "school-1", "sec-1", "y25", "y26");
+    expect(lastUrl()).toContain("promotion/preview?fromAcademicYearId=y25&toAcademicYearId=y26");
+
+    fetchMock.mockClear();
+    await api.previewPromotion("t", "school-1", "sec-1", "y25");
+    expect(lastUrl()).toMatch(/promotion\/preview\?fromAcademicYearId=y25$/);
+  });
+
+  it("listClasses passes the year filter", async () => {
+    await api.listClasses("t", "school-1", "y26");
+    expect(lastUrl()).toContain("/schools/school-1/classes?academicYearId=y26");
+  });
+});

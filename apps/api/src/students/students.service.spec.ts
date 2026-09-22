@@ -43,7 +43,7 @@ describe("StudentsService.create — duplicate detection", () => {
   beforeEach(() => {
     prisma = {
       student: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn().mockResolvedValue({ id: "new-student", firstName: "Amina", lastName: "Ali" }) },
-      section: { findFirst: jest.fn().mockResolvedValue({ id: "section-1", name: "A", capacity: null }) },
+      section: { findFirst: jest.fn().mockResolvedValue({ id: "section-1", name: "A", capacity: null, class: { name: "Form 1", academicYearId: "year-1" } }) },
       academicYear: { findFirst: jest.fn().mockResolvedValue({ id: "year-1", name: "2027" }) },
       studentEnrollment: {
         count: jest.fn().mockResolvedValue(0),
@@ -60,6 +60,21 @@ describe("StudentsService.create — duplicate detection", () => {
       {} as unknown as StorageService,
       { record: jest.fn().mockResolvedValue(undefined) } as unknown as AuditService,
     );
+  });
+
+  it("an enrollment must point at the class of ITS OWN academic year: a class of another year is refused", async () => {
+    prisma.section.findFirst.mockResolvedValue({ id: "section-1", name: "A", capacity: null, class: { name: "Form 1", academicYearId: "year-2" } });
+
+    await expect(service.create(ACTOR, "school-1", { ...BASE_DTO })).rejects.toThrow(/Form 1 belongs to a different academic year/);
+    expect(prisma.student.create).not.toHaveBeenCalled();
+    expect(prisma.studentEnrollment.create).not.toHaveBeenCalled();
+  });
+
+  it("an unstamped legacy class (no academic year yet) is refused, nothing is created", async () => {
+    prisma.section.findFirst.mockResolvedValue({ id: "section-1", name: "A", capacity: null, class: { name: "Form 1", academicYearId: null } });
+
+    await expect(service.create(ACTOR, "school-1", { ...BASE_DTO })).rejects.toThrow(/has no academic year yet/);
+    expect(prisma.student.create).not.toHaveBeenCalled();
   });
 
   it("rejects a full name + DOB match even with no legacyStudentNumber supplied", async () => {
@@ -107,5 +122,60 @@ describe("StudentsService.create — duplicate detection", () => {
     await service.create(ACTOR, "school-1", { ...BASE_DTO, confirmDespiteDuplicates: true });
 
     expect(prisma.student.findMany).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("StudentsService.update — enrollment correction points at the class of the enrollment's year", () => {
+  const tx = {
+    student: { update: jest.fn().mockResolvedValue({}) },
+    studentEnrollment: { findFirst: jest.fn(), count: jest.fn().mockResolvedValue(0), update: jest.fn() },
+    section: { findFirst: jest.fn() },
+    academicYear: { findFirst: jest.fn() },
+  };
+  let service: StudentsService;
+
+  const ENROLLMENT = { academicYearId: "year-2", classId: "class-f3-26", sectionId: "sec-1" };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    tx.studentEnrollment.findFirst.mockResolvedValue({
+      id: "enr-1", schoolId: "school-1", academicYearId: "year-1", classId: "class-f3-25", sectionId: "sec-0", rollNumber: 4,
+    });
+    tx.academicYear.findFirst.mockResolvedValue({ id: "year-2", name: "2026-2027" });
+    const prisma = { $transaction: jest.fn((cb: (t: unknown) => unknown) => cb(tx)) };
+    service = new StudentsService(
+      prisma as unknown as PrismaService,
+      {} as unknown as SchoolsService,
+      {} as unknown as GuardiansService,
+      {} as unknown as StorageService,
+      { record: jest.fn().mockResolvedValue(undefined) } as unknown as AuditService,
+    );
+    (jest.spyOn(service as unknown as { assertAccessibleStudent: () => Promise<unknown> }, "assertAccessibleStudent") as jest.SpyInstance).mockResolvedValue({});
+    (jest.spyOn(service as unknown as { getFullDetail: () => Promise<unknown> }, "getFullDetail") as jest.SpyInstance).mockResolvedValue({});
+  });
+
+  it("moves an enrollment into a class of ITS OWN year", async () => {
+    tx.section.findFirst.mockResolvedValue({ id: "sec-1", capacity: null, name: "A", class: { name: "Form 3", academicYearId: "year-2" } });
+
+    await service.update(ACTOR, "student-1", { enrollment: ENROLLMENT } as never);
+
+    expect(tx.studentEnrollment.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ academicYearId: "year-2", classId: "class-f3-26", sectionId: "sec-1" }) }),
+    );
+  });
+
+  it("refuses a class of another year", async () => {
+    tx.section.findFirst.mockResolvedValue({ id: "sec-1", capacity: null, name: "A", class: { name: "Form 3", academicYearId: "year-1" } });
+
+    await expect(service.update(ACTOR, "student-1", { enrollment: ENROLLMENT } as never)).rejects.toThrow(/Form 3 belongs to a different academic year/);
+    expect(tx.studentEnrollment.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unstamped legacy class", async () => {
+    tx.section.findFirst.mockResolvedValue({ id: "sec-1", capacity: null, name: "A", class: { name: "Form 3", academicYearId: null } });
+
+    await expect(service.update(ACTOR, "student-1", { enrollment: ENROLLMENT } as never)).rejects.toThrow(/has no academic year yet/);
+    expect(tx.studentEnrollment.update).not.toHaveBeenCalled();
   });
 });

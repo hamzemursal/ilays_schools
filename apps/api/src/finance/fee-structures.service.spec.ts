@@ -69,8 +69,20 @@ describe("FeeStructuresService.create", () => {
     );
   });
 
+  it("refuses a class of a DIFFERENT academic year than the fee's", async () => {
+    prisma.class.findFirst.mockResolvedValue({ id: "class-1", name: "Form 1", academicYearId: "year-2" });
+    await expect(service.create(ACTOR, "school-1", dto({ classId: "class-1" }))).rejects.toThrow(/Form 1 belongs to a different academic year/);
+    expect(prisma.feeStructure.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a class that has no academic year yet (unstamped legacy class)", async () => {
+    prisma.class.findFirst.mockResolvedValue({ id: "class-1", name: "Form 1", academicYearId: null });
+    await expect(service.create(ACTOR, "school-1", dto({ classId: "class-1" }))).rejects.toThrow(/has no academic year yet/);
+    expect(prisma.feeStructure.create).not.toHaveBeenCalled();
+  });
+
   it("creates a class-scoped fee structure once the class is validated", async () => {
-    prisma.class.findFirst.mockResolvedValue({ id: "class-1" });
+    prisma.class.findFirst.mockResolvedValue({ id: "class-1", name: "Form 1", academicYearId: "year-1" });
     prisma.feeStructure.create.mockResolvedValue({ id: "fee-1" });
     await service.create(ACTOR, "school-1", dto({ classId: "class-1" }));
     expect(prisma.feeStructure.create).toHaveBeenCalledWith(

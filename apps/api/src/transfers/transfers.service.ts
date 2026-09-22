@@ -5,6 +5,7 @@ import { SchoolsService } from "../schools/schools.service";
 import { AuditService } from "../audit/audit.service";
 import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
+import { assertClassInYear } from "../academic/class-year";
 import { RequestTransferDto } from "./dto/request-transfer.dto";
 import { ApproveTransferDto } from "./dto/approve-transfer.dto";
 import { RejectTransferDto } from "./dto/reject-transfer.dto";
@@ -146,10 +147,13 @@ export class TransfersService {
       where: { id: dto.academicYearId, schoolId: transfer.toSchoolId },
     });
     if (!academicYear) throw new BadRequestException("That academic year does not belong to the destination school");
+    // The destination class must belong to the DESTINATION academic year.
+    assertClassInYear(section.class, academicYear.id, academicYear.name);
 
     if (section.capacity !== null) {
+      // Only the destination academic year's roster counts against capacity.
       const activeCount = await this.prisma.studentEnrollment.count({
-        where: { sectionId: section.id, status: "ACTIVE" },
+        where: { sectionId: section.id, academicYearId: academicYear.id, status: "ACTIVE" },
       });
       if (activeCount >= section.capacity) {
         throw new BadRequestException(`Section ${section.name} is at capacity (${section.capacity})`);
@@ -161,8 +165,13 @@ export class TransfersService {
     const rollNumber = dto.rollNumber ?? (await this.generateRollNumber(section.id, dto.academicYearId));
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.studentEnrollment.update({
-        where: { id: transfer.fromEnrollmentId },
+      // Only a student who is ACTIVE at the origin is "transferred out". A
+      // COMPLETED (Class 8) or GRADUATED enrollment is a finished, historical
+      // fact and stays exactly as it is - the student simply gets a new ACTIVE
+      // enrollment at the destination (same permanent Student ID, new Student
+      // Number); the old number stays on the old enrollment.
+      await tx.studentEnrollment.updateMany({
+        where: { id: transfer.fromEnrollmentId, status: "ACTIVE" },
         data: { status: "TRANSFERRED_OUT", endDate: new Date() },
       });
 
@@ -588,6 +597,8 @@ export class TransfersService {
       where: { id: dto.toAcademicYearId, schoolId: dto.toSchoolId },
     });
     if (!toAcademicYear) throw new BadRequestException("That academic year does not belong to the destination school");
+    // The destination class must belong to the DESTINATION academic year.
+    assertClassInYear(toClass, toAcademicYear.id, toAcademicYear.name);
 
     const studentIds = dto.assignments.map((a) => a.studentId);
     if (new Set(studentIds).size !== studentIds.length) {
@@ -639,7 +650,7 @@ export class TransfersService {
     for (const section of sections) {
       if (section.capacity !== null) {
         const activeCount = await this.prisma.studentEnrollment.count({
-          where: { sectionId: section.id, status: "ACTIVE" },
+          where: { sectionId: section.id, academicYearId: dto.toAcademicYearId, status: "ACTIVE" },
         });
         const incoming = incomingBySection.get(section.id) ?? 0;
         if (activeCount + incoming > section.capacity) {
@@ -670,8 +681,10 @@ export class TransfersService {
           const studentNumber = await this.generateStudentNumber(dto.toSchoolId, dto.toAcademicYearId, toAcademicYear.name, tx);
           const rollNumber = await this.generateRollNumber(assignment.sectionId, dto.toAcademicYearId, tx);
 
-          await tx.studentEnrollment.update({
-            where: { id: enrollment.id },
+          // See approve(): only an ACTIVE origin enrollment becomes
+          // TRANSFERRED_OUT; a COMPLETED / GRADUATED one is left untouched.
+          await tx.studentEnrollment.updateMany({
+            where: { id: enrollment.id, status: "ACTIVE" },
             data: { status: "TRANSFERRED_OUT", endDate: new Date() },
           });
 

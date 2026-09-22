@@ -176,3 +176,18 @@ describe("DashboardService.getSummary", () => {
     expect(result.counts.teachers).toBe(7);
   });
 });
+
+
+describe("DashboardService.getSummary — class and section counts are for the selected year", () => {
+  it("counts only the selected academic year's classes and sections", async () => {
+    const prisma = createMockPrisma();
+    prisma.academicYear.findMany.mockResolvedValue([{ id: "year-1", isCurrent: true }]);
+    const { service } = createService(prisma);
+
+    await service.getSummary(ACTOR, "school-1").catch(() => undefined);
+
+    const classWhere = { division: { schoolId: "school-1" }, OR: [{ academicYearId: "year-1" }, { academicYearId: null }] };
+    expect(prisma.class.count).toHaveBeenCalledWith({ where: classWhere });
+    expect(prisma.section.count).toHaveBeenCalledWith({ where: { class: classWhere } });
+  });
+});

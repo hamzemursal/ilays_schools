@@ -75,9 +75,10 @@ export default function SectionWorkspacePage({
     (async () => {
       try {
         const school = await api.resolveSchool(accessToken, schoolSlug);
-        const cls = await api.resolveClass(accessToken, school.id, classSlugParam);
-        const section = await api.resolveSection(accessToken, school.id, cls.id, sectionSlugParam);
+        // The year first: a class slug names one class per academic year.
         const year = yearFromUrl ? await api.resolveAcademicYear(accessToken, school.id, yearFromUrl) : null;
+        const cls = await api.resolveClass(accessToken, school.id, classSlugParam, year?.id);
+        const section = await api.resolveSection(accessToken, school.id, cls.id, sectionSlugParam);
         if (!cancelled) {
           setResolved({
             schoolId: school.id,

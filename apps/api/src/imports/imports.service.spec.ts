@@ -182,3 +182,53 @@ describe("ImportsService", () => {
     });
   });
 });
+
+// Classes belong to one academic year, so an imported row's class is looked up
+// WITHIN the row's own academic year - never across years.
+describe("ImportsService — class lookup is academic-year aware", () => {
+  const prisma = {
+    academicYear: { findFirst: jest.fn() },
+    class: { findFirst: jest.fn() },
+    section: { findFirst: jest.fn() },
+  };
+  const service = new ImportsService(
+    prisma as unknown as PrismaService,
+    {} as unknown as SchoolsService,
+    {} as unknown as StudentsService,
+    {} as unknown as AuditService,
+  );
+  const buildDto = (raw: Record<string, string>) =>
+    (service as unknown as { buildDto: (s: string, r: Record<string, string>, c: boolean) => Promise<{ ok: boolean; error?: string; dto?: { enrollment: { classId: string } } }> }).buildDto(
+      "school-1",
+      raw,
+      false,
+    );
+  const ROW = { firstName: "Amina", lastName: "Warsame", dateOfBirth: "2011-03-12", sex: "FEMALE", academicYear: "2026-2027", className: "Form 3", sectionName: "A" };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.academicYear.findFirst.mockResolvedValue({ id: "year-26", name: "2026-2027" });
+  });
+
+  it("finds the class by name AND the row's academic year", async () => {
+    prisma.class.findFirst.mockResolvedValue({ id: "class-f3-26" });
+    prisma.section.findFirst.mockResolvedValue({ id: "sec-a" });
+
+    const result = await buildDto(ROW);
+
+    expect(prisma.class.findFirst).toHaveBeenCalledWith({
+      where: { division: { schoolId: "school-1" }, academicYearId: "year-26", name: { equals: "Form 3", mode: "insensitive" } },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.dto?.enrollment.classId).toBe("class-f3-26");
+  });
+
+  it("a class that exists only in ANOTHER year is not found, and the message names the year", async () => {
+    prisma.class.findFirst.mockResolvedValue(null);
+
+    const result = await buildDto(ROW);
+
+    expect(result).toEqual({ ok: false, error: 'No class named "Form 3" in academic year "2026-2027" in this school' });
+    expect(prisma.section.findFirst).not.toHaveBeenCalled();
+  });
+});

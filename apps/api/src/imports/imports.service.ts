@@ -297,10 +297,12 @@ export class ImportsService implements OnModuleInit {
     });
     if (!academicYear) return { ok: false, error: `No academic year named "${academicYearName}" in this school` };
 
+    // A class belongs to one academic year, so the name is looked up WITHIN the
+    // row's academic year (never across years).
     const klass = await this.prisma.class.findFirst({
-      where: { division: { schoolId }, name: { equals: className, mode: "insensitive" } },
+      where: { division: { schoolId }, academicYearId: academicYear.id, name: { equals: className, mode: "insensitive" } },
     });
-    if (!klass) return { ok: false, error: `No class named "${className}" in this school` };
+    if (!klass) return { ok: false, error: `No class named "${className}" in academic year "${academicYear.name}" in this school` };
 
     const section = await this.prisma.section.findFirst({
       where: { classId: klass.id, name: { equals: sectionName, mode: "insensitive" } },

@@ -1786,6 +1786,11 @@ export interface PromotionPreview {
   naturalOutcome: NaturalPromotionOutcome;
   currentClass: { id: string; name: string };
   nextClass: { id: string; name: string } | null;
+  // Classes are year-scoped: the same level (RETAINED) and next level (PROMOTED)
+  // of the DESTINATION academic year. currentClassSections is the RETAINED pool.
+  retainedClass?: { id: string; name: string } | null;
+  targetAcademicYear?: { id: string; name: string } | null;
+  warnings?: string[];
   currentClassSections: PromotionSectionOption[];
   nextClassSections: PromotionSectionOption[];
   students: PromotionStudentRow[];
@@ -2113,10 +2118,13 @@ export const api = {
   // resolve to something the caller is already allowed to see.
   resolveSchool: (accessToken: string, identifier: string) =>
     request<School>(`/schools/by-identifier/${encodeURIComponent(identifier)}`, { accessToken }),
-  resolveClass: (accessToken: string, schoolId: string, identifier: string) =>
-    request<ClassWithSections>(`/schools/${schoolId}/classes/by-identifier/${encodeURIComponent(identifier)}`, {
-      accessToken,
-    }),
+  // A "{division}-{level}" slug names one class PER academic year: pass the year to
+  // pick that year's class (without it the backend uses the current year).
+  resolveClass: (accessToken: string, schoolId: string, identifier: string, academicYearId?: string) =>
+    request<ClassWithSections>(
+      `/schools/${schoolId}/classes/by-identifier/${encodeURIComponent(identifier)}${qs({ academicYearId })}`,
+      { accessToken },
+    ),
   resolveSection: (accessToken: string, schoolId: string, classId: string, identifier: string) =>
     request<Section>(
       `/schools/${schoolId}/classes/${classId}/sections/by-identifier/${encodeURIComponent(identifier)}`,
@@ -2168,6 +2176,8 @@ export const api = {
     schoolId: string,
     body: {
       divisionId: string;
+      // A class always belongs to one academic year.
+      academicYearId: string;
       name: string;
       level: number;
       sections?: { name: string; capacity?: number | null }[];
@@ -2589,14 +2599,16 @@ export const api = {
   removeSchoolLogo: (accessToken: string, schoolId: string) =>
     request<{ success: boolean }>(`/schools/${schoolId}/logo`, { method: "DELETE", accessToken }),
 
+  // toAcademicYearId is optional: without it the backend uses the next later year.
   previewPromotion: (
     accessToken: string,
     schoolId: string,
     sectionId: string,
     fromAcademicYearId: string,
+    toAcademicYearId?: string,
   ) =>
     request<PromotionPreview>(
-      `/schools/${schoolId}/sections/${sectionId}/promotion/preview?fromAcademicYearId=${fromAcademicYearId}`,
+      `/schools/${schoolId}/sections/${sectionId}/promotion/preview${qs({ fromAcademicYearId, toAcademicYearId })}`,
       { accessToken },
     ),
   confirmPromotion: (

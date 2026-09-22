@@ -26,6 +26,14 @@ export interface LifecycleListFilters {
   pageSize?: number;
 }
 
+// A COMPLETED (Primary) or GRADUATED (Secondary) enrollment is never rewritten
+// by a transfer. A student who finished and then moved to another school is
+// found through the executed Transfer record instead.
+const movedAfterFinishing = (finished: "COMPLETED" | "GRADUATED"): Prisma.StudentEnrollmentWhereInput => ({
+  status: finished,
+  transfersOut: { some: { status: "EXECUTED" } },
+});
+
 // Primary Completion (Class 8 → COMPLETED) already exists and is untouched —
 // see PromotionsService.confirm(), which now just picks a different audit
 // action name depending on the resolved outcome. Everything in this service
@@ -148,7 +156,9 @@ export class StudentLifecycleService {
       this.prisma.studentEnrollment.count({
         where: { ...base, status: "COMPLETED", promotionFrom: { some: { toEnrollmentId: { not: null } } } },
       }),
-      this.prisma.studentEnrollment.count({ where: { ...base, status: "TRANSFERRED_OUT" } }),
+      this.prisma.studentEnrollment.count({
+        where: { ...base, OR: [{ status: "TRANSFERRED_OUT" }, movedAfterFinishing("COMPLETED")] },
+      }),
       this.prisma.studentEnrollment.count({
         where: {
           ...base,
@@ -187,7 +197,9 @@ export class StudentLifecycleService {
       this.prisma.studentEnrollment.count({
         where: { ...base, status: "GRADUATED", student: { currentStatus: "GRADUATED" } },
       }),
-      this.prisma.studentEnrollment.count({ where: { ...base, status: "TRANSFERRED_OUT" } }),
+      this.prisma.studentEnrollment.count({
+        where: { ...base, OR: [{ status: "TRANSFERRED_OUT" }, movedAfterFinishing("GRADUATED")] },
+      }),
       this.prisma.studentEnrollment.count({
         where: {
           organizationId,
@@ -309,7 +321,7 @@ export class StudentLifecycleService {
       case "ENROLLED_FORM1":
         return { status: "COMPLETED", promotionFrom: { some: { toEnrollmentId: { not: null } } } };
       case "TRANSFERRED_OUT":
-        return { status: "TRANSFERRED_OUT" };
+        return { OR: [{ status: "TRANSFERRED_OUT" }, movedAfterFinishing("COMPLETED")] };
       case "WITHDRAWN":
         return { OR: [{ status: "WITHDRAWN" }, { status: "COMPLETED", student: { currentStatus: "ARCHIVED" } }] };
       default:
@@ -322,7 +334,7 @@ export class StudentLifecycleService {
       case "GRADUATED":
         return { status: "GRADUATED", student: { currentStatus: "GRADUATED" } };
       case "TRANSFERRED_OUT":
-        return { status: "TRANSFERRED_OUT" };
+        return { OR: [{ status: "TRANSFERRED_OUT" }, movedAfterFinishing("GRADUATED")] };
       default:
         return { status: "GRADUATED" };
     }
@@ -395,8 +407,8 @@ export class StudentLifecycleService {
 
   async previewForm1Transition(actor: AuthenticatedUser, schoolId: string, dto: PreviewForm1TransitionDto) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    const toClass = await this.getForm1ClassOrThrow(schoolId, dto.toClassId);
-    await this.getAcademicYearOrThrow(schoolId, dto.toAcademicYearId);
+    const toYear = await this.getAcademicYearOrThrow(schoolId, dto.toAcademicYearId);
+    const toClass = await this.getForm1ClassOrThrow(schoolId, dto.toClassId, dto.toAcademicYearId, toYear.name);
 
     const enrollments = await this.prisma.studentEnrollment.findMany({
       where: { id: { in: dto.enrollmentIds }, schoolId },
@@ -448,7 +460,7 @@ export class StudentLifecycleService {
     const targetSections = await Promise.all(
       toClass.sections.map(async (s) => {
         const currentActive = await this.prisma.studentEnrollment.count({
-          where: { sectionId: s.id, status: "ACTIVE" },
+          where: { sectionId: s.id, academicYearId: dto.toAcademicYearId, status: "ACTIVE" },
         });
         return {
           id: s.id,
@@ -470,8 +482,8 @@ export class StudentLifecycleService {
 
   async confirmForm1Transition(actor: AuthenticatedUser, schoolId: string, dto: ConfirmForm1TransitionDto) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    const toClass = await this.getForm1ClassOrThrow(schoolId, dto.toClassId);
     const toYear = await this.getAcademicYearOrThrow(schoolId, dto.toAcademicYearId);
+    const toClass = await this.getForm1ClassOrThrow(schoolId, dto.toClassId, dto.toAcademicYearId, toYear.name);
 
     const enrollmentIds = dto.assignments.map((a) => a.enrollmentId);
     if (new Set(enrollmentIds).size !== enrollmentIds.length) {
@@ -525,7 +537,7 @@ export class StudentLifecycleService {
     for (const section of sections) {
       if (section.capacity !== null) {
         const currentActive = await this.prisma.studentEnrollment.count({
-          where: { sectionId: section.id, status: "ACTIVE" },
+          where: { sectionId: section.id, academicYearId: dto.toAcademicYearId, status: "ACTIVE" },
         });
         const incoming = incomingBySection.get(section.id) ?? 0;
         if (currentActive + incoming > section.capacity) {
@@ -649,14 +661,16 @@ export class StudentLifecycleService {
     return { ...batch, results };
   }
 
-  private async getForm1ClassOrThrow(schoolId: string, classId: string) {
+  // The destination must be the Form 1 OF THE DESTINATION ACADEMIC YEAR: a
+  // Form 1 of another year (or one with no year yet) is refused.
+  private async getForm1ClassOrThrow(schoolId: string, classId: string, academicYearId: string, academicYearName?: string) {
     const toClass = await this.prisma.class.findFirst({
-      where: { id: classId, level: 1, division: { schoolId, type: "SECONDARY" } },
+      where: { id: classId, level: 1, academicYearId, division: { schoolId, type: "SECONDARY" } },
       include: { sections: true },
     });
     if (!toClass) {
       throw new BadRequestException(
-        "Target class must be a level-1 (Form 1) class in this school's Secondary division",
+        `Target class must be a level-1 (Form 1) class of ${academicYearName ?? "the destination academic year"} in this school's Secondary division`,
       );
     }
     return toClass;

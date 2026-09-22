@@ -98,6 +98,25 @@ function ClassWizard({
   const currentYear = years.find((y) => y.isCurrent) ?? years[0];
 
   const [academicYearId, setAcademicYearId] = useState(currentYear?.id ?? "");
+
+  // Classes are academic-year scoped, so "which levels already exist" depends on
+  // the SELECTED year: the class list follows the year picker (the page passes
+  // the current year's classes first).
+  const [yearClasses, setYearClasses] = useState<ClassWithSections[]>(classes);
+  useEffect(() => {
+    if (!academicYearId) return;
+    let cancelled = false;
+    api
+      .listClasses(accessToken, schoolId, academicYearId)
+      .then((list) => {
+        if (!cancelled) setYearClasses(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, schoolId, academicYearId]);
+
   const [addingYear, setAddingYear] = useState(years.length === 0);
   const [newYearName, setNewYearName] = useState("");
   const [newYearStart, setNewYearStart] = useState("");
@@ -111,12 +130,17 @@ function ClassWizard({
   // Only levels not already used by an existing class in this division —
   // the exact "Class 7 already exists" collision is now impossible to hit
   // because it's simply never offered as a choice.
-  const usedLevels = new Set(classes.filter((c) => c.division.id === divisionId).map((c) => c.level));
+  const usedLevels = new Set(yearClasses.filter((c) => c.division.id === divisionId).map((c) => c.level));
   const levelOptions = selectedDivision
     ? Array.from({ length: LEVEL_RANGE[selectedDivision.type] }, (_, i) => i + 1).filter((lvl) => !usedLevels.has(lvl))
     : [];
 
   const [level, setLevel] = useState<number | null>(levelOptions[0] ?? null);
+  // Changing the year (or the division) changes which levels are free: never keep a level that is taken.
+  useEffect(() => {
+    setLevel((current) => (current !== null && !usedLevels.has(current) ? current : (levelOptions[0] ?? null)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [yearClasses, divisionId]);
   const [sectionNames, setSectionNames] = useState<string[]>([""]);
   const [selectedSubjectIds, setSelectedSubjectIds] = useState<Set<string>>(new Set());
   const [newSubjectName, setNewSubjectName] = useState("");
@@ -133,7 +157,7 @@ function ClassWizard({
   function onDivisionChange(newDivisionId: string) {
     setDivisionId(newDivisionId);
     const division = divisions.find((d) => d.id === newDivisionId);
-    const used = new Set(classes.filter((c) => c.division.id === newDivisionId).map((c) => c.level));
+    const used = new Set(yearClasses.filter((c) => c.division.id === newDivisionId).map((c) => c.level));
     const options = division
       ? Array.from({ length: LEVEL_RANGE[division.type] }, (_, i) => i + 1).filter((lvl) => !used.has(lvl))
       : [];
@@ -232,12 +256,14 @@ function ClassWizard({
     try {
       const cls = await api.createClass(accessToken, schoolId, {
         divisionId,
+        academicYearId,
         name: className,
         level,
         sections: cleanedSections.map((name) => ({ name })),
         subjectIds: Array.from(selectedSubjectIds),
       });
       onClassesChange([...classes, cls]);
+      setYearClasses((prev) => [...prev, cls]);
       setCreated(cls);
     } catch (err) {
       setSaveError(err instanceof ApiError ? err.message : "Failed to create class");
@@ -267,7 +293,7 @@ function ClassWizard({
               {created._count.classSubjects === 1 ? "" : "s"}
             </p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
-              <Button icon={<Plus className="size-4" />} onClick={() => resetForNextClass(classes)}>
+              <Button icon={<Plus className="size-4" />} onClick={() => resetForNextClass(yearClasses)}>
                 Create another class
               </Button>
               <Link href={`/schools/${schoolId}/academic`}>

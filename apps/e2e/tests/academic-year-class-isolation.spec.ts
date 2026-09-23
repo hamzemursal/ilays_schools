@@ -7,9 +7,10 @@ import { ADMIN } from "../fixtures/credentials";
 // silently fail because the page re-validated the class against an
 // unscoped (current-year-defaulted) list. This creates its own extra
 // academic year and class via the real admin UI — nothing pre-seeded,
-// nothing faked — then drills all the way down:
-//   Academic Years -> add a previous year -> Classes & Sections -> create a
-//   class in that year -> open the class -> open one of its sections.
+// nothing faked — then drills all the way down through the current
+// year-scoped hierarchy:
+//   Academic Years -> add a previous year -> open that year's own page ->
+//   create a class in it -> open the class -> open one of its sections.
 test.describe.configure({ timeout: 90_000 });
 
 test("a class and section created in a non-current academic year remain reachable", async ({ page }) => {
@@ -29,15 +30,16 @@ test("a class and section created in a non-current academic year remain reachabl
   await page.getByRole("dialog").getByRole("button", { name: "Create Academic Year" }).click();
   await expect(page.getByText("Academic year added.")).toBeVisible();
 
-  // --- Classes & sections tab, switch to the new 2025 year. ---
-  await page.getByRole("button", { name: "Classes & sections" }).click();
-  const yearSelect = page.locator("select").filter({ hasText: "2025" });
-  await yearSelect.selectOption({ label: "2025" });
+  // --- Open 2025's own page (the year-scoped hierarchy's entry point). ---
+  await page.getByRole("link", { name: "Open 2025" }).click();
+  await page.waitForURL(/\/academic\/years\/[^/]+$/);
+  await expect(page.getByText("No classes yet for this year")).toBeVisible();
 
-  await expect(page.getByText("No classes yet")).toBeVisible();
-
-  // --- Create a class for 2025 via the real class wizard. ---
-  await page.getByRole("link", { name: "Create class" }).click();
+  // --- Create a class for 2025 via the real class wizard, reached from
+  // this year's own "Create class" button. Both the header action and the
+  // empty-state action point at the same wizard route when a year has no
+  // classes yet, so pick the first match. ---
+  await page.getByRole("link", { name: "Create class" }).first().click();
   await page.waitForURL(/\/academic\/classes\/new$/);
 
   const wizardYearSelect = page.locator("select").filter({ hasText: "2025" });
@@ -53,13 +55,15 @@ test("a class and section created in a non-current academic year remain reachabl
   await page.getByRole("link", { name: "Back to Classes" }).click();
   await page.waitForURL(/\/academic$/);
 
-  // --- Back on Classes & sections, 2025, open the class we just made. ---
-  await page.getByRole("button", { name: "Classes & sections" }).click();
-  await page.locator("select").filter({ hasText: "2025" }).selectOption({ label: "2025" });
+  // --- Back to 2025's own page, open the class we just made. ---
+  await page.getByRole("link", { name: "Open 2025" }).click();
+  await page.waitForURL(/\/academic\/years\/[^/]+$/);
 
-  const classCard = page.locator("div.rounded-xl", { hasText: "View Sections" });
-  await expect(classCard).toHaveCount(1);
-  await classCard.getByRole("link", { name: "View Sections" }).click();
+  // The wizard auto-numbers the class from the school's existing classes
+  // (not from 1 per year), so assert on the pattern rather than a specific number.
+  const classLink = page.getByRole("link", { name: /Class \d+/ });
+  await expect(classLink).toHaveCount(1);
+  await classLink.click();
 
   // --- Class detail page: this is the exact regression. Must show the
   // real class, never "Class not found". ---

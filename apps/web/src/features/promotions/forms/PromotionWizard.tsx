@@ -565,9 +565,9 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
             <div className="min-w-0">
               <h3 className="font-semibold text-foreground">Destination not ready</h3>
               <p className="mt-1 text-sm text-foreground-soft">{destinationNotReadyMessage}</p>
-              <Link href={`/schools/${schoolId}/academic?tab=${encodeURIComponent("Classes & sections")}`} className="mt-3 inline-block">
+              <Link href={`/schools/${schoolId}/academic/years/${toYearId}`} className="mt-3 inline-block">
                 <Button size="sm" variant="outline" icon={<ArrowRight className="size-4" />}>
-                  Go to Academic → Classes &amp; Sections
+                  Go to {laterYears.find((y) => y.id === toYearId)?.name ?? "that academic year"}
                 </Button>
               </Link>
             </div>

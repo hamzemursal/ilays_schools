@@ -223,7 +223,7 @@ export function ClassesSubjectsStep({
             <EmptyState
               icon={BookOpen}
               title="No subjects assigned"
-              description="The selected class(es) have no subjects assigned yet — add subjects to the class first, in Academic → Classes & sections."
+              description="The selected class(es) have no subjects assigned yet — add subjects to the class first, from Academic → Academic Years → the class's own page."
             />
           ) : (
             <div className="grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-3">

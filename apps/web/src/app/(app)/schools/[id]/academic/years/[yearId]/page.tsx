@@ -10,7 +10,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
-import { CalendarDays, ChevronRight, GraduationCap } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { CalendarDays, ChevronRight, GraduationCap, Plus } from "lucide-react";
 import { TermWeightsEditor } from "../../page";
 
 // One academic year's own page — strictly scoped to the single year
@@ -104,7 +105,7 @@ export default function AcademicYearDetailPage({ params }: { params: Promise<{ i
           <TermWeightsEditor schoolId={schoolId} accessToken={accessToken!} year={year} canManage={canManage} onSaved={setYear} />
         </Card>
 
-        <YearClassesSection schoolId={schoolId} accessToken={accessToken!} year={year} />
+        <YearClassesSection schoolId={schoolId} accessToken={accessToken!} year={year} canManage={canManage} />
       </div>
     </div>
   );
@@ -114,7 +115,17 @@ export default function AcademicYearDetailPage({ params }: { params: Promise<{ i
 // Sections. The one API call is scoped by this exact year's id (never a
 // global/default year), so a class from any other academic year can never
 // appear here, regardless of which year is "current" elsewhere in the app.
-function YearClassesSection({ schoolId, accessToken, year }: { schoolId: string; accessToken: string; year: AcademicYear }) {
+function YearClassesSection({
+  schoolId,
+  accessToken,
+  year,
+  canManage,
+}: {
+  schoolId: string;
+  accessToken: string;
+  year: AcademicYear;
+  canManage: boolean;
+}) {
   const [classes, setClasses] = useState<ClassWithSections[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -139,7 +150,19 @@ function YearClassesSection({ schoolId, accessToken, year }: { schoolId: string;
 
   return (
     <Card padding="none">
-      <CardHeader title="Classes & Sections" description={`Only classes that belong to ${year.name}.`} />
+      <CardHeader
+        title="Classes & Sections"
+        description={`Only classes that belong to ${year.name}.`}
+        actions={
+          canManage && (
+            <Link href={`/schools/${schoolId}/academic/classes/new`}>
+              <Button size="sm" icon={<Plus className="size-4" />}>
+                Create class
+              </Button>
+            </Link>
+          )
+        }
+      />
       <div className="p-5">
         {error ? (
           <Alert tone="danger">{error}</Alert>
@@ -150,6 +173,15 @@ function YearClassesSection({ schoolId, accessToken, year }: { schoolId: string;
             icon={GraduationCap}
             title="No classes yet for this year"
             description={`Nothing has been created for ${year.name} yet.`}
+            action={
+              canManage && (
+                <Link href={`/schools/${schoolId}/academic/classes/new`}>
+                  <Button size="sm" icon={<Plus className="size-4" />}>
+                    Create class
+                  </Button>
+                </Link>
+              )
+            }
           />
         ) : (
           <div className="space-y-8">
@@ -178,9 +210,10 @@ function YearClassesSection({ schoolId, accessToken, year }: { schoolId: string;
   );
 }
 
-// A read-focused summary card — this page is a navigation entry point, not
-// a management surface (that stays on the existing Classes & sections tab).
-// Clicking opens the existing (already year-aware) class detail page with
+// A read-focused summary card — day-to-day class management (rename,
+// delete, sections, subjects, teachers) still lives on the class's own
+// detail page, unchanged. Clicking opens the existing (already year-aware)
+// class detail page with
 // this exact year's id, so Sections/Students/Subjects there stay scoped to
 // the same year the admin was just looking at, never silently defaulting
 // to whichever year happens to be current.

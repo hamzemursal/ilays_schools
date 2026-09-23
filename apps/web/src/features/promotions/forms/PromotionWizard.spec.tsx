@@ -160,9 +160,12 @@ describe("PromotionWizard — destination-not-ready state", () => {
 
     expect(await screen.findByText("Destination not ready")).toBeInTheDocument();
     expect(screen.getByText(/Class 2 has not been created for 2028/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Go to Academic/ })).toHaveAttribute(
+    // Links straight to the destination year's own page — the year-scoped
+    // hierarchy (Academic Years -> year -> Primary/Secondary -> Class/Form)
+    // is where that class now gets created, not the old flat tab.
+    expect(screen.getByRole("link", { name: /Go to 2028/ })).toHaveAttribute(
       "href",
-      expect.stringContaining("/schools/school-1/academic"),
+      "/schools/school-1/academic/years/year-2",
     );
     // Never a generic, unhelpful error banner for this specific case.
     expect(screen.queryByText(/Failed to preview promotion/)).not.toBeInTheDocument();

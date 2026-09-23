@@ -100,6 +100,24 @@ export class StudentsController {
     return this.students.getOne(user, id);
   }
 
+  // Staff-facing (studentId-addressed) equivalent of GET students/me/results-report
+  // above, reused inside the Student Profile's Academic History tab. Gated
+  // by students.view — the SAME permission as getOne() just above, not
+  // results.view — because this exposes a student's FULL results across
+  // every subject/section they've ever had, with no per-section teacher
+  // scoping like getResultsForSection's assertCanAccessSectionForSubject
+  // has. A Teacher holds results.view but not students.view and already
+  // cannot open this student's profile at all; keep it that way here too.
+  @RequirePermissions("students.view")
+  @Get("students/:id/results-report")
+  getResultsReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Query("academicYearId") academicYearId?: string,
+  ) {
+    return this.students.getResultsReport(user, id, academicYearId);
+  }
+
   @RequirePermissions("students.update")
   @Patch("students/:id")
   update(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Body() dto: UpdateStudentDto) {

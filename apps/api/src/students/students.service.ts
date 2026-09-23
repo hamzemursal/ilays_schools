@@ -18,6 +18,7 @@ import { CreateStudentDto } from "./dto/create-student.dto";
 import { UpdateStudentDto } from "./dto/update-student.dto";
 import { EnrollmentInputDto } from "./dto/enrollment-input.dto";
 import { assertClassInYear } from "../academic/class-year";
+import { buildStudentResultsReport } from "../exams/student-results-report";
 
 type Tx = Prisma.TransactionClient;
 
@@ -341,6 +342,31 @@ export class StudentsService {
   async getOne(actor: AuthenticatedUser, studentId: string) {
     await this.assertAccessibleStudent(actor, studentId);
     return this.getFullDetail(actor, studentId);
+  }
+
+  // Admin/teacher-facing equivalent of StudentPortalService.myResultsReport
+  // and GuardianPortalService's child results-report — same shared,
+  // year-isolated builder, just reached by studentId instead of "me"/a
+  // linked child. assertAccessibleStudent only proves the student has SOME
+  // accessible enrollment (e.g. their current school, post-transfer); a
+  // school-scoped actor could otherwise still request a specific
+  // academicYearId that belongs to a DIFFERENT (inaccessible) school the
+  // student was previously enrolled at, so that exact year's enrollment is
+  // re-checked here before ever building the report.
+  async getResultsReport(actor: AuthenticatedUser, studentId: string, academicYearId?: string) {
+    await this.assertAccessibleStudent(actor, studentId);
+
+    if (academicYearId && actor.schoolIds.length > 0) {
+      const enrollment = await this.prisma.studentEnrollment.findFirst({
+        where: { studentId, academicYearId },
+        select: { schoolId: true },
+      });
+      if (enrollment && !actor.schoolIds.includes(enrollment.schoolId)) {
+        throw new NotFoundException("Student not found");
+      }
+    }
+
+    return buildStudentResultsReport(this.prisma, studentId, academicYearId);
   }
 
   // Shared by getOne/update/archive so every mutation hands back the same

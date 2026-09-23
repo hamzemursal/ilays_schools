@@ -169,6 +169,7 @@ export function StudentProfile({ studentId }: { studentId: string }) {
   const canUpdate = user?.permissions.includes("students.update") ?? false;
   const canDelete = user?.permissions.includes("students.archive") ?? false;
   const canManageGuardians = user?.permissions.includes("guardians.manage") ?? false;
+  const canViewResults = user?.permissions.includes("results.view") ?? false;
   const canViewGuardianProfile = user?.permissions.includes("guardians.view") ?? false;
   const canTransfer = (user?.permissions.includes("transfers.create") ?? false) && !!activeEnrollment;
   // Financial data is opt-in visibility, not default — a Teacher viewing a
@@ -389,10 +390,16 @@ export function StudentProfile({ studentId }: { studentId: string }) {
         </>
       )}
 
-      {tab === "Academic History" && (
+      {tab === "Academic History" && accessToken && (
         <div className="space-y-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground-muted">Enrollment history</h2>
-          <AcademicHistoryTimeline enrollments={student.enrollments} />
+          <AcademicHistoryTimeline
+            enrollments={student.enrollments}
+            studentId={student.id}
+            accessToken={accessToken}
+            canViewResults={canViewResults}
+            loadResultsReport={(academicYearId) => studentsApi.getResultsReport(accessToken, student.id, academicYearId)}
+          />
         </div>
       )}
 

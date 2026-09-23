@@ -7,6 +7,7 @@ export const studentsApi = {
   list: api.listStudents,
   create: api.createStudent,
   getOne: api.getStudent,
+  getResultsReport: api.getStudentResultsReport,
   update: api.updateStudent,
   archive: api.archiveStudent,
   remove: api.deleteStudent,

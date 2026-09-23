@@ -674,7 +674,7 @@ export interface StudentEnrollmentRecord {
   startDate: string;
   endDate: string | null;
   school: { id: string; name: string };
-  academicYear: { id: string; name: string };
+  academicYear: { id: string; name: string; isCurrent: boolean };
   class: { id: string; name: string };
   section: { id: string; name: string };
 }
@@ -2359,6 +2359,8 @@ export const api = {
     }),
   getStudent: (accessToken: string, studentId: string) =>
     request<StudentDetail>(`/students/${studentId}`, { accessToken }),
+  getStudentResultsReport: (accessToken: string, studentId: string, academicYearId?: string) =>
+    request<MyResultsReport>(`/students/${studentId}/results-report${qs({ academicYearId })}`, { accessToken }),
   updateStudent: (accessToken: string, studentId: string, body: UpdateStudentInput) =>
     request<StudentDetail>(`/students/${studentId}`, { method: "PATCH", body, accessToken }),
   archiveStudent: (accessToken: string, studentId: string) =>

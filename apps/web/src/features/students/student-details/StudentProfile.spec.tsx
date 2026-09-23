@@ -40,6 +40,7 @@ const apiMock = vi.hoisted(() => ({
   listClasses: vi.fn(),
   updateStudent: vi.fn(),
   getStudentAttendanceHistory: vi.fn(),
+  getStudentResultsReport: vi.fn(),
 }));
 vi.mock("@/lib/api", () => ({ api: apiMock }));
 
@@ -71,7 +72,7 @@ function enrollment(overrides: Partial<StudentEnrollmentRecord> = {}): StudentEn
     startDate: "2027-01-01",
     endDate: null,
     school: { id: "school-1", name: "Saamalay Primary School" },
-    academicYear: { id: "year-1", name: "2027" },
+    academicYear: { id: "year-1", name: "2027", isCurrent: true },
     class: { id: "class-1", name: "Class 1" },
     section: { id: "section-a", name: "A" },
     ...overrides,

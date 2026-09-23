@@ -50,6 +50,7 @@ describe("AcademicYearsService.resolveIdentifierOrThrow", () => {
     expect(result).toBe(YEAR_2027);
     expect(prisma.academicYear.findFirst).toHaveBeenLastCalledWith({
       where: { name: "2027", schoolId: "school-1" },
+      include: { terms: { orderBy: { name: "asc" } } },
     });
   });
 
@@ -57,6 +58,30 @@ describe("AcademicYearsService.resolveIdentifierOrThrow", () => {
     prisma.academicYear.findFirst.mockResolvedValue(null);
 
     await expect(service.resolveIdentifierOrThrow(ACTOR, "school-1", "1999")).rejects.toThrow(NotFoundException);
+  });
+
+  // Regression: this resolver's Prisma query previously omitted `terms`,
+  // even though every caller (e.g. the Academic Year detail page's
+  // TermWeightsEditor) receives this as an AcademicYear and calls
+  // `year.terms.find(...)` on it — an undefined `terms` crashed the page
+  // with "Cannot read properties of undefined (reading 'find')".
+  it("includes terms in both the id and name lookups, matching list()'s own query shape", async () => {
+    prisma.academicYear.findFirst.mockResolvedValue(YEAR_2027);
+    await service.resolveIdentifierOrThrow(ACTOR, "school-1", "year-real-id");
+    expect(prisma.academicYear.findFirst).toHaveBeenCalledWith({
+      where: { id: "year-real-id", schoolId: "school-1" },
+      include: { terms: { orderBy: { name: "asc" } } },
+    });
+
+    prisma.academicYear.findFirst.mockReset();
+    prisma.academicYear.findFirst.mockImplementation((args) =>
+      Promise.resolve(args.where.id ? null : YEAR_2027),
+    );
+    await service.resolveIdentifierOrThrow(ACTOR, "school-1", "2027");
+    expect(prisma.academicYear.findFirst).toHaveBeenLastCalledWith({
+      where: { name: "2027", schoolId: "school-1" },
+      include: { terms: { orderBy: { name: "asc" } } },
+    });
   });
 });
 

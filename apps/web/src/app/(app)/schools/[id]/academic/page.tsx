@@ -438,8 +438,12 @@ export function TermWeightsEditor({
   canManage: boolean;
   onSaved: (updated: AcademicYear) => void;
 }) {
-  const term1 = year.terms.find((t) => t.name === "Term 1");
-  const term2 = year.terms.find((t) => t.name === "Term 2");
+  // Defensive: some callers resolve a year through an endpoint that may not
+  // always include `terms` (e.g. a resolve-by-identifier lookup) — never
+  // assume it's present, even though the AcademicYear type declares it as
+  // required. Missing terms render nothing below instead of crashing.
+  const term1 = year.terms?.find((t) => t.name === "Term 1");
+  const term2 = year.terms?.find((t) => t.name === "Term 2");
   const [editing, setEditing] = useState(false);
   const [term1Weight, setTerm1Weight] = useState(String(term1?.weight ?? 50));
   const [term2Weight, setTerm2Weight] = useState(String(term2?.weight ?? 50));

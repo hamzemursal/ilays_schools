@@ -114,4 +114,23 @@ describe("AcademicYearDetailPage — opening a specific academic year", () => {
     await waitFor(() => expect(screen.getByText("Current Year")).toBeInTheDocument());
     expect(screen.queryByText("Previous Year")).not.toBeInTheDocument();
   });
+
+  // Regression: production crashed with "Uncaught TypeError: Cannot read
+  // properties of undefined (reading 'find')" because resolveAcademicYear's
+  // backend response omitted `terms` (now fixed server-side in
+  // academic-years.service.ts), and TermWeightsEditor called
+  // `year.terms.find(...)` unconditionally. Reproduces the exact undefined
+  // shape here so the page must render safely regardless of what the API
+  // sends, not just because the backend now happens to include it.
+  it("never crashes when the resolved year is missing its terms array", async () => {
+    const yearMissingTerms = { ...PREVIOUS_YEAR, terms: undefined } as unknown as AcademicYear;
+    apiMock.resolveAcademicYear.mockResolvedValue(yearMissingTerms);
+
+    await renderPage("year-2026");
+
+    expect(await screen.findByText("Previous Year")).toBeInTheDocument();
+    // TermWeightsEditor safely renders nothing rather than crashing.
+    expect(screen.queryByText(/Term 1/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit weights" })).not.toBeInTheDocument();
+  });
 });

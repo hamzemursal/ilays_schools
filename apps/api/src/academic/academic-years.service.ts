@@ -33,10 +33,20 @@ export class AcademicYearsService {
   async resolveIdentifierOrThrow(actor: AuthenticatedUser, schoolId: string, identifier: string) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
 
-    const byId = await this.prisma.academicYear.findFirst({ where: { id: identifier, schoolId } });
+    // Same shape as list()'s own query — every caller of this resolver
+    // (the Academic Year detail page in particular, via TermWeightsEditor)
+    // relies on `terms` actually being present, matching the AcademicYear
+    // type this endpoint declares itself to return.
+    const byId = await this.prisma.academicYear.findFirst({
+      where: { id: identifier, schoolId },
+      include: { terms: { orderBy: { name: "asc" } } },
+    });
     if (byId) return byId;
 
-    const byName = await this.prisma.academicYear.findFirst({ where: { name: identifier, schoolId } });
+    const byName = await this.prisma.academicYear.findFirst({
+      where: { name: identifier, schoolId },
+      include: { terms: { orderBy: { name: "asc" } } },
+    });
     if (!byName) throw new NotFoundException("Academic year not found in this school");
     return byName;
   }

@@ -100,4 +100,22 @@ describe("TermWeightsEditor", () => {
 
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
+
+  // Regression: the Academic Year detail page resolves a year through an
+  // endpoint whose response previously omitted `terms` (a real backend gap,
+  // now fixed) — this crashed the whole page with "Cannot read properties
+  // of undefined (reading 'find')". This component must never assume
+  // `terms` is present, no matter what a caller passes in.
+  it("renders nothing instead of crashing when the year is missing its terms array", () => {
+    const yearWithoutTerms = { ...YEAR, terms: undefined } as unknown as AcademicYear;
+    expect(() =>
+      render(
+        <ToastProvider>
+          <TermWeightsEditor schoolId="school-1" accessToken="token" year={yearWithoutTerms} canManage={true} onSaved={vi.fn()} />
+        </ToastProvider>,
+      ),
+    ).not.toThrow();
+    expect(screen.queryByText(/Term 1/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit weights" })).not.toBeInTheDocument();
+  });
 });

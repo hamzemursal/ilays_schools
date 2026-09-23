@@ -390,15 +390,14 @@ export function StudentProfile({ studentId }: { studentId: string }) {
         </>
       )}
 
-      {tab === "Academic History" && accessToken && (
+      {tab === "Academic History" && (
         <div className="space-y-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground-muted">Enrollment history</h2>
           <AcademicHistoryTimeline
             enrollments={student.enrollments}
+            schoolId={activeEnrollment?.school.id ?? student.enrollments[0]?.school.id ?? ""}
             studentId={student.id}
-            accessToken={accessToken}
             canViewResults={canViewResults}
-            loadResultsReport={(academicYearId) => studentsApi.getResultsReport(accessToken, student.id, academicYearId)}
           />
         </div>
       )}

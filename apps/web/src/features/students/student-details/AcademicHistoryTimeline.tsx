@@ -1,16 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { Building2, ChevronDown, ChevronUp, GraduationCap, Hash, Layers } from "lucide-react";
-import { ApiError } from "@/lib/auth-context";
-import type { MyResultsReport, StudentEnrollmentRecord } from "@/lib/api";
+import Link from "next/link";
+import { ArrowRight, Building2, GraduationCap, Hash, Layers } from "lucide-react";
+import type { StudentEnrollmentRecord } from "@/lib/api";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Alert } from "@/components/ui/Alert";
-import { SkeletonCards } from "@/components/ui/Skeleton";
-import { ResultsReportView } from "@/features/portal-results/PortalResults";
 
 // Every real enrollment this student has ever had, one per academic year (a
 // retained/promoted/transferred student gets a NEW row each year — see
@@ -34,19 +30,20 @@ function formatStatus(status: string) {
 
 export function AcademicHistoryTimeline({
   enrollments,
+  schoolId,
   studentId,
-  accessToken,
   canViewResults,
-  loadResultsReport,
 }: {
   enrollments: StudentEnrollmentRecord[];
+  // The CURRENTLY browsed school (not necessarily the enrollment row's own
+  // school — a transferred student's past enrollments can belong to a
+  // DIFFERENT school) — this is only ever used to build the results page's
+  // URL and its own "Back to Student Profile" link, never to decide which
+  // results are visible. That isolation is enforced server-side, per the
+  // requested academicYearId, regardless of which school this value names.
+  schoolId: string;
   studentId: string;
-  accessToken: string | null;
   canViewResults: boolean;
-  // Injected rather than reaching for studentsApi directly, so this
-  // component (and its tests) never care whether the caller is an admin
-  // viewing studentId or anyone else — the loader owns that scoping.
-  loadResultsReport: (academicYearId: string) => Promise<MyResultsReport>;
 }) {
   if (enrollments.length === 0) {
     return (
@@ -105,68 +102,24 @@ export function AcademicHistoryTimeline({
               </div>
             </div>
 
-            {canViewResults && accessToken && (
-              <ViewResultsSection
-                key={`${e.id}-${studentId}`}
-                academicYearId={e.academicYear.id}
-                loadResultsReport={loadResultsReport}
-              />
+            {/* Whether this specific year's results are actually published
+                is only known once the dedicated results page loads them —
+                querying that up front for every row here would mean one
+                extra request per enrollment just to decide a button's
+                label. The link is always offered; the results page itself
+                is the only place that ever renders (or withholds) marks. */}
+            {canViewResults && (
+              <div className="mt-3 border-t border-border pt-3">
+                <Link href={`/schools/${schoolId}/students/${studentId}/results/${e.academicYear.id}`}>
+                  <Button size="sm" variant="outline" icon={<ArrowRight className="size-4" />}>
+                    View Results
+                  </Button>
+                </Link>
+              </div>
             )}
           </Card>
         </div>
       ))}
-    </div>
-  );
-}
-
-function ViewResultsSection({
-  academicYearId,
-  loadResultsReport,
-}: {
-  academicYearId: string;
-  loadResultsReport: (academicYearId: string) => Promise<MyResultsReport>;
-}) {
-  const [open, setOpen] = useState(false);
-  const [report, setReport] = useState<MyResultsReport | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  function toggle() {
-    if (open) {
-      setOpen(false);
-      return;
-    }
-    setOpen(true);
-    if (report || loading) return;
-    setLoading(true);
-    setError(null);
-    loadResultsReport(academicYearId)
-      .then(setReport)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load results"))
-      .finally(() => setLoading(false));
-  }
-
-  const isEmpty =
-    !!report &&
-    report.terms.every((t) => t.results.length === 0) &&
-    report.otherResults.length === 0 &&
-    report.annual.annualPercentage === null;
-
-  return (
-    <div className="mt-3 border-t border-border pt-3">
-      <Button size="sm" variant="outline" icon={open ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />} onClick={toggle}>
-        View Results
-      </Button>
-      {open && (
-        <div className="mt-3 space-y-3">
-          {loading && <SkeletonCards count={1} />}
-          {error && <Alert tone="danger">{error}</Alert>}
-          {report && isEmpty && (
-            <EmptyState icon={GraduationCap} title="Results not published" description="No results have been published for this academic year yet." />
-          )}
-          {report && !isEmpty && <ResultsReportView report={report} />}
-        </div>
-      )}
     </div>
   );
 }

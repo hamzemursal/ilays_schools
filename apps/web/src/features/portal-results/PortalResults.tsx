@@ -58,7 +58,7 @@ export function ResultsSummary({ report }: { report: MyResultsReport }) {
   );
 }
 
-function ResultsTable({ rows }: { rows: PortalResultRow[] }) {
+export function ResultsTable({ rows }: { rows: PortalResultRow[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[640px] text-left text-sm">
@@ -99,7 +99,7 @@ function ResultsTable({ rows }: { rows: PortalResultRow[] }) {
   );
 }
 
-function TermCard({ term }: { term: PortalTermResults }) {
+export function TermCard({ term }: { term: PortalTermResults }) {
   return (
     <Card padding="none">
       <CardHeader

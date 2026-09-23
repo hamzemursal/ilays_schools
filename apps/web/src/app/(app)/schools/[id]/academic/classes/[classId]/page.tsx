@@ -25,23 +25,27 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ActionsMenu } from "@/components/ui/ActionsMenu";
 import { useToast } from "@/components/ui/Toast";
 import { ClassRosterTable } from "@/features/students/tables/ClassRosterTable";
-import { DECORATIVE_TONE_PARTS } from "@/components/ui/decorativeTones";
 import { classSlug as toClassSlug, slugify } from "@/lib/slug";
-import { ArrowLeftRight, GraduationCap, Pencil, Plus, Printer, Search, Trash2, Check, X } from "lucide-react";
+import {
+  ArrowLeftRight,
+  ArrowRight,
+  BookOpen,
+  GraduationCap,
+  Layers,
+  Pencil,
+  Plus,
+  Printer,
+  Search,
+  Trash2,
+  Users,
+  Check,
+  X,
+} from "lucide-react";
 
 type RosterAttendanceFilter = "ALL" | "EXCELLENT" | "GOOD" | "NEEDS_ATTENTION";
-
-// A subtle, cycling visual identity per section card — decorative only,
-// never a security boundary (isolation is enforced by classId/sectionId on
-// every request, not by which color a card happens to be).
-const SECTION_ACCENTS = [
-  { soft: "bg-accent-soft", avatar: "bg-white text-accent" },
-  { soft: "bg-success-soft", avatar: "bg-white text-success" },
-  { soft: DECORATIVE_TONE_PARTS.violet.soft, avatar: `bg-white ${DECORATIVE_TONE_PARTS.violet.text}` },
-  { soft: DECORATIVE_TONE_PARTS.amber.soft, avatar: `bg-white ${DECORATIVE_TONE_PARTS.amber.text}` },
-] as const;
 
 // The URL segment for school/class (and the "?year=" query param) is a
 // human-readable slug, not a raw id — "xaafuun", "secondary-1", "2027".
@@ -150,6 +154,7 @@ function ClassDetailPageInner({
 
   const [sectionName, setSectionName] = useState("");
   const [sectionFormError, setSectionFormError] = useState<string | null>(null);
+  const [sectionSearch, setSectionSearch] = useState("");
   const [pickSubjectId, setPickSubjectId] = useState("");
   const [assigning, setAssigning] = useState(false);
 
@@ -865,130 +870,31 @@ function ClassDetailPageInner({
               </Card>
             )}
 
-            <Card padding="none">
-              <CardHeader
-                title="Sections"
-                description={`${sections.length} section(s) in this class for ${yearName || "the selected year"} — each one is managed independently.`}
-              />
-              {sections.length === 0 ? (
-                <div className="p-5">
-                  <EmptyState icon={GraduationCap} title="No sections yet" description="Add a section below." />
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
-                  {sections.map((s, index) => {
-                    const rows = assignmentsBySection[s.id];
-                    const subjectsHere = new Set(rows?.map((r) => r.subjectId)).size;
-                    const teachersHere = new Set(rows?.map((r) => r.teacher.id)).size;
-                    const isEditing = editingSectionId === s.id;
-                    const accent = SECTION_ACCENTS[index % SECTION_ACCENTS.length];
-                    return (
-                      <div key={s.id} className="rounded-xl border border-border p-4">
-                        {isEditing ? (
-                          <div className="space-y-2.5">
-                            <Input
-                              value={sectionEditName}
-                              onChange={(e) => setSectionEditName(e.target.value)}
-                              placeholder="Section name"
-                            />
-                            <Input
-                              type="number"
-                              min={1}
-                              value={sectionEditCapacity}
-                              onChange={(e) => setSectionEditCapacity(e.target.value)}
-                              placeholder="Unlimited"
-                            />
-                            <div className="flex justify-end gap-1.5">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                icon={<Check className="size-4" />}
-                                loading={savingSectionId === s.id}
-                                disabled={!sectionEditName.trim()}
-                                onClick={() => onSaveSection(s.id)}
-                                aria-label="Save"
-                              />
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                icon={<X className="size-4" />}
-                                onClick={() => setEditingSectionId(null)}
-                                disabled={savingSectionId === s.id}
-                                aria-label="Cancel"
-                              />
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <div className={`-m-4 mb-0 rounded-t-xl border-b border-border px-4 py-3 ${accent.soft}`}>
-                              <div className="flex items-center gap-3">
-                                <div className={`flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${accent.avatar}`}>
-                                  {s.name.charAt(0).toUpperCase()}
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="truncate font-medium text-foreground">Section {s.name}</p>
-                                  <p className="text-xs text-foreground-muted">{cls?.name}</p>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="mt-3.5 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
-                              <Stat label="Students" value={s._count.enrollments} />
-                              {s.capacity !== null && <Stat label="Capacity" value={s.capacity} />}
-                              <Stat label="Subjects" value={rows ? subjectsHere : "…"} />
-                              <Stat label="Teachers" value={rows ? teachersHere : "…"} />
-                            </div>
-
-                            <div className="mt-4 flex flex-wrap gap-1.5">
-                              <Link
-                                href={`/schools/${slugify(schoolName)}/academic/classes/${cls ? toClassSlug(cls.division.type, cls.level) : classId}/sections/${slugify(s.name)}${yearName ? `?year=${encodeURIComponent(yearName)}` : ""}`}
-                                className="flex-1"
-                              >
-                                <Button size="sm" variant="outline" className="w-full">
-                                  View Section
-                                </Button>
-                              </Link>
-                              {canManage && (
-                                <>
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    icon={<Pencil className="size-4" />}
-                                    onClick={() => startEditSection(s)}
-                                    aria-label={`Edit Section ${s.name}`}
-                                  />
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    icon={<Trash2 className="size-4" />}
-                                    onClick={() => setDeleteSectionTarget(s)}
-                                    aria-label={`Delete Section ${s.name}`}
-                                  />
-                                </>
-                              )}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              {canManage && (
-                <form onSubmit={onAddSection} className="flex flex-wrap items-end gap-2 border-t border-border p-5">
-                  <Input
-                    value={sectionName}
-                    onChange={(e) => setSectionName(e.target.value)}
-                    placeholder="Section name, e.g. F"
-                    className="max-w-[180px]"
-                  />
-                  <Button type="submit" size="sm" variant="outline" icon={<Plus className="size-4" />}>
-                    Add section
-                  </Button>
-                  {sectionFormError && <p className="w-full text-sm text-danger">{sectionFormError}</p>}
-                </form>
-              )}
-            </Card>
+            <SectionsPanel
+              sections={sections}
+              search={sectionSearch}
+              onSearchChange={setSectionSearch}
+              cls={cls}
+              schoolName={schoolName}
+              yearName={yearName}
+              isCurrentYear={years.find((y) => y.id === yearId)?.isCurrent ?? false}
+              assignmentsBySection={assignmentsBySection}
+              canManage={canManage}
+              editingSectionId={editingSectionId}
+              sectionEditName={sectionEditName}
+              sectionEditCapacity={sectionEditCapacity}
+              savingSectionId={savingSectionId}
+              onStartEdit={startEditSection}
+              onEditNameChange={setSectionEditName}
+              onEditCapacityChange={setSectionEditCapacity}
+              onSaveEdit={onSaveSection}
+              onCancelEdit={() => setEditingSectionId(null)}
+              onDelete={setDeleteSectionTarget}
+              sectionName={sectionName}
+              onSectionNameChange={setSectionName}
+              onAddSection={onAddSection}
+              sectionFormError={sectionFormError}
+            />
 
             <Card padding="none">
               <CardHeader
@@ -1170,11 +1076,281 @@ function ClassDetailPageInner({
   );
 }
 
-function Stat({ label, value }: { label: string; value: React.ReactNode }) {
+// The redesigned Sections area: search + a grid of modern Section cards +
+// the create-section form. Pulled out of ClassDetailPageInner as its own
+// named, exported component (same pattern as AcademicYearsSection in
+// academic/page.tsx) purely so it — and each SectionCard's real counts,
+// year-scoping, and Open Section/Edit/Delete wiring — can be unit-tested on
+// its own, without dragging in the whole class page's roster/transfer state.
+export function SectionsPanel({
+  sections,
+  search,
+  onSearchChange,
+  cls,
+  schoolName,
+  yearName,
+  isCurrentYear,
+  assignmentsBySection,
+  canManage,
+  editingSectionId,
+  sectionEditName,
+  sectionEditCapacity,
+  savingSectionId,
+  onStartEdit,
+  onEditNameChange,
+  onEditCapacityChange,
+  onSaveEdit,
+  onCancelEdit,
+  onDelete,
+  sectionName,
+  onSectionNameChange,
+  onAddSection,
+  sectionFormError,
+}: {
+  sections: Section[];
+  search: string;
+  onSearchChange: (v: string) => void;
+  cls: ClassWithSections | null;
+  schoolName: string;
+  yearName: string;
+  isCurrentYear: boolean;
+  assignmentsBySection: Record<string, SectionTeacherAssignment[]>;
+  canManage: boolean;
+  editingSectionId: string | null;
+  sectionEditName: string;
+  sectionEditCapacity: string;
+  savingSectionId: string | null;
+  onStartEdit: (s: Section) => void;
+  onEditNameChange: (v: string) => void;
+  onEditCapacityChange: (v: string) => void;
+  onSaveEdit: (sectionId: string) => void;
+  onCancelEdit: () => void;
+  onDelete: (s: Section) => void;
+  sectionName: string;
+  onSectionNameChange: (v: string) => void;
+  onAddSection: (e: FormEvent) => void;
+  sectionFormError: string | null;
+}) {
+  const q = search.trim().toLowerCase();
+  const filteredSections = q ? sections.filter((s) => s.name.toLowerCase().includes(q)) : sections;
+
   return (
-    <div>
-      <p className="text-xs text-foreground-muted">{label}</p>
-      <p className="font-medium text-foreground">{value}</p>
+    <Card padding="none">
+      <CardHeader
+        title="Classes & Sections"
+        description={`${sections.length} section(s) in this class for ${yearName || "the selected year"} — each one is managed independently.`}
+      />
+
+      {sections.length > 1 && (
+        <div className="border-b border-border px-5 py-3">
+          <div className="relative max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-muted" />
+            <Input
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder="Search sections…"
+              className="pl-9"
+              aria-label="Search sections"
+            />
+          </div>
+        </div>
+      )}
+
+      {sections.length === 0 ? (
+        <div className="p-5">
+          <EmptyState icon={Layers} title="No sections yet" description="Create the first section below." />
+        </div>
+      ) : filteredSections.length === 0 ? (
+        <div className="p-5">
+          <EmptyState icon={Search} title="No sections match your search" description="Try a different section name." />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
+          {filteredSections.map((s) => {
+            const rows = assignmentsBySection[s.id];
+            const subjectsHere = new Set(rows?.map((r) => r.subjectId)).size;
+            const teachersHere = new Set(rows?.map((r) => r.teacher.id)).size;
+            return (
+              <SectionCard
+                key={s.id}
+                section={s}
+                classDisplayName={cls?.name ?? ""}
+                yearName={yearName}
+                isCurrentYear={isCurrentYear}
+                subjectsCount={rows ? subjectsHere : null}
+                teachersCount={rows ? teachersHere : null}
+                openHref={`/schools/${slugify(schoolName)}/academic/classes/${cls ? toClassSlug(cls.division.type, cls.level) : ""}/sections/${slugify(s.name)}${yearName ? `?year=${encodeURIComponent(yearName)}` : ""}`}
+                canManage={canManage}
+                isEditing={editingSectionId === s.id}
+                editName={sectionEditName}
+                editCapacity={sectionEditCapacity}
+                saving={savingSectionId === s.id}
+                onEditNameChange={onEditNameChange}
+                onEditCapacityChange={onEditCapacityChange}
+                onStartEdit={() => onStartEdit(s)}
+                onSaveEdit={() => onSaveEdit(s.id)}
+                onCancelEdit={onCancelEdit}
+                onDelete={() => onDelete(s)}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      {canManage && (
+        <form onSubmit={onAddSection} className="flex flex-wrap items-end gap-2 border-t border-border bg-surface-soft p-5">
+          <FormField label="Create Section" htmlFor="new-section-name" className="max-w-[200px]">
+            <Input
+              id="new-section-name"
+              value={sectionName}
+              onChange={(e) => onSectionNameChange(e.target.value)}
+              placeholder="Section name, e.g. F"
+            />
+          </FormField>
+          <Button type="submit" size="sm" icon={<Plus className="size-4" />}>
+            Create Section
+          </Button>
+          {sectionFormError && <p className="w-full text-sm text-danger">{sectionFormError}</p>}
+        </form>
+      )}
+    </Card>
+  );
+}
+
+function SectionCard({
+  section,
+  classDisplayName,
+  yearName,
+  isCurrentYear,
+  subjectsCount,
+  teachersCount,
+  openHref,
+  canManage,
+  isEditing,
+  editName,
+  editCapacity,
+  saving,
+  onEditNameChange,
+  onEditCapacityChange,
+  onStartEdit,
+  onSaveEdit,
+  onCancelEdit,
+  onDelete,
+}: {
+  section: Section;
+  classDisplayName: string;
+  yearName: string;
+  isCurrentYear: boolean;
+  subjectsCount: number | null;
+  teachersCount: number | null;
+  openHref: string;
+  canManage: boolean;
+  isEditing: boolean;
+  editName: string;
+  editCapacity: string;
+  saving: boolean;
+  onEditNameChange: (v: string) => void;
+  onEditCapacityChange: (v: string) => void;
+  onStartEdit: () => void;
+  onSaveEdit: () => void;
+  onCancelEdit: () => void;
+  onDelete: () => void;
+}) {
+  if (isEditing) {
+    return (
+      <div className="rounded-2xl border border-border bg-background p-4 shadow-sm">
+        <div className="space-y-2.5">
+          <Input value={editName} onChange={(e) => onEditNameChange(e.target.value)} placeholder="Section name" />
+          <Input
+            type="number"
+            min={1}
+            value={editCapacity}
+            onChange={(e) => onEditCapacityChange(e.target.value)}
+            placeholder="Unlimited"
+          />
+          <div className="flex justify-end gap-1.5">
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<Check className="size-4" />}
+              loading={saving}
+              disabled={!editName.trim()}
+              onClick={onSaveEdit}
+              aria-label="Save"
+            />
+            <Button size="sm" variant="ghost" icon={<X className="size-4" />} onClick={onCancelEdit} disabled={saving} aria-label="Cancel" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col rounded-2xl border border-border bg-background p-5 shadow-sm transition-shadow hover:shadow-md">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+            <Layers className="size-5" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="truncate text-base font-semibold text-foreground">Section {section.name}</h3>
+              <Badge tone={isCurrentYear ? "success" : "neutral"}>{isCurrentYear ? "Active" : "Previous Year"}</Badge>
+            </div>
+            <p className="mt-0.5 truncate text-xs text-foreground-muted">
+              {classDisplayName}
+              {yearName ? ` · ${yearName}` : ""}
+            </p>
+          </div>
+        </div>
+        {canManage && (
+          <ActionsMenu
+            label={`More actions for Section ${section.name}`}
+            items={[{ label: "Delete", icon: Trash2, tone: "danger", onClick: onDelete }]}
+          />
+        )}
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2 rounded-xl bg-surface-soft p-3">
+        <SectionStat
+          icon={Users}
+          label="Students"
+          value={section.capacity !== null ? `${section._count.enrollments}/${section.capacity}` : section._count.enrollments}
+        />
+        <SectionStat icon={BookOpen} label="Subjects" value={subjectsCount ?? "…"} />
+        <SectionStat icon={GraduationCap} label="Teachers" value={teachersCount ?? "…"} />
+      </div>
+
+      <div className="mt-4 flex gap-2">
+        <Link href={openHref} className="flex-1">
+          <Button size="sm" className="w-full" icon={<ArrowRight className="size-4" />}>
+            Open Section
+          </Button>
+        </Link>
+        {canManage && (
+          <Button size="sm" variant="outline" icon={<Pencil className="size-4" />} onClick={onStartEdit} aria-label={`Edit Section ${section.name}`}>
+            Edit
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SectionStat({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-1 text-center">
+      <Icon className="size-4 text-accent" />
+      <p className="text-sm font-semibold tabular-nums text-foreground">{value}</p>
+      <p className="text-[11px] text-foreground-muted">{label}</p>
     </div>
   );
 }

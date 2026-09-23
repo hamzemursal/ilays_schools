@@ -1,23 +1,27 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
+import Link from "next/link";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type AcademicYear } from "@/lib/api";
+import { api, type AcademicYear, type ClassWithSections } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { Card } from "@/components/ui/Card";
+import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
-import { CalendarDays } from "lucide-react";
+import { CalendarDays, ChevronRight, GraduationCap } from "lucide-react";
 import { TermWeightsEditor } from "../../page";
 
 // One academic year's own page — strictly scoped to the single year
 // resolved below (via the school's existing "resolve by identifier"
 // endpoint, the same one every "?year=" link elsewhere in Academic already
-// uses), never mixed with another year's data. Classes, Sections, Subjects
-// and Exams for this year are deliberately out of scope here — this page
-// only carries what the Academic Years card itself already showed, now in
-// its own dedicated view.
+// uses), never mixed with another year's data. This is the entry point for
+// this year's own academic structure: Primary/Secondary -> Class/Form ->
+// Sections, all reusing the existing year-aware listClasses() call and the
+// existing (already year-scoped) class-detail/section-workspace pages —
+// nothing new is built for those, only linked into with this year's id.
+// Subjects and Exams for this year remain out of scope here.
 export default function AcademicYearDetailPage({ params }: { params: Promise<{ id: string; yearId: string }> }) {
   const { id: schoolId, yearId } = use(params);
   const { user, accessToken } = useAuth();
@@ -99,7 +103,111 @@ export default function AcademicYearDetailPage({ params }: { params: Promise<{ i
 
           <TermWeightsEditor schoolId={schoolId} accessToken={accessToken!} year={year} canManage={canManage} onSaved={setYear} />
         </Card>
+
+        <YearClassesSection schoolId={schoolId} accessToken={accessToken!} year={year} />
       </div>
     </div>
+  );
+}
+
+// This year's own academic structure: Primary/Secondary -> Class/Form ->
+// Sections. The one API call is scoped by this exact year's id (never a
+// global/default year), so a class from any other academic year can never
+// appear here, regardless of which year is "current" elsewhere in the app.
+function YearClassesSection({ schoolId, accessToken, year }: { schoolId: string; accessToken: string; year: AcademicYear }) {
+  const [classes, setClasses] = useState<ClassWithSections[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setClasses(null);
+    setError(null);
+    api
+      .listClasses(accessToken, schoolId, year.id)
+      .then((list) => {
+        if (!cancelled) setClasses(list);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof ApiError ? err.message : "Failed to load classes for this academic year");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, schoolId, year.id]);
+
+  return (
+    <Card padding="none">
+      <CardHeader title="Classes & Sections" description={`Only classes that belong to ${year.name}.`} />
+      <div className="p-5">
+        {error ? (
+          <Alert tone="danger">{error}</Alert>
+        ) : !classes ? (
+          <SkeletonCards count={2} />
+        ) : classes.length === 0 ? (
+          <EmptyState
+            icon={GraduationCap}
+            title="No classes yet for this year"
+            description={`Nothing has been created for ${year.name} yet.`}
+          />
+        ) : (
+          <div className="space-y-8">
+            {(["SECONDARY", "PRIMARY"] as const).map((divisionType) => {
+              const group = classes
+                .filter((c) => c.division.type === divisionType)
+                .sort((a, b) => a.level - b.level);
+              if (group.length === 0) return null;
+              return (
+                <div key={divisionType}>
+                  <h3 className="mb-3 text-sm font-semibold text-foreground">
+                    {divisionType === "SECONDARY" ? "Secondary" : "Primary"}
+                  </h3>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {group.map((cls) => (
+                      <ClassSummaryCard key={cls.id} cls={cls} schoolId={schoolId} yearId={year.id} />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// A read-focused summary card — this page is a navigation entry point, not
+// a management surface (that stays on the existing Classes & sections tab).
+// Clicking opens the existing (already year-aware) class detail page with
+// this exact year's id, so Sections/Students/Subjects there stay scoped to
+// the same year the admin was just looking at, never silently defaulting
+// to whichever year happens to be current.
+function ClassSummaryCard({ cls, schoolId, yearId }: { cls: ClassWithSections; schoolId: string; yearId: string }) {
+  const isSecondary = cls.division.type === "SECONDARY";
+  const href = `/schools/${schoolId}/academic/classes/${cls.id}?year=${yearId}`;
+
+  return (
+    <Link href={href} className="block">
+      <Card className="flex h-full flex-col transition-colors hover:border-accent/40">
+        <div className="flex items-center gap-2.5">
+          <div
+            className={`flex size-9 shrink-0 items-center justify-center rounded-xl ${
+              isSecondary ? "bg-accent-soft text-accent" : "bg-success-soft text-success"
+            }`}
+          >
+            <GraduationCap className="size-4.5" />
+          </div>
+          <p className="truncate font-semibold text-foreground">{cls.name}</p>
+        </div>
+        <div className="mt-3 flex items-center justify-between text-sm text-foreground-soft">
+          <span>
+            {cls.sections.length} Section{cls.sections.length === 1 ? "" : "s"}
+          </span>
+          <ChevronRight className="size-4 text-foreground-muted" />
+        </div>
+      </Card>
+    </Link>
   );
 }

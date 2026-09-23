@@ -198,11 +198,19 @@ function SectionWorkspacePageInner({
     exams?.filter((e) => e.academicYearId === yearId && e.examSubjects.some((es) => es.classId === classId)) ?? [];
 
   function attendanceHref() {
+    // backHref must carry the same ?year= this page was viewing — without
+    // it, navigating back re-resolves this section with no year context,
+    // which (for a non-current year) makes the page's own class-list check
+    // default to the CURRENT year and wrongly report "Section not found in
+    // this class" even though the section is exactly what's still open.
+    const backHref = `/schools/${schoolId}/academic/classes/${classId}/sections/${sectionId}${
+      yearName ? `?year=${encodeURIComponent(yearName)}` : ""
+    }`;
     const query = new URLSearchParams({
       year: yearName,
       class: cls!.name,
       section: section!.name,
-      backHref: `/schools/${schoolId}/academic/classes/${classId}/sections/${sectionId}`,
+      backHref,
       backLabel: `Section ${section!.name}`,
     });
     return `/schools/${schoolId}/sections/${sectionId}/attendance?${query.toString()}`;
@@ -211,14 +219,19 @@ function SectionWorkspacePageInner({
   return (
     <div>
       <PageHeader
-        eyebrow={`${cls.name} · ${cls.division.type}`}
+        eyebrow={`${cls.name} · ${yearName || cls.division.type}`}
         title={`Section ${section.name}`}
         breadcrumbs={[
           { label: "Dashboard", href: "/dashboard" },
-          { label: "Academic", href: `/schools/${schoolId}/academic?tab=Classes%20%26%20sections` },
+          { label: "Academic", href: `/schools/${schoolId}/academic` },
           {
             label: cls.name,
-            href: `/schools/${slugify(schoolName)}/academic/classes/${toClassSlug(cls.division.type, cls.level)}`,
+            // Same reasoning as attendanceHref's backHref above — without
+            // ?year=, re-resolving a non-current year's class defaults to
+            // the current year and can wrongly report "Class not found".
+            href: `/schools/${slugify(schoolName)}/academic/classes/${toClassSlug(cls.division.type, cls.level)}${
+              yearName ? `?year=${encodeURIComponent(yearName)}` : ""
+            }`,
           },
           { label: `Section ${section.name}` },
         ]}

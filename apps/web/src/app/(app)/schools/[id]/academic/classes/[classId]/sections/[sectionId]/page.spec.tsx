@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, fireEvent } from "@testing-library/react";
 import type { AcademicYear, ClassWithSections, School, Section } from "@/lib/api";
 import { ToastProvider } from "@/components/ui/Toast";
 import SectionWorkspacePage from "./page";
@@ -184,5 +184,39 @@ describe("SectionWorkspacePage — academic-year isolation", () => {
 
     expect(await screen.findByText("Class not found")).toBeInTheDocument();
     expect(apiMock.listClasses).not.toHaveBeenCalled();
+  });
+
+  // Regression: the Attendance tab's "Open attendance" link builds a
+  // backHref pointing back to this exact section — for a non-current year,
+  // that backHref used to omit ?year=, so following it re-resolved the
+  // section with no year context and wrongly reported "Section not found
+  // in this class" (the page's own class-list re-validation defaults to
+  // the CURRENT year when no year is given). Both the "Open attendance"
+  // link and the class breadcrumb must carry the year forward.
+  it("carries ?year= through the Attendance tab's back link and the class breadcrumb", async () => {
+    searchParamsMock.mockReturnValue("2026");
+    apiMock.resolveAcademicYear.mockResolvedValue(YEAR_2026);
+    const class2026 = classFixture({ id: "class-2026-form3" });
+    const section2026 = sectionFixture({ id: "section-2026-a" });
+    apiMock.resolveClass.mockResolvedValue(class2026);
+    apiMock.resolveSection.mockResolvedValue(section2026);
+    apiMock.listClasses.mockImplementation((_token: string, _schoolId: string, academicYearId?: string) =>
+      Promise.resolve(academicYearId === "year-2026" ? [class2026] : [classFixture()]),
+    );
+    apiMock.listSections.mockResolvedValue([section2026]);
+
+    await renderPage();
+    expect(await screen.findByText("Form 3")).toBeInTheDocument();
+
+    // Class breadcrumb.
+    const classBreadcrumb = screen.getByRole("link", { name: "Form 3" });
+    expect(classBreadcrumb.getAttribute("href")).toContain("year=2026");
+
+    // Attendance tab -> "Open attendance" link's backHref.
+    fireEvent.click(screen.getByRole("button", { name: "Attendance" }));
+    const openAttendance = screen.getByRole("link", { name: "Open attendance" });
+    const href = openAttendance.getAttribute("href") ?? "";
+    const backHref = new URLSearchParams(href.split("?")[1]).get("backHref") ?? "";
+    expect(backHref).toContain("year=2026");
   });
 });

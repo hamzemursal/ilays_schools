@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Search, UserPlus } from "lucide-react";
-import { api, type AcademicYear, type ClassWithSections, type Teacher, type TeacherSearchResult } from "@/lib/api";
+import { api, type AcademicYear, type Teacher, type TeacherSearchResult } from "@/lib/api";
+import { useYearClasses } from "@/lib/useYearClasses";
 import { ApiError } from "@/lib/auth-context";
 import { teachersApi } from "../api";
 import { ClassSubjectChecklist } from "../teacher-details/AssignmentsManager";
@@ -139,7 +140,6 @@ function AssignPicker({
   onBack: () => void;
 }) {
   const [years, setYears] = useState<AcademicYear[]>([]);
-  const [classes, setClasses] = useState<ClassWithSections[]>([]);
   // Every teacher already assigned at THIS school — used only to keep a
   // subject/section from being offered to two teachers at once. Never
   // shows this candidate's assignments at their other school(s); those
@@ -153,15 +153,14 @@ function AssignPicker({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([api.listAcademicYears(accessToken, schoolId), api.listClasses(accessToken, schoolId), teachersApi.list(accessToken, schoolId)]).then(
-      ([y, c, t]) => {
-        setYears(y);
-        setClasses(c);
-        setAllTeachers(t);
-      },
-    );
+    Promise.all([api.listAcademicYears(accessToken, schoolId), teachersApi.list(accessToken, schoolId)]).then(([y, t]) => {
+      setYears(y);
+      setAllTeachers(t);
+    });
   }, [accessToken, schoolId]);
 
+  // The SELECTED year's own classes (not only the current year's).
+  const classes = useYearClasses(accessToken, schoolId, academicYearId);
   const selectedClass = classes.find((c) => c.id === classId);
 
   function onYearChange(newYearId: string) {

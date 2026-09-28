@@ -6,13 +6,13 @@ import {
   api,
   type AcademicYear,
   type BillingPeriod,
-  type ClassWithSections,
   type FeeStructure,
   type PayrollPeriod,
   type PaymentMethod,
   type SchoolCharge,
   type SchoolInvoice,
 } from "@/lib/api";
+import { useYearClasses } from "@/lib/useYearClasses";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -57,7 +57,6 @@ export default function FinancePage({ params }: { params: Promise<{ id: string }
   const [tab, setTab] = useState<Tab>("Dashboard");
 
   const [years, setYears] = useState<AcademicYear[]>([]);
-  const [classes, setClasses] = useState<ClassWithSections[]>([]);
   const [feeStructures, setFeeStructures] = useState<FeeStructure[]>([]);
   const [invoices, setInvoices] = useState<SchoolInvoice[]>([]);
   const [billingPeriods, setBillingPeriods] = useState<BillingPeriod[]>([]);
@@ -70,16 +69,14 @@ export default function FinancePage({ params }: { params: Promise<{ id: string }
     if (!accessToken) return;
     Promise.all([
       api.listAcademicYears(accessToken, schoolId),
-      api.listClasses(accessToken, schoolId),
       api.listFeeStructures(accessToken, schoolId),
       api.listSchoolInvoices(accessToken, schoolId),
       api.listBillingPeriods(accessToken, schoolId),
       api.listCharges(accessToken, schoolId),
       api.listPayrollPeriods(accessToken, schoolId),
     ])
-      .then(([y, c, fs, inv, bp, ch, pp]) => {
+      .then(([y, fs, inv, bp, ch, pp]) => {
         setYears(y);
-        setClasses(c);
         setFeeStructures(fs);
         setInvoices(inv);
         setBillingPeriods(bp);
@@ -160,7 +157,6 @@ export default function FinancePage({ params }: { params: Promise<{ id: string }
                 schoolId={schoolId}
                 accessToken={accessToken!}
                 years={years}
-                classes={classes}
                 feeStructures={feeStructures}
                 setFeeStructures={setFeeStructures}
                 onGenerated={refreshInvoices}
@@ -252,7 +248,6 @@ function FeeStructuresSection({
   schoolId,
   accessToken,
   years,
-  classes,
   feeStructures,
   setFeeStructures,
   onGenerated,
@@ -261,7 +256,6 @@ function FeeStructuresSection({
   schoolId: string;
   accessToken: string;
   years: AcademicYear[];
-  classes: ClassWithSections[];
   feeStructures: FeeStructure[];
   setFeeStructures: (fn: (prev: FeeStructure[]) => FeeStructure[]) => void;
   onGenerated: () => void;
@@ -269,6 +263,8 @@ function FeeStructuresSection({
 }) {
   const [academicYearId, setAcademicYearId] = useState(years[0]?.id ?? "");
   const [classId, setClassId] = useState("");
+  // A fee's class must belong to the fee's academic year — list that year's classes.
+  const classes = useYearClasses(accessToken, schoolId, academicYearId);
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
@@ -350,7 +346,13 @@ function FeeStructuresSection({
           <h3 className="text-sm font-semibold text-foreground">Add fee structure</h3>
           <form onSubmit={onCreate} className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
             <FormField label="Year">
-              <Select value={academicYearId} onChange={(e) => setAcademicYearId(e.target.value)}>
+              <Select
+                value={academicYearId}
+                onChange={(e) => {
+                  setAcademicYearId(e.target.value);
+                  setClassId("");
+                }}
+              >
                 {years.map((y) => (
                   <option key={y.id} value={y.id}>
                     {y.name}

@@ -12,7 +12,7 @@ import { UpdateSectionDto } from "./dto/update-section.dto";
 import { AssignSubjectDto } from "./dto/assign-subject.dto";
 import { BulkTransferClassDto } from "./dto/bulk-transfer-class.dto";
 import { isRestrictedForeignKeyError } from "../common/prisma-errors";
-import { parseClassSlug } from "../common/slug";
+import { parseClassSlug, slugify } from "../common/slug";
 import { assertClassInYear, assertClassStamped, classYearReadWhere, resolveSchoolYear } from "./class-year";
 
 const CLASS_INCLUDE = {
@@ -323,8 +323,15 @@ export class ClassesService {
     const byName = await this.prisma.section.findFirst({
       where: { classId, name: { equals: identifier, mode: "insensitive" } },
     });
-    if (!byName) throw new NotFoundException("Section not found in this class");
-    return byName;
+    if (byName) return byName;
+
+    // Links carry the section's SLUG (e.g. "a/b" -> "a-b"), which no longer
+    // equals its stored name once the name has punctuation — match that too,
+    // among this class's own sections only.
+    const sections = await this.prisma.section.findMany({ where: { classId } });
+    const bySlug = sections.find((s) => slugify(s.name) === identifier.toLowerCase());
+    if (!bySlug) throw new NotFoundException("Section not found in this class");
+    return bySlug;
   }
 
   async listSubjects(actor: AuthenticatedUser, schoolId: string, classId: string) {

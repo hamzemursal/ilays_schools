@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, CheckCircle2, Loader2 } from "lucide-react";
 import { ApiError, useAuth } from "@/lib/auth-context";
-import { api, type AcademicYear, type ClassWithSections, type DuplicateCandidate } from "@/lib/api";
+import { api, type AcademicYear, type DuplicateCandidate } from "@/lib/api";
+import { useYearClasses } from "@/lib/useYearClasses";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
@@ -33,7 +34,6 @@ export function StudentWizard({
   const { show } = useToast();
 
   const [years, setYears] = useState<AcademicYear[]>([]);
-  const [classes, setClasses] = useState<ClassWithSections[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [step, setStep] = useState(0);
@@ -49,7 +49,6 @@ export function StudentWizard({
     Promise.all([api.listAcademicYears(accessToken, schoolId), api.listClasses(accessToken, schoolId)])
       .then(([y, c]) => {
         setYears(y);
-        setClasses(c);
         const current = y.find((yr) => yr.isCurrent) ?? y[0];
         // initialClassId/initialSectionId arrive from a section workspace's
         // "Add student" link — prefilled as a convenience default, not a
@@ -76,8 +75,16 @@ export function StudentWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The class list is the SELECTED enrollment year's own classes.
+  const classes = useYearClasses(accessToken, schoolId, state.academicYearId);
+
   function patch(p: Partial<WizardState>) {
-    setState((prev) => ({ ...prev, ...p }));
+    setState((prev) => {
+      // A class/section belongs to one academic year: changing the year
+      // clears them so a previous year's class is never submitted.
+      const yearChanged = p.academicYearId !== undefined && p.academicYearId !== prev.academicYearId;
+      return { ...prev, ...(yearChanged ? { classId: "", sectionId: "" } : {}), ...p };
+    });
   }
 
   const canProceed =

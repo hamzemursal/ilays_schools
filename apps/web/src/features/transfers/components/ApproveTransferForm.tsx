@@ -2,7 +2,8 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { ApiError, useAuth } from "@/lib/auth-context";
-import { api, type AcademicYear, type ClassWithSections, type Transfer } from "@/lib/api";
+import { api, type AcademicYear, type Transfer } from "@/lib/api";
+import { useYearClasses } from "@/lib/useYearClasses";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { FormField, Select } from "@/components/ui/FormControls";
@@ -20,7 +21,6 @@ export function ApproveTransferForm({
 }) {
   const { accessToken } = useAuth();
   const [years, setYears] = useState<AcademicYear[]>([]);
-  const [classes, setClasses] = useState<ClassWithSections[]>([]);
   const [academicYearId, setAcademicYearId] = useState("");
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
@@ -29,19 +29,23 @@ export function ApproveTransferForm({
 
   useEffect(() => {
     if (!accessToken) return;
-    Promise.all([api.listAcademicYears(accessToken, schoolId), api.listClasses(accessToken, schoolId)]).then(
-      ([y, c]) => {
-        setYears(y);
-        setClasses(c);
-        const current = y.find((yr) => yr.isCurrent) ?? y[0];
-        if (current) setAcademicYearId(current.id);
-        if (c[0]) {
-          setClassId(c[0].id);
-          setSectionId(c[0].sections[0]?.id ?? "");
-        }
-      },
-    );
+    api.listAcademicYears(accessToken, schoolId).then((y) => {
+      setYears(y);
+      const current = y.find((yr) => yr.isCurrent) ?? y[0];
+      if (current) setAcademicYearId(current.id);
+    });
   }, [accessToken, schoolId]);
+
+  // The SELECTED year's own classes; the first one is preselected, as before.
+  const classes = useYearClasses(accessToken, schoolId, academicYearId);
+  const [prevClasses, setPrevClasses] = useState(classes);
+  if (classes !== prevClasses) {
+    setPrevClasses(classes);
+    if (!classes.some((c) => c.id === classId)) {
+      setClassId(classes[0]?.id ?? "");
+      setSectionId(classes[0]?.sections[0]?.id ?? "");
+    }
+  }
 
   const selectedClass = classes.find((c) => c.id === classId);
 

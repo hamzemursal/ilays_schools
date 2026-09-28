@@ -1,3 +1,4 @@
+import { slugify } from "../common/slug";
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
@@ -47,8 +48,18 @@ export class AcademicYearsService {
       where: { name: identifier, schoolId },
       include: { terms: { orderBy: { name: "asc" } } },
     });
-    if (!byName) throw new NotFoundException("Academic year not found in this school");
-    return byName;
+    if (byName) return byName;
+
+    // Tolerate a name with stray spaces/punctuation (" 2027-2028",
+    // "2028`-2029"): match on the same slug the web builds, within this
+    // school's own years only.
+    const years = await this.prisma.academicYear.findMany({
+      where: { schoolId },
+      include: { terms: { orderBy: { name: "asc" } } },
+    });
+    const bySlug = years.find((y) => slugify(y.name) === slugify(identifier));
+    if (!bySlug) throw new NotFoundException("Academic year not found in this school");
+    return bySlug;
   }
 
   async create(actor: AuthenticatedUser, schoolId: string, dto: CreateAcademicYearDto) {

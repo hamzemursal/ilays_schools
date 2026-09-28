@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, CheckCircle2, Loader2 } from "lucide-react";
 import { ApiError, useAuth } from "@/lib/auth-context";
 import { api, type AcademicYear, type ClassWithSections, type Subject, type Teacher } from "@/lib/api";
+import { useClassesByYear } from "@/lib/useYearClasses";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
@@ -53,6 +54,10 @@ export function TeacherWizard({ schoolId }: { schoolId: string }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Each assignment row lists its OWN year's classes.
+  const classesByYear = useClassesByYear(accessToken, schoolId, state.assignments.map((a) => a.academicYearId));
+  const allClasses = [...classes, ...Object.values(classesByYear).flat()];
 
   function patch(p: Partial<TeacherWizardState>) {
     setState((prev) => ({ ...prev, ...p }));
@@ -131,8 +136,10 @@ export function TeacherWizard({ schoolId }: { schoolId: string }) {
       <Card>
         {step === 0 && <PersonalInfoStep state={state} onChange={patch} />}
         {step === 1 && <ContactStep state={state} onChange={patch} />}
-        {step === 2 && <AssignmentsStep state={state} onChange={patch} years={years} classes={classes} subjects={subjects} />}
-        {step === 3 && <ReviewStep state={state} years={years} classes={classes} subjects={subjects} />}
+        {step === 2 && (
+          <AssignmentsStep state={state} onChange={patch} years={years} classes={classes} classesByYear={classesByYear} subjects={subjects} />
+        )}
+        {step === 3 && <ReviewStep state={state} years={years} classes={allClasses} subjects={subjects} />}
       </Card>
 
       {submitError && <Alert tone="danger">{submitError}</Alert>}

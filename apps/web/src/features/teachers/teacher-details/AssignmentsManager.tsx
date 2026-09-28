@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { BookUser, Check, ChevronDown, ChevronUp, GraduationCap, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
-import { api, type AcademicYear, type ClassSubjectRecord, type ClassWithSections, type Teacher } from "@/lib/api";
+import { api, type AcademicYear, type ClassSubjectRecord, type Teacher } from "@/lib/api";
+import { useYearClasses } from "@/lib/useYearClasses";
 import { ApiError } from "@/lib/auth-context";
 import { teachersApi } from "../api";
 import { groupAssignmentsByClass, groupAssignmentsBySchool, groupAssignmentsByYear } from "@/features/my-classes/schoolGrouping";
@@ -77,7 +78,6 @@ export function AssignmentsManager({
   const { show } = useToast();
   const [editing, setEditing] = useState(false);
   const [years, setYears] = useState<AcademicYear[]>([]);
-  const [classes, setClasses] = useState<ClassWithSections[]>([]);
   // Every teacher's assignments in this school — not just this one's — so
   // the subject picker below can exclude a subject the moment ANY teacher
   // already holds it for that class/section/year, not just this teacher.
@@ -109,18 +109,15 @@ export function AssignmentsManager({
 
   useEffect(() => {
     if (!canManage || !editing) return;
-    Promise.all([api.listAcademicYears(accessToken, schoolId), api.listClasses(accessToken, schoolId), refreshAllTeachers()]).then(
-      ([y, c]) => {
-        setYears(y);
-        setClasses(c);
-      },
-    );
+    Promise.all([api.listAcademicYears(accessToken, schoolId), refreshAllTeachers()]).then(([y]) => setYears(y));
     // refreshAllTeachers is stable for the lifetime of this component
     // instance (closes over accessToken/schoolId props, not state) — safe
     // to omit from deps the same way the fetch calls above are.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, schoolId, canManage, editing]);
 
+  // The SELECTED year's own classes (not only the current year's).
+  const classes = useYearClasses(canManage && editing ? accessToken : null, schoolId, academicYearId);
   const selectedClass = classes.find((c) => c.id === classId);
 
   function startEditing() {

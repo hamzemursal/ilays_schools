@@ -35,14 +35,21 @@ export function AssignmentsStep({
   onChange,
   years,
   classes,
+  classesByYear,
   subjects,
 }: {
   state: TeacherWizardState;
   onChange: (patch: Partial<TeacherWizardState>) => void;
   years: AcademicYear[];
+  // The current year's classes (row defaults / "anything to assign yet?").
   classes: ClassWithSections[];
+  // Every row's OWN year's classes — a class belongs to one academic year.
+  // Falls back to `classes` for a year not loaded (yet).
+  classesByYear?: Record<string, ClassWithSections[]>;
   subjects: Subject[];
 }) {
+  const classesFor = (yearId: string) => classesByYear?.[yearId] ?? classes;
+
   function addRow() {
     const currentYear = years.find((y) => y.isCurrent) ?? years[0];
     const firstClass = classes[0];
@@ -86,7 +93,8 @@ export function AssignmentsStep({
         <>
           <div className="space-y-3">
             {state.assignments.map((row, i) => {
-              const cls = classes.find((c) => c.id === row.classId);
+              const rowClasses = classesFor(row.academicYearId);
+              const cls = rowClasses.find((c) => c.id === row.classId);
               const isDuplicate = duplicateIndexes.has(i);
               return (
                 <div key={i}>
@@ -95,7 +103,14 @@ export function AssignmentsStep({
                       isDuplicate ? "border-danger bg-danger-soft" : "border-border bg-surface-soft"
                     }`}
                   >
-                  <Select value={row.academicYearId} onChange={(e) => updateRow(i, { academicYearId: e.target.value })}>
+                  <Select
+                    value={row.academicYearId}
+                    onChange={(e) => {
+                      // A new year has its own classes: start that row on its first one.
+                      const first = classesByYear?.[e.target.value]?.[0];
+                      updateRow(i, { academicYearId: e.target.value, classId: first?.id ?? "", sectionId: first?.sections[0]?.id ?? "" });
+                    }}
+                  >
                     {years.map((y) => (
                       <option key={y.id} value={y.id}>
                         {y.name}
@@ -105,11 +120,12 @@ export function AssignmentsStep({
                   <Select
                     value={row.classId}
                     onChange={(e) => {
-                      const c = classes.find((cl) => cl.id === e.target.value);
+                      const c = rowClasses.find((cl) => cl.id === e.target.value);
                       updateRow(i, { classId: e.target.value, sectionId: c?.sections[0]?.id ?? "" });
                     }}
                   >
-                    {classes.map((c) => (
+                    {!cls && <option value="">Select class…</option>}
+                    {rowClasses.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
                       </option>

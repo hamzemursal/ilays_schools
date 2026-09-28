@@ -17,12 +17,12 @@ const ACTOR: AuthenticatedUser = {
 const YEAR_2027 = { id: "year-real-id", name: "2027", schoolId: "school-1" };
 
 describe("AcademicYearsService.resolveIdentifierOrThrow", () => {
-  let prisma: { academicYear: { findFirst: jest.Mock } };
+  let prisma: { academicYear: { findFirst: jest.Mock; findMany: jest.Mock } };
   let schools: { findOneAccessibleOrThrow: jest.Mock };
   let service: AcademicYearsService;
 
   beforeEach(() => {
-    prisma = { academicYear: { findFirst: jest.fn() } };
+    prisma = { academicYear: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) } };
     schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
     service = new AcademicYearsService(
       prisma as unknown as PrismaService,
@@ -52,6 +52,15 @@ describe("AcademicYearsService.resolveIdentifierOrThrow", () => {
       where: { name: "2027", schoolId: "school-1" },
       include: { terms: { orderBy: { name: "asc" } } },
     });
+  });
+
+  it("resolves a year whose stored name has stray spaces or punctuation by its slug", async () => {
+    prisma.academicYear.findFirst.mockResolvedValue(null);
+    const odd = { id: "y-odd", name: "2028`-2029", schoolId: "school-1", terms: [] };
+    prisma.academicYear.findMany.mockResolvedValue([{ id: "y-2", name: " 2027-2028", schoolId: "school-1", terms: [] }, odd]);
+
+    expect(await service.resolveIdentifierOrThrow(ACTOR, "school-1", "2028-2029")).toBe(odd);
+    expect(prisma.academicYear.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { schoolId: "school-1" } }));
   });
 
   it("throws NotFoundException when neither id nor name matches within this school", async () => {

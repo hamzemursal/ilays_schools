@@ -8,11 +8,11 @@ import {
   api,
   type AcademicYear,
   type AcademicYearDeletionImpact,
-  type ClassWithSections,
   type Division,
   type Exam,
   type Subject,
 } from "@/lib/api";
+import { useYearClasses } from "@/lib/useYearClasses";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -45,7 +45,6 @@ export default function AcademicStructurePage({ params }: { params: Promise<{ id
 
   const [divisions, setDivisions] = useState<Division[] | null>(null);
   const [years, setYears] = useState<AcademicYear[]>([]);
-  const [classes, setClasses] = useState<ClassWithSections[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -61,14 +60,12 @@ export default function AcademicStructurePage({ params }: { params: Promise<{ id
     Promise.all([
       api.listDivisions(accessToken, schoolId),
       api.listAcademicYears(accessToken, schoolId),
-      api.listClasses(accessToken, schoolId),
       api.listSubjects(accessToken, schoolId),
       api.listExams(accessToken, schoolId),
     ])
-      .then(([d, y, c, subj, ex]) => {
+      .then(([d, y, subj, ex]) => {
         setDivisions(d);
         setYears(y);
-        setClasses(c);
         setSubjects(subj);
         setExams(ex);
       })
@@ -120,7 +117,6 @@ export default function AcademicStructurePage({ params }: { params: Promise<{ id
                 schoolId={schoolId}
                 accessToken={accessToken!}
                 years={years}
-                classes={classes}
                 subjects={subjects}
                 exams={exams}
                 setExams={setExams}
@@ -764,7 +760,6 @@ function ExamsSection({
   schoolId,
   accessToken,
   years,
-  classes,
   subjects,
   exams,
   setExams,
@@ -773,7 +768,6 @@ function ExamsSection({
   schoolId: string;
   accessToken: string;
   years: AcademicYear[];
-  classes: ClassWithSections[];
   subjects: Subject[];
   exams: Exam[];
   setExams: (fn: (prev: Exam[]) => Exam[]) => void;
@@ -803,7 +797,6 @@ function ExamsSection({
               accessToken={accessToken}
               exam={exam}
               years={years}
-              classes={classes}
               subjects={subjects}
               setExams={setExams}
               canManage={canManage}
@@ -820,7 +813,6 @@ function ExamRow({
   accessToken,
   exam,
   years,
-  classes,
   subjects,
   setExams,
   canManage,
@@ -829,12 +821,19 @@ function ExamRow({
   accessToken: string;
   exam: Exam;
   years: AcademicYear[];
-  classes: ClassWithSections[];
   subjects: Subject[];
   setExams: (fn: (prev: Exam[]) => Exam[]) => void;
   canManage: boolean;
 }) {
-  const [classId, setClassId] = useState(classes[0]?.id ?? "");
+  // An exam belongs to one academic year: only THAT year's classes can be
+  // added to it (not the current year's, once a new year is current).
+  const classes = useYearClasses(accessToken, schoolId, exam.academicYearId);
+  const [classId, setClassId] = useState("");
+  const [prevClasses, setPrevClasses] = useState(classes);
+  if (classes !== prevClasses) {
+    setPrevClasses(classes);
+    if (!classes.some((c) => c.id === classId)) setClassId(classes[0]?.id ?? "");
+  }
   const [subjectId, setSubjectId] = useState(subjects[0]?.id ?? "");
   const [maxMarks, setMaxMarks] = useState("100");
   const [passingMark, setPassingMark] = useState("");

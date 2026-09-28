@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { AcademicYear, ClassSubjectRecord, ClassWithSections, Teacher, TeacherSearchResult } from "@/lib/api";
 import { AssignExistingTeacherForm } from "./AssignExistingTeacherForm";
@@ -173,10 +173,12 @@ describe("AssignExistingTeacherForm — assigning a selected teacher", () => {
   });
 
   it("fetches this school's own years/classes/teachers, not the candidate's home school's", async () => {
-    await selectTeacher();
+    const { user } = await selectTeacher();
     expect(apiMock.listAcademicYears).toHaveBeenCalledWith("token-1", "school-b");
-    expect(apiMock.listClasses).toHaveBeenCalledWith("token-1", "school-b");
     expect(teachersApiMock.list).toHaveBeenCalledWith("token-1", "school-b");
+    // Classes are those of the SELECTED academic year (not just the current one).
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "year-1");
+    await waitFor(() => expect(apiMock.listClasses).toHaveBeenCalledWith("token-1", "school-b", "year-1"));
   });
 
   it("returns to search without assigning when 'Back to search' is clicked", async () => {

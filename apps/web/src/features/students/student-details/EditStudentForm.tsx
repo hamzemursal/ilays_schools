@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { api, type AcademicYear, type ClassWithSections, type StudentDetail, type UpdateStudentInput } from "@/lib/api";
+import { api, type AcademicYear, type StudentDetail, type UpdateStudentInput } from "@/lib/api";
+import { useYearClasses } from "@/lib/useYearClasses";
 import { ApiError } from "@/lib/auth-context";
 import { studentsApi } from "../api";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -42,7 +43,6 @@ export function EditStudentForm({
   });
 
   const [years, setYears] = useState<AcademicYear[]>([]);
-  const [classes, setClasses] = useState<ClassWithSections[]>([]);
   const [academicYearId, setAcademicYearId] = useState(activeEnrollment?.academicYear.id ?? "");
   const [classId, setClassId] = useState(activeEnrollment?.class.id ?? "");
   const [sectionId, setSectionId] = useState(activeEnrollment?.section.id ?? "");
@@ -53,15 +53,13 @@ export function EditStudentForm({
 
   useEffect(() => {
     if (!activeEnrollment) return;
-    Promise.all([api.listAcademicYears(accessToken, schoolId), api.listClasses(accessToken, schoolId)]).then(
-      ([y, c]) => {
-        setYears(y);
-        setClasses(c);
-      },
-    );
+    api.listAcademicYears(accessToken, schoolId).then(setYears);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, schoolId]);
 
+  // The SELECTED year's own classes — a student enrolled in a non-current
+  // year must still see (and keep) their real class here.
+  const classes = useYearClasses(activeEnrollment ? accessToken : null, schoolId, academicYearId);
   const selectedClass = classes.find((c) => c.id === classId);
   const enrollmentValid = !activeEnrollment || (!!academicYearId && !!classId && !!sectionId && Number(rollNumber) >= 1);
 

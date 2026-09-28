@@ -9,9 +9,9 @@ import {
   type AcademicYear,
   type BulkTransferPreview,
   type BulkTransferResult,
-  type ClassWithSections,
   type StudentListItem,
 } from "@/lib/api";
+import { useYearClasses } from "@/lib/useYearClasses";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
@@ -48,7 +48,6 @@ export function BulkTransferWizard({
   const [schools, setSchools] = useState<{ id: string; name: string }[]>([]);
   const [toSchoolId, setToSchoolId] = useState("");
   const [years, setYears] = useState<AcademicYear[]>([]);
-  const [classes, setClasses] = useState<ClassWithSections[]>([]);
   const [toAcademicYearId, setToAcademicYearId] = useState("");
   const [toClassId, setToClassId] = useState("");
 
@@ -92,26 +91,23 @@ export function BulkTransferWizard({
   const [prevToSchoolId, setPrevToSchoolId] = useState(toSchoolId);
   if (toSchoolId !== prevToSchoolId) {
     setPrevToSchoolId(toSchoolId);
-    if (!toSchoolId) {
-      setYears([]);
-      setClasses([]);
-    }
+    if (!toSchoolId) setYears([]);
   }
 
   useEffect(() => {
     if (!accessToken || !toSchoolId) return;
-    Promise.all([api.listAcademicYears(accessToken, toSchoolId), api.listClasses(accessToken, toSchoolId)])
-      .then(([y, c]) => {
+    api
+      .listAcademicYears(accessToken, toSchoolId)
+      .then((y) => {
         setYears(y);
-        setClasses(c);
         const current = y.find((yr) => yr.isCurrent) ?? y[0];
         if (current) setToAcademicYearId(current.id);
       })
-      .catch(() => {
-        setYears([]);
-        setClasses([]);
-      });
+      .catch(() => setYears([]));
   }, [accessToken, toSchoolId]);
+
+  // The destination school's classes of the SELECTED destination year.
+  const classes = useYearClasses(accessToken, toSchoolId, toAcademicYearId);
 
   const activeStudents = selectedStudents.filter((s) => !removedIds.has(s.studentId));
   const toClass = classes.find((c) => c.id === toClassId);
@@ -239,7 +235,13 @@ export function BulkTransferWizard({
             {toSchoolId && (
               <>
                 <FormField label="Academic year" required>
-                  <Select value={toAcademicYearId} onChange={(e) => setToAcademicYearId(e.target.value)}>
+                  <Select
+                    value={toAcademicYearId}
+                    onChange={(e) => {
+                      setToAcademicYearId(e.target.value);
+                      setToClassId("");
+                    }}
+                  >
                     <option value="">Select…</option>
                     {years.map((y) => (
                       <option key={y.id} value={y.id}>

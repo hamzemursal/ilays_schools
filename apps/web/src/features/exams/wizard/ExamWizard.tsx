@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, CheckCircle2, Loader2 } from "lucide-react";
 import { ApiError, useAuth } from "@/lib/auth-context";
-import { api, type AcademicYear, type ClassWithSections, type Exam, type Subject } from "@/lib/api";
+import { api, type AcademicYear, type Exam, type Subject } from "@/lib/api";
+import { useYearClasses } from "@/lib/useYearClasses";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
@@ -22,7 +23,6 @@ export function ExamWizard({ schoolId }: { schoolId: string }) {
   const { show } = useToast();
 
   const [years, setYears] = useState<AcademicYear[]>([]);
-  const [classes, setClasses] = useState<ClassWithSections[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -34,14 +34,9 @@ export function ExamWizard({ schoolId }: { schoolId: string }) {
 
   useEffect(() => {
     if (!accessToken) return;
-    Promise.all([
-      api.listAcademicYears(accessToken, schoolId),
-      api.listClasses(accessToken, schoolId),
-      api.listSubjects(accessToken, schoolId),
-    ])
-      .then(([y, c, s]) => {
+    Promise.all([api.listAcademicYears(accessToken, schoolId), api.listSubjects(accessToken, schoolId)])
+      .then(([y, s]) => {
         setYears(y);
-        setClasses(c);
         setSubjects(s);
         const current = y.find((year) => year.isCurrent) ?? y[0];
         if (current) setState((prev) => ({ ...prev, academicYearId: prev.academicYearId || current.id }));
@@ -49,8 +44,15 @@ export function ExamWizard({ schoolId }: { schoolId: string }) {
       .catch((err) => setLoadError(err instanceof ApiError ? err.message : "Failed to load form data"));
   }, [accessToken, schoolId]);
 
+  // An exam belongs to one academic year: it can only cover THAT year's classes.
+  const classes = useYearClasses(accessToken, schoolId, state.academicYearId);
+
   function patch(p: Partial<typeof state>) {
-    setState((prev) => ({ ...prev, ...p }));
+    setState((prev) => {
+      // Changing the year drops classes/subjects picked from another year.
+      const yearChanged = p.academicYearId !== undefined && p.academicYearId !== prev.academicYearId;
+      return { ...prev, ...(yearChanged ? { selectedClassIds: new Set<string>(), selectedSubjectIds: new Set<string>() } : {}), ...p };
+    });
   }
 
   // A brand-new exam starts from a clean form on the first step. Nothing from

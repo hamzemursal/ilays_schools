@@ -108,7 +108,7 @@ describe("ClassesService.bulkTransfer", () => {
 describe("ClassesService.resolveIdentifierOrThrow / resolveSectionIdentifierOrThrow", () => {
   let prisma: {
     class: { findFirst: jest.Mock; findMany: jest.Mock };
-    section: { findFirst: jest.Mock };
+    section: { findFirst: jest.Mock; findMany: jest.Mock };
     academicYear: { findFirst: jest.Mock };
   };
   let schools: { findOneAccessibleOrThrow: jest.Mock };
@@ -117,7 +117,11 @@ describe("ClassesService.resolveIdentifierOrThrow / resolveSectionIdentifierOrTh
   const SECONDARY_1 = { id: "class-real-id", name: "Form 1", level: 1, divisionId: "div-secondary", academicYearId: "year-1" };
 
   beforeEach(() => {
-    prisma = { class: { findFirst: jest.fn(), findMany: jest.fn() }, section: { findFirst: jest.fn() }, academicYear: { findFirst: jest.fn() } };
+    prisma = {
+      class: { findFirst: jest.fn(), findMany: jest.fn() },
+      section: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      academicYear: { findFirst: jest.fn() },
+    };
     schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
     service = new ClassesService(
       prisma as unknown as PrismaService,
@@ -231,6 +235,22 @@ describe("ClassesService.resolveIdentifierOrThrow / resolveSectionIdentifierOrTh
     const result = await service.resolveSectionIdentifierOrThrow(ACTOR, "school-1", "class-real-id", "a");
 
     expect(result).toEqual({ id: "section-real-id", name: "A", classId: "class-real-id" });
+  });
+
+  it("resolveSectionIdentifierOrThrow resolves the slug of a section name with punctuation (\"a/b\" -> \"a-b\")", async () => {
+    prisma.class.findFirst.mockResolvedValue(SECONDARY_1);
+    prisma.section.findFirst.mockResolvedValue(null);
+    const ab = { id: "sec-ab", name: "a/b", classId: "class-real-id" };
+    prisma.section.findMany.mockResolvedValue([{ id: "sec-bc", name: "B/C", classId: "class-real-id" }, ab]);
+
+    expect(await service.resolveSectionIdentifierOrThrow(ACTOR, "school-1", "class-real-id", "a-b")).toBe(ab);
+    expect(prisma.section.findMany).toHaveBeenCalledWith({ where: { classId: "class-real-id" } });
+  });
+
+  it("resolveSectionIdentifierOrThrow still 404s when neither name nor slug matches", async () => {
+    prisma.class.findFirst.mockResolvedValue(SECONDARY_1);
+    prisma.section.findFirst.mockResolvedValue(null);
+    await expect(service.resolveSectionIdentifierOrThrow(ACTOR, "school-1", "class-real-id", "z")).rejects.toThrow("Section not found in this class");
   });
 });
 

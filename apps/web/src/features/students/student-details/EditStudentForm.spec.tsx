@@ -222,3 +222,21 @@ describe("EditStudentForm — submit", () => {
     expect(onCancel).toHaveBeenCalled();
   });
 });
+
+describe("EditStudentForm — a student enrolled in a NON-current academic year", () => {
+  it("lists that year's classes, so the student's real class is shown and kept", async () => {
+    const pastClass: ClassWithSections = { ...CLASS, id: "class-past", name: "Class 1 (2028)" };
+    apiMock.listClasses.mockImplementation((_t: string, _s: string, yearId?: string) =>
+      Promise.resolve(yearId === "year-2" ? [pastClass] : [CLASS]),
+    );
+    renderForm({
+      student: student({
+        enrollments: [enrollment({ academicYear: { id: "year-2", name: "2028", isCurrent: false }, class: { id: "class-past", name: "Class 1 (2028)" } })],
+      }),
+    });
+
+    expect(await screen.findByRole("option", { name: "Class 1 (2028)" })).toBeInTheDocument();
+    expect(apiMock.listClasses).toHaveBeenCalledWith("token-1", "school-1", "year-2");
+    expect(screen.queryByRole("option", { name: "Class 1" })).toBeNull();
+  });
+});

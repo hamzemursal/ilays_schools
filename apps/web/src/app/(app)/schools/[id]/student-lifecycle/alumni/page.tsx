@@ -1,21 +1,8 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { use } from "react";
-import { LifecycleListExplorer } from "@/features/student-lifecycle/LifecycleListExplorer";
-
-export default function SchoolAlumniPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id: schoolId } = use(params);
-
-  return (
-    <LifecycleListExplorer
-      kind="alumni"
-      fixedSchoolId={schoolId}
-      pageTitle="Alumni"
-      breadcrumbs={[
-        { label: "Dashboard", href: "/dashboard" },
-        { label: "Student Lifecycle", href: `/schools/${schoolId}/student-lifecycle` },
-        { label: "Alumni" },
-      ]}
-    />
-  );
+// Superseded by the school's Alumni Directory (/schools/:id/alumni). Kept as a
+// redirect so old links and bookmarks still land somewhere useful.
+export default async function LegacySchoolLifecycleAlumniPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  redirect(`/schools/${id}/alumni`);
 }

@@ -171,7 +171,8 @@ export function StudentLifecycleOverview({
               disabledHint="Select a school above to start a transition"
             />
             <QuickLink icon={GraduationCap} label="Secondary Graduated" href={qsFor("secondary-graduated")} />
-            <QuickLink icon={Award} label="Alumni" href={qsFor("alumni")} />
+            {/* The Alumni Directory replaces the old lifecycle Alumni list. */}
+            <QuickLink icon={Award} label="Alumni" href={fixedSchoolId ? `/schools/${fixedSchoolId}/alumni` : "/alumni"} />
             <QuickLink icon={Users} label="All Students" href={schoolId ? `/schools/${schoolId}/students` : "/schools"} />
           </div>
         </div>

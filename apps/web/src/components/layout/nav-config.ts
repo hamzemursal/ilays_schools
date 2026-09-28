@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   LayoutDashboard,
   GraduationCap,
+  UsersRound,
   Users,
   UserSquare2,
   Wallet,
@@ -91,10 +92,11 @@ export function schoolNavItems(user: Profile, schoolId: string): NavItem[] {
     items.push({ label: "Finance", href: `/schools/${schoolId}/finance`, icon: Wallet });
   }
   if (has("promotions.execute")) {
-    items.push({ label: "Promotions", href: `/schools/${schoolId}/promotions`, icon: ArrowUpCircle });
+    items.push({ label: "Year-End Progression", href: `/schools/${schoolId}/promotions`, icon: ArrowUpCircle });
   }
   if (has("students.view")) {
     items.push({ label: "Student Lifecycle", href: `/schools/${schoolId}/student-lifecycle`, icon: Milestone });
+    items.push({ label: "Alumni", href: `/schools/${schoolId}/alumni`, icon: UsersRound });
   }
   if (has("transfers.create") || has("transfers.approve")) {
     items.push({ label: "Transfers", href: `/schools/${schoolId}/transfers`, icon: ArrowLeftRight });
@@ -132,6 +134,7 @@ export function orgNavItems(user: Profile): NavItem[] {
   // equivalent is schoolNavItems' own per-school "Student Lifecycle" entry.
   if (user.permissions.includes("schools.view") && user.permissions.includes("students.view")) {
     items.push({ label: "Student Lifecycle", href: "/student-lifecycle", icon: Milestone });
+    items.push({ label: "Alumni", href: "/alumni", icon: UsersRound });
   }
   // Org-wide Transfers — same audience as the two entries above; a School
   // Admin's equivalent is schoolNavItems' own per-school "Transfers" entry.

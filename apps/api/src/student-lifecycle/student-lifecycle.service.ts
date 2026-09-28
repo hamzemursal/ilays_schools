@@ -10,6 +10,9 @@ import { ConfirmForm1TransitionDto } from "./dto/confirm-form1-transition.dto";
 
 const MAX_PAGE_SIZE = 100;
 
+// Mirrors PromotionsService: Class 8 / Form 4 are the fixed final classes.
+const FINAL_LEVEL_BY_DIVISION = { PRIMARY: 8, SECONDARY: 4 } as const;
+
 export interface LifecycleListFilters {
   schoolId?: string;
   academicYearId?: string;
@@ -22,6 +25,9 @@ export interface LifecycleListFilters {
   academicYearName?: string;
   search?: string;
   status?: string;
+  // Alumni Directory only (see listAlumniDirectory).
+  divisionType?: "PRIMARY" | "SECONDARY";
+  sectionName?: string;
   page?: number;
   pageSize?: number;
 }
@@ -220,36 +226,31 @@ export class StudentLifecycleService {
     };
   }
 
-  // "Final class" of a division = the highest `level` class it has — the
-  // same rule PromotionsService.resolvePlan() already uses to detect
-  // "nothing to promote into," just computed for many divisions/schools at
-  // once instead of one section at a time, and used here to find who's
-  // *still active* there (candidates for graduation, not yet graduated).
+  // "Final class" of a division is FIXED — Class 8 (Primary) / Form 4
+  // (Secondary), the same FINAL_LEVEL_BY_DIVISION rule PromotionsService
+  // enforces when graduating. Never "the highest level configured": a school
+  // that has only set up Form 1–2 so far must not show its Form 2 students as
+  // graduation candidates. Used here to find who's *still active* in a final
+  // class (candidates for graduation, not yet graduated).
   private async getFinalClassIds(
     organizationId: string,
     schoolIds: string[] | undefined,
     divisionType: "PRIMARY" | "SECONDARY",
   ): Promise<string[]> {
-    const divisions = await this.prisma.division.findMany({
+    const classes = await this.prisma.class.findMany({
       where: {
-        type: divisionType,
-        school: {
-          organizationId,
-          ...(schoolIds ? { id: { in: schoolIds } } : {}),
+        level: FINAL_LEVEL_BY_DIVISION[divisionType],
+        division: {
+          type: divisionType,
+          school: {
+            organizationId,
+            ...(schoolIds ? { id: { in: schoolIds } } : {}),
+          },
         },
       },
-      include: { classes: { select: { id: true, level: true } } },
+      select: { id: true },
     });
-
-    const finalClassIds: string[] = [];
-    for (const division of divisions) {
-      if (division.classes.length === 0) continue;
-      const maxLevel = Math.max(...division.classes.map((c) => c.level));
-      for (const c of division.classes) {
-        if (c.level === maxLevel) finalClassIds.push(c.id);
-      }
-    }
-    return finalClassIds;
+    return classes.map((c) => c.id);
   }
 
   // ---------------------------------------------------------------------
@@ -314,6 +315,55 @@ export class StudentLifecycleService {
     return this.listSecondaryGraduated(actor, { ...filters, status: "GRADUATED" });
   }
 
+  // The Alumni Directory: everyone who finished a division's FIXED final class
+  // and did not continue from it —
+  //   * Secondary: a Form 4 enrollment that ended GRADUATED;
+  //   * Primary:   a Class 8 enrollment that ended COMPLETED and was never
+  //                linked forward into Form 1 (Completed — Not Continuing).
+  // Anchored on the finishing enrollment itself, not Student.currentStatus,
+  // so a graduate stays in the directory even if their student record's
+  // status later changes. Read-only; reuses the existing Student/enrollment
+  // rows — nothing is copied into a separate alumni record.
+  async listAlumniDirectory(actor: AuthenticatedUser, filters: LifecycleListFilters) {
+    const organizationId = this.requireOrganizationId(actor);
+    const schoolIds = await this.resolveSchoolIds(actor, filters.schoolId);
+
+    const scopeWhere: Prisma.StudentEnrollmentWhereInput = {
+      organizationId,
+      ...(schoolIds ? { schoolId: { in: schoolIds } } : {}),
+      ...this.academicYearWhere(filters.academicYearId, filters.academicYearName),
+    };
+    const secondary: Prisma.StudentEnrollmentWhereInput = {
+      status: "GRADUATED",
+      class: { level: FINAL_LEVEL_BY_DIVISION.SECONDARY, division: { type: "SECONDARY" } },
+    };
+    const primary: Prisma.StudentEnrollmentWhereInput = {
+      status: "COMPLETED",
+      class: { level: FINAL_LEVEL_BY_DIVISION.PRIMARY, division: { type: "PRIMARY" } },
+      promotionFrom: { none: { toEnrollmentId: { not: null } } },
+    };
+    const divisionWhere: Prisma.StudentEnrollmentWhereInput =
+      filters.divisionType === "SECONDARY" ? secondary : filters.divisionType === "PRIMARY" ? primary : { OR: [secondary, primary] };
+
+    const baseWhere: Prisma.StudentEnrollmentWhereInput = { AND: [scopeWhere, divisionWhere, this.searchWhere(filters.search)] };
+    const where: Prisma.StudentEnrollmentWhereInput = filters.sectionName
+      ? { AND: [baseWhere, { section: { name: filters.sectionName } }] }
+      : baseWhere;
+
+    const [page, sections] = await Promise.all([
+      this.paginateEnrollments(where, filters),
+      // Section filter options — the real section names present in the
+      // current result set (ignoring the section filter itself).
+      this.prisma.section.findMany({
+        where: { enrollments: { some: baseWhere } },
+        select: { name: true },
+        distinct: ["name"],
+        orderBy: { name: "asc" },
+      }),
+    ]);
+    return { ...page, facets: { sectionNames: sections.map((s) => s.name) } };
+  }
+
   private primaryStatusWhere(status?: string): Prisma.StudentEnrollmentWhereInput {
     switch (status) {
       case "AWAITING":
@@ -362,7 +412,7 @@ export class StudentLifecycleService {
         include: {
           student: { select: { id: true, firstName: true, lastName: true, currentStatus: true } },
           school: { select: { id: true, name: true } },
-          class: { select: { id: true, name: true } },
+          class: { select: { id: true, name: true, division: { select: { type: true } } } },
           section: { select: { id: true, name: true } },
           academicYear: { select: { id: true, name: true } },
           promotionFrom: { select: { toEnrollmentId: true }, take: 1 },
@@ -383,7 +433,8 @@ export class StudentLifecycleService {
         studentNumber: r.studentNumber,
         rollNumber: r.rollNumber,
         school: r.school,
-        class: r.class,
+        class: { id: r.class.id, name: r.class.name },
+        divisionType: r.class.division.type,
         section: r.section,
         academicYear: r.academicYear,
         enrollmentStatus: r.status,
@@ -405,16 +456,58 @@ export class StudentLifecycleService {
   // source enrollments, and each student can land in a different section.
   // ---------------------------------------------------------------------
 
+  // The school the new Form 1 enrollment is created in. `schoolId` (the path
+  // param) is always the SOURCE school — the one holding the completed Class 8
+  // enrollment. toSchoolId, when given and different, must be another school
+  // of the SAME organization that the actor can also access; the student
+  // record and their permanent Student ID are shared org-wide, so only the
+  // enrollment row changes school.
+  private async resolveDestinationSchoolId(actor: AuthenticatedUser, sourceSchoolId: string, toSchoolId?: string) {
+    const source = await this.schools.findOneAccessibleOrThrow(actor, sourceSchoolId);
+    if (!toSchoolId || toSchoolId === sourceSchoolId) return sourceSchoolId;
+    const destination = await this.schools.findOneAccessibleOrThrow(actor, toSchoolId);
+    if (destination.organizationId !== source.organizationId) {
+      throw new BadRequestException("The destination school must belong to the same organization");
+    }
+    return destination.id;
+  }
+
+  // Student IDs are unique per (school, year, status). A permanent ID coming
+  // from ANOTHER school could, rarely, collide with an ID the destination
+  // school already issued for that year — reported per student here instead
+  // of failing the whole transaction on the database constraint. Within the
+  // same school the ID was issued by that school itself, so there is nothing
+  // to check (unchanged same-school behaviour).
+  private async studentNumbersTakenAt(
+    sourceSchoolId: string,
+    destSchoolId: string,
+    academicYearId: string,
+    studentNumbers: string[],
+  ) {
+    if (destSchoolId === sourceSchoolId || studentNumbers.length === 0) return new Set<string>();
+    const taken = await this.prisma.studentEnrollment.findMany({
+      where: { schoolId: destSchoolId, academicYearId, status: "ACTIVE", studentNumber: { in: studentNumbers } },
+      select: { studentNumber: true },
+    });
+    return new Set(taken.map((t) => t.studentNumber));
+  }
+
   async previewForm1Transition(actor: AuthenticatedUser, schoolId: string, dto: PreviewForm1TransitionDto) {
-    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    const toYear = await this.getAcademicYearOrThrow(schoolId, dto.toAcademicYearId);
-    const toClass = await this.getForm1ClassOrThrow(schoolId, dto.toClassId, dto.toAcademicYearId, toYear.name);
+    const destSchoolId = await this.resolveDestinationSchoolId(actor, schoolId, dto.toSchoolId);
+    const toYear = await this.getAcademicYearOrThrow(destSchoolId, dto.toAcademicYearId);
+    const toClass = await this.getForm1ClassOrThrow(destSchoolId, dto.toClassId, dto.toAcademicYearId, toYear.name);
 
     const enrollments = await this.prisma.studentEnrollment.findMany({
       where: { id: { in: dto.enrollmentIds }, schoolId },
       include: { student: true, class: { include: { division: true } } },
     });
     const byId = new Map(enrollments.map((e) => [e.id, e]));
+    const takenNumbers = await this.studentNumbersTakenAt(
+      schoolId,
+      destSchoolId,
+      dto.toAcademicYearId,
+      enrollments.map((e) => e.studentNumber),
+    );
 
     const eligible: {
       enrollmentId: string;
@@ -444,6 +537,13 @@ export class StudentLifecycleService {
         ineligible.push({
           enrollmentId: id,
           reason: `Student is currently ${e.student.currentStatus}, not awaiting enrollment`,
+        });
+        continue;
+      }
+      if (takenNumbers.has(e.studentNumber)) {
+        ineligible.push({
+          enrollmentId: id,
+          reason: `Student ID ${e.studentNumber} is already in use at the destination school for ${toYear.name}`,
         });
         continue;
       }
@@ -481,9 +581,9 @@ export class StudentLifecycleService {
   }
 
   async confirmForm1Transition(actor: AuthenticatedUser, schoolId: string, dto: ConfirmForm1TransitionDto) {
-    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
-    const toYear = await this.getAcademicYearOrThrow(schoolId, dto.toAcademicYearId);
-    const toClass = await this.getForm1ClassOrThrow(schoolId, dto.toClassId, dto.toAcademicYearId, toYear.name);
+    const destSchoolId = await this.resolveDestinationSchoolId(actor, schoolId, dto.toSchoolId);
+    const toYear = await this.getAcademicYearOrThrow(destSchoolId, dto.toAcademicYearId);
+    const toClass = await this.getForm1ClassOrThrow(destSchoolId, dto.toClassId, dto.toAcademicYearId, toYear.name);
 
     const enrollmentIds = dto.assignments.map((a) => a.enrollmentId);
     if (new Set(enrollmentIds).size !== enrollmentIds.length) {
@@ -528,6 +628,18 @@ export class StudentLifecycleService {
           `Student ${e.studentId} is currently ${e.student.currentStatus}, not awaiting enrollment`,
         );
       }
+    }
+
+    const takenNumbers = await this.studentNumbersTakenAt(
+      schoolId,
+      destSchoolId,
+      dto.toAcademicYearId,
+      enrollments.map((e) => e.studentNumber),
+    );
+    if (takenNumbers.size > 0) {
+      throw new BadRequestException(
+        `Student ID ${[...takenNumbers].join(", ")} is already in use at the destination school for ${toYear.name}`,
+      );
     }
 
     const incomingBySection = new Map<string, number>();
@@ -600,7 +712,7 @@ export class StudentLifecycleService {
             data: {
               studentId: enrollment.studentId,
               organizationId: enrollment.organizationId,
-              schoolId,
+              schoolId: destSchoolId,
               academicYearId: dto.toAcademicYearId,
               classId: toClass.id,
               sectionId: assignment.sectionId,
@@ -647,6 +759,7 @@ export class StudentLifecycleService {
               studentCount: dto.assignments.length,
               toClass: toClass.name,
               toAcademicYear: toYear.name,
+              ...(destSchoolId !== schoolId ? { toSchoolId: destSchoolId } : {}),
               sections: sections.map((s) => s.name),
             },
           },

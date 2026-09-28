@@ -39,7 +39,7 @@ describe("Super Admin sidebar structure", () => {
       Overview: ["Dashboard"],
       Organization: ["Schools"],
       Academic: ["Exam Papers", "Exams & Results"],
-      Operations: ["Student Lifecycle", "Transfers", "Central Finance"],
+      Operations: ["Student Lifecycle", "Alumni", "Transfers", "Central Finance"],
       Governance: ["Audit Log"],
     });
   });

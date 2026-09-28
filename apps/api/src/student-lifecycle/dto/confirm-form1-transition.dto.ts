@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { ArrayMinSize, IsArray, IsUUID, ValidateNested } from "class-validator";
+import { ArrayMinSize, IsArray, IsOptional, IsUUID, ValidateNested } from "class-validator";
 
 // One entry per student being transitioned — deliberately per-enrollment,
 // not one shared sectionId for the whole batch, so different students can
@@ -19,6 +19,11 @@ export class ConfirmForm1TransitionDto {
 
   @IsUUID()
   toAcademicYearId!: string;
+
+  // Optional: another school of the same organization — see PreviewForm1TransitionDto.
+  @IsOptional()
+  @IsUUID()
+  toSchoolId?: string;
 
   @IsArray()
   @ArrayMinSize(1)

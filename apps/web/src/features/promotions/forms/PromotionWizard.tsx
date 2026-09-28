@@ -102,7 +102,17 @@ function autoFillDestinations(
   return result;
 }
 
-export function PromotionWizard({ schoolId }: { schoolId: string }) {
+// initialClassId / initialFromYearId preselect the source when the wizard is
+// opened from a class card on the Year-End Progression landing page.
+export function PromotionWizard({
+  schoolId,
+  initialClassId,
+  initialFromYearId,
+}: {
+  schoolId: string;
+  initialClassId?: string;
+  initialFromYearId?: string;
+}) {
   const { accessToken } = useAuth();
 
   const [years, setYears] = useState<AcademicYear[]>([]);
@@ -142,15 +152,16 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
       .then(([y, c]) => {
         setYears(y);
         setClasses(c);
-        const current = y.find((yr) => yr.isCurrent) ?? y[0];
+        const current = y.find((yr) => yr.id === initialFromYearId) ?? y.find((yr) => yr.isCurrent) ?? y[0];
         if (current) setFromYearId(current.id);
-        if (c[0]) {
-          setClassId(c[0].id);
-          setSectionId(c[0].sections[0]?.id ?? "");
+        const initialClass = c.find((cl) => cl.id === initialClassId) ?? c[0];
+        if (initialClass) {
+          setClassId(initialClass.id);
+          setSectionId(initialClass.sections[0]?.id ?? "");
         }
       })
       .catch((err) => setLoadError(err instanceof ApiError ? err.message : "Failed to load form data"));
-  }, [accessToken, schoolId]);
+  }, [accessToken, schoolId, initialClassId, initialFromYearId]);
 
   const selectedClass = classes.find((c) => c.id === classId);
 

@@ -12,6 +12,8 @@ interface LifecycleListQuery {
   academicYearName?: string;
   search?: string;
   status?: string;
+  divisionType?: string;
+  sectionName?: string;
   page?: string;
   pageSize?: string;
 }
@@ -23,6 +25,9 @@ function parseListFilters(query: LifecycleListQuery): LifecycleListFilters {
     academicYearName: query.academicYearName,
     search: query.search,
     status: query.status,
+    // Anything but the two real division types is ignored (= both).
+    divisionType: query.divisionType === "PRIMARY" || query.divisionType === "SECONDARY" ? query.divisionType : undefined,
+    sectionName: query.sectionName || undefined,
     page: query.page ? Number(query.page) : undefined,
     pageSize: query.pageSize ? Number(query.pageSize) : undefined,
   };
@@ -78,6 +83,12 @@ export class StudentLifecycleController {
   @Get("student-lifecycle/alumni")
   listAlumni(@CurrentUser() user: AuthenticatedUser, @Query() query: LifecycleListQuery) {
     return this.lifecycle.listAlumni(user, parseListFilters(query));
+  }
+
+  @RequirePermissions("students.view")
+  @Get("student-lifecycle/alumni-directory")
+  listAlumniDirectory(@CurrentUser() user: AuthenticatedUser, @Query() query: LifecycleListQuery) {
+    return this.lifecycle.listAlumniDirectory(user, parseListFilters(query));
   }
 
   @RequirePermissions("promotions.execute")

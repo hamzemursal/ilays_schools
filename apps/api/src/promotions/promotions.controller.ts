@@ -5,6 +5,22 @@ import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { RequirePermissions } from "../auth/decorators/require-permissions.decorator";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 
+@Controller("schools/:schoolId/promotions")
+export class PromotionsOverviewController {
+  constructor(private readonly promotions: PromotionsService) {}
+
+  @RequirePermissions("promotions.execute")
+  @Get("overview")
+  overview(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Query("academicYearId") academicYearId?: string,
+  ) {
+    if (!academicYearId) throw new BadRequestException("academicYearId query param is required");
+    return this.promotions.overview(user, schoolId, academicYearId);
+  }
+}
+
 @Controller("schools/:schoolId/sections/:sectionId/promotion")
 export class PromotionsController {
   constructor(private readonly promotions: PromotionsService) {}

@@ -27,7 +27,7 @@ const GROUPS: { label: string; entries: { href: string; label?: string }[] }[] =
   },
   {
     label: "Operations",
-    entries: [{ href: "/student-lifecycle" }, { href: "/transfers" }, { href: "/finance", label: "Central Finance" }],
+    entries: [{ href: "/student-lifecycle" }, { href: "/alumni" }, { href: "/transfers" }, { href: "/finance", label: "Central Finance" }],
   },
   { label: "Governance", entries: [{ href: "/audit-log" }] },
 ];

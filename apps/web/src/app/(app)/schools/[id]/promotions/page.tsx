@@ -3,7 +3,7 @@
 import { use } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { PromotionWizard } from "@/features/promotions/forms/PromotionWizard";
+import { ProgressionLanding } from "@/features/progression/ProgressionLanding";
 
 export default function PromotionsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: schoolId } = use(params);
@@ -13,13 +13,13 @@ export default function PromotionsPage({ params }: { params: Promise<{ id: strin
   return (
     <div>
       <PageHeader
-        eyebrow="Promotions"
+        eyebrow="Year-End Progression"
         title={schoolName}
-        description="Move a section's students to the next class, or mark them complete/graduated, at year end."
-        breadcrumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Promotions" }]}
+        description="Progress every class at year end. Class 8 continues to Form 1; Form 4 graduates to Alumni."
+        breadcrumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Year-End Progression" }]}
       />
-      <div className="mx-auto max-w-6xl p-4 sm:p-6">
-        <PromotionWizard schoolId={schoolId} />
+      <div className="mx-auto max-w-7xl p-4 sm:p-6">
+        <ProgressionLanding schoolId={schoolId} />
       </div>
     </div>
   );

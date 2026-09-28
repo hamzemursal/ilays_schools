@@ -17,20 +17,19 @@ import { LifecycleStatusBadge } from "./LifecycleBadges";
 import { resolvePrimaryRowState, resolveSecondaryRowState, formatLifecycleDate } from "./state";
 import { useLifecycleYearFilter } from "./useLifecycleYearFilter";
 
-export type LifecycleListKind = "primary-completed" | "secondary-graduated" | "awaiting-enrollment" | "alumni";
+// (The former "alumni" list lives on as the Alumni Directory — features/alumni.)
+export type LifecycleListKind = "primary-completed" | "secondary-graduated" | "awaiting-enrollment";
 
 const FETCHERS: Record<LifecycleListKind, (accessToken: string, filters: import("@/lib/api").LifecycleListFilters) => Promise<LifecycleListResponse>> = {
   "primary-completed": api.listPrimaryCompleted,
   "awaiting-enrollment": api.listAwaitingEnrollment,
   "secondary-graduated": api.listSecondaryGraduated,
-  alumni: api.listAlumni,
 };
 
 const IS_SECONDARY: Record<LifecycleListKind, boolean> = {
   "primary-completed": false,
   "awaiting-enrollment": false,
   "secondary-graduated": true,
-  alumni: true,
 };
 
 const EMPTY_COPY: Record<LifecycleListKind, { title: string; description: string }> = {
@@ -46,7 +45,6 @@ const EMPTY_COPY: Record<LifecycleListKind, { title: string; description: string
     title: "No Secondary graduations found",
     description: "Students who finish the final Secondary class will appear here.",
   },
-  alumni: { title: "No alumni yet", description: "Graduated students appear here as alumni." },
 };
 
 // Status dropdown per kind — Awaiting Enrollment and Alumni are always
@@ -245,7 +243,7 @@ export function LifecycleListExplorer({
       nextStepColumn,
       actionsColumn,
     ];
-  } else if (kind === "awaiting-enrollment") {
+  } else {
     columns = [
       studentColumn,
       studentIdColumn,
@@ -257,8 +255,6 @@ export function LifecycleListExplorer({
       { key: "nextAction", header: "Available Next Action", render: (r) => rowState(r).nextStep },
       actionsColumn,
     ];
-  } else {
-    columns = [studentColumn, studentIdColumn, schoolColumn, classColumn, sectionColumn, yearColumn, { key: "graduationDate", header: "Graduation Date", render: (r) => formatLifecycleDate(r.endDate) }, statusColumn];
   }
 
   const supportsBulkTransition = kind === "awaiting-enrollment";

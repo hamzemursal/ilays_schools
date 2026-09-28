@@ -126,6 +126,54 @@ export class PromotionsService {
     );
   }
 
+  // Read-only year-end overview for the Year-End Progression landing page: one
+  // row per class of `academicYearId`, with how many of its students are still
+  // ACTIVE (not yet progressed) and how many were already progressed out of it
+  // by a promotion batch (PROMOTED/RETAINED/COMPLETED/GRADUATED). Nothing is
+  // computed from results here — eligibility is still decided per section by
+  // preview(). isFinal uses the same fixed FINAL_LEVEL_BY_DIVISION rule.
+  async overview(actor: AuthenticatedUser, schoolId: string, academicYearId: string) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    const year = await this.prisma.academicYear.findFirst({ where: { id: academicYearId, schoolId } });
+    if (!year) throw new BadRequestException("That academic year does not belong to this school");
+
+    const classes = await this.prisma.class.findMany({
+      where: { academicYearId, division: { schoolId } },
+      include: { division: true, sections: { orderBy: { name: "asc" } } },
+      orderBy: [{ division: { type: "asc" } }, { level: "asc" }],
+    });
+    const counts = await this.prisma.studentEnrollment.groupBy({
+      by: ["sectionId", "status"],
+      where: { schoolId, academicYearId, classId: { in: classes.map((c) => c.id) } },
+      _count: { _all: true },
+    });
+    const PROGRESSED = new Set(["PROMOTED", "RETAINED", "COMPLETED", "GRADUATED"]);
+    const countFor = (sectionId: string, match: (status: string) => boolean) =>
+      counts.filter((c) => c.sectionId === sectionId && match(c.status)).reduce((sum, c) => sum + c._count._all, 0);
+
+    return {
+      academicYear: { id: year.id, name: year.name },
+      classes: classes.map((c) => {
+        const sections = c.sections.map((s) => ({
+          id: s.id,
+          name: s.name,
+          activeCount: countFor(s.id, (st) => st === "ACTIVE"),
+          progressedCount: countFor(s.id, (st) => PROGRESSED.has(st)),
+        }));
+        return {
+          id: c.id,
+          name: c.name,
+          level: c.level,
+          divisionType: c.division.type,
+          isFinal: c.level >= FINAL_LEVEL_BY_DIVISION[c.division.type],
+          sections,
+          activeCount: sections.reduce((n, s) => n + s.activeCount, 0),
+          progressedCount: sections.reduce((n, s) => n + s.progressedCount, 0),
+        };
+      }),
+    };
+  }
+
   // Per-student review data: each active enrollment's real Term 1/Term 2/
   // Annual result (from ExamsService — never recomputed here, never a
   // second source of truth) plus the outcome the system suggests, which the

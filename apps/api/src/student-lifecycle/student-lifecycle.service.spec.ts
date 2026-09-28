@@ -358,3 +358,145 @@ describe("StudentLifecycleService.confirmForm1Transition", () => {
     );
   });
 });
+
+describe("StudentLifecycleService — Form 1 in another school of the organization", () => {
+  let prisma: MockPrisma;
+  let service: StudentLifecycleService;
+  let schools: { findOneAccessibleOrThrow: jest.Mock };
+
+  beforeEach(() => {
+    prisma = createMockPrisma();
+    ({ service, schools } = createService(prisma));
+    schools.findOneAccessibleOrThrow.mockImplementation((_actor: unknown, id: string) =>
+      Promise.resolve({ id, organizationId: id === "school-other-org" ? "org-2" : "org-1" }),
+    );
+    prisma.class.findFirst.mockResolvedValue(FORM1_CLASS);
+    prisma.academicYear.findFirst.mockResolvedValue({ id: "year-2", name: "2028" });
+  });
+
+  it("looks the destination year and Form 1 up in the destination school, after checking access to both schools", async () => {
+    prisma.studentEnrollment.findMany.mockResolvedValue([]);
+    await service.previewForm1Transition(ACTOR, "school-1", {
+      toSchoolId: "school-2",
+      toClassId: "class-form1",
+      toAcademicYearId: "year-2",
+      enrollmentIds: [],
+    });
+
+    expect(schools.findOneAccessibleOrThrow).toHaveBeenCalledWith(ACTOR, "school-1");
+    expect(schools.findOneAccessibleOrThrow).toHaveBeenCalledWith(ACTOR, "school-2");
+    expect(prisma.academicYear.findFirst).toHaveBeenCalledWith({ where: { id: "year-2", schoolId: "school-2" } });
+    expect(prisma.class.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ division: { schoolId: "school-2", type: "SECONDARY" } }) }),
+    );
+  });
+
+  it("refuses a destination school in a different organization", async () => {
+    await expect(
+      service.previewForm1Transition(ACTOR, "school-1", {
+        toSchoolId: "school-other-org",
+        toClassId: "class-form1",
+        toAcademicYearId: "year-2",
+        enrollmentIds: [],
+      }),
+    ).rejects.toThrow("The destination school must belong to the same organization");
+  });
+
+  it("flags a student whose permanent ID is already used at the destination school that year", async () => {
+    prisma.studentEnrollment.findMany
+      .mockResolvedValueOnce([completedEnrollment()])
+      .mockResolvedValueOnce([{ studentNumber: "STU-1" }]);
+    prisma.studentEnrollment.count.mockResolvedValue(0);
+
+    const result = await service.previewForm1Transition(ACTOR, "school-1", {
+      toSchoolId: "school-2",
+      toClassId: "class-form1",
+      toAcademicYearId: "year-2",
+      enrollmentIds: ["enr-1"],
+    });
+
+    expect(result.eligible).toEqual([]);
+    expect(result.ineligible[0].reason).toMatch(/STU-1 is already in use at the destination school/);
+  });
+
+  it("creates the ACTIVE Form 1 enrollment in the destination school, keeping the permanent Student ID", async () => {
+    prisma.section.findMany.mockResolvedValue([{ id: "sec-1", name: "A", capacity: null }]);
+    prisma.studentEnrollment.findMany
+      .mockResolvedValueOnce([{ ...completedEnrollment(), schoolId: "school-1" }])
+      .mockResolvedValueOnce([]);
+    prisma.studentEnrollment.aggregate.mockResolvedValue({ _max: { rollNumber: null } });
+    prisma.promotionBatch.create.mockResolvedValue({ id: "batch-1" });
+    prisma.studentEnrollment.create.mockResolvedValue({ id: "enr-new" });
+
+    await service.confirmForm1Transition(ACTOR, "school-1", {
+      toSchoolId: "school-2",
+      toClassId: "class-form1",
+      toAcademicYearId: "year-2",
+      assignments: [{ enrollmentId: "enr-1", sectionId: "sec-1" }],
+    });
+
+    expect(prisma.studentEnrollment.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ schoolId: "school-2", studentNumber: "STU-1", status: "ACTIVE", classId: "class-form1" }),
+    });
+    // The source Class 8 enrollment is never rewritten — it stays COMPLETED.
+    expect(prisma.promotionItem.update).toHaveBeenCalledWith({
+      where: { fromEnrollmentId: "enr-1" },
+      data: { toEnrollmentId: "enr-new" },
+    });
+    expect(prisma.promotionBatch.create).toHaveBeenCalledWith({ data: expect.objectContaining({ schoolId: "school-1" }) });
+  });
+});
+
+describe("StudentLifecycleService — fixed final classes and the Alumni Directory", () => {
+  function setup() {
+    const prisma = createMockPrisma() as MockPrisma & Record<string, unknown>;
+    const classFindMany = jest.fn().mockResolvedValue([]);
+    (prisma.class as unknown as { findMany: jest.Mock }).findMany = classFindMany;
+    prisma.studentEnrollment.count.mockResolvedValue(0);
+    prisma.studentEnrollment.findMany.mockResolvedValue([]);
+    prisma.section.findMany.mockResolvedValue([{ name: "A" }, { name: "B" }]);
+    const { service } = createService(prisma as MockPrisma);
+    return { prisma, service, classFindMany };
+  }
+
+  it("finds graduation candidates only in Form 4 — never the highest class a school happens to have", async () => {
+    const { service, classFindMany } = setup();
+    await service.listSecondaryGraduated(ACTOR, { status: "PENDING" });
+    expect(classFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ level: 4, division: expect.objectContaining({ type: "SECONDARY" }) }) }),
+    );
+  });
+
+  it("lists Form 4 GRADUATED and Class 8 COMPLETED-not-continuing enrollments, with section facets", async () => {
+    const { service, prisma } = setup();
+    const result = await service.listAlumniDirectory(ACTOR, {});
+
+    const where = prisma.studentEnrollment.findMany.mock.calls[0][0].where;
+    const division = where.AND[1];
+    expect(division.OR).toEqual([
+      { status: "GRADUATED", class: { level: 4, division: { type: "SECONDARY" } } },
+      {
+        status: "COMPLETED",
+        class: { level: 8, division: { type: "PRIMARY" } },
+        promotionFrom: { none: { toEnrollmentId: { not: null } } },
+      },
+    ]);
+    expect(result.facets.sectionNames).toEqual(["A", "B"]);
+  });
+
+  it("narrows by division and section name", async () => {
+    const { service, prisma } = setup();
+    await service.listAlumniDirectory(ACTOR, { divisionType: "SECONDARY", sectionName: "B" });
+
+    const where = prisma.studentEnrollment.findMany.mock.calls[0][0].where;
+    expect(where.AND[0].AND[1]).toEqual({ status: "GRADUATED", class: { level: 4, division: { type: "SECONDARY" } } });
+    expect(where.AND[1]).toEqual({ section: { name: "B" } });
+  });
+
+  it("keeps a School Admin inside their own school(s)", async () => {
+    const { service, prisma } = setup();
+    await service.listAlumniDirectory(ACTOR, {});
+    const where = prisma.studentEnrollment.findMany.mock.calls[0][0].where;
+    expect(where.AND[0]).toEqual(expect.objectContaining({ organizationId: "org-1", schoolId: { in: ["school-1"] } }));
+  });
+});

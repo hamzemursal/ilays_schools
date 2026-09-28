@@ -739,3 +739,38 @@ describe("PromotionsService — academic-year scoped classes (Phase 5B-2)", () =
     });
   });
 });
+
+describe("PromotionsService.overview — Year-End Progression landing", () => {
+  it("returns every class of the year with active vs progressed counts and the fixed final-class flag", async () => {
+    const prisma = createMockPrisma() as MockPrisma & { class: { findMany: jest.Mock }; studentEnrollment: { groupBy: jest.Mock } };
+    (prisma.class as unknown as { findMany: jest.Mock }).findMany = jest.fn().mockResolvedValue([
+      { id: "c7", name: "Class 7", level: 7, division: { type: "PRIMARY" }, sections: [{ id: "s7a", name: "A" }] },
+      { id: "c8", name: "Class 8", level: 8, division: { type: "PRIMARY" }, sections: [{ id: "s8a", name: "A" }] },
+      { id: "f2", name: "Form 2", level: 2, division: { type: "SECONDARY" }, sections: [{ id: "f2a", name: "A" }] },
+    ]);
+    (prisma.studentEnrollment as unknown as { groupBy: jest.Mock }).groupBy = jest.fn().mockResolvedValue([
+      { sectionId: "s7a", status: "ACTIVE", _count: { _all: 30 } },
+      { sectionId: "s8a", status: "COMPLETED", _count: { _all: 20 } },
+      { sectionId: "s8a", status: "RETAINED", _count: { _all: 2 } },
+      { sectionId: "s8a", status: "ACTIVE", _count: { _all: 3 } },
+    ]);
+    mockYears(prisma);
+    const { service } = createService(prisma);
+
+    const result = await service.overview(ACTOR, "school-1", "year-1");
+
+    expect(result.classes.map((c) => [c.name, c.isFinal, c.activeCount, c.progressedCount])).toEqual([
+      ["Class 7", false, 30, 0],
+      ["Class 8", true, 3, 22],
+      // Form 2 is never a final class, even if it is the highest one configured.
+      ["Form 2", false, 0, 0],
+    ]);
+  });
+
+  it("rejects an academic year of another school", async () => {
+    const prisma = createMockPrisma();
+    prisma.academicYear.findFirst.mockResolvedValue(null);
+    const { service } = createService(prisma);
+    await expect(service.overview(ACTOR, "school-1", "year-x")).rejects.toThrow(BadRequestException);
+  });
+});

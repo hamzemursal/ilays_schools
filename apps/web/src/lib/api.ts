@@ -1955,6 +1955,8 @@ export interface LifecycleEnrollmentRow {
   endDate: string | null;
   enrolledInForm1: boolean;
   transfer: { status: TransferStatus; toSchoolId: string } | null;
+  // Division of the enrollment's class (Primary / Secondary).
+  divisionType?: DivisionType;
 }
 
 export interface LifecycleListResponse {
@@ -1970,8 +1972,34 @@ export interface LifecycleListFilters {
   academicYearName?: string;
   search?: string;
   status?: string;
+  // Alumni Directory only.
+  divisionType?: DivisionType;
+  sectionName?: string;
   page?: number;
   pageSize?: number;
+}
+
+// Alumni Directory — Form 4 graduates and Class 8 completers who did not
+// continue, straight from their finishing enrollment (see
+// StudentLifecycleService.listAlumniDirectory).
+export interface AlumniDirectoryResponse extends LifecycleListResponse {
+  facets: { sectionNames: string[] };
+}
+
+// Year-End Progression landing — see PromotionsService.overview.
+export interface ProgressionOverviewClass {
+  id: string;
+  name: string;
+  level: number;
+  divisionType: DivisionType;
+  isFinal: boolean;
+  sections: { id: string; name: string; activeCount: number; progressedCount: number }[];
+  activeCount: number;
+  progressedCount: number;
+}
+export interface ProgressionOverview {
+  academicYear: { id: string; name: string };
+  classes: ProgressionOverviewClass[];
 }
 
 // One entry per distinct AcademicYear.name across the actor's accessible
@@ -2694,12 +2722,16 @@ export const api = {
     request<LifecycleListResponse>(`/student-lifecycle/awaiting-enrollment${auditLogQs(filters)}`, { accessToken }),
   listSecondaryGraduated: (accessToken: string, filters: LifecycleListFilters) =>
     request<LifecycleListResponse>(`/student-lifecycle/secondary-graduated${auditLogQs(filters)}`, { accessToken }),
-  listAlumni: (accessToken: string, filters: LifecycleListFilters) =>
-    request<LifecycleListResponse>(`/student-lifecycle/alumni${auditLogQs(filters)}`, { accessToken }),
+  listAlumniDirectory: (accessToken: string, filters: LifecycleListFilters) =>
+    request<AlumniDirectoryResponse>(`/student-lifecycle/alumni-directory${auditLogQs(filters)}`, { accessToken }),
+  getProgressionOverview: (accessToken: string, schoolId: string, academicYearId: string) =>
+    request<ProgressionOverview>(`/schools/${schoolId}/promotions/overview${qs({ academicYearId })}`, { accessToken }),
+  // schoolId is the SOURCE school; toSchoolId (optional) another school of
+  // the same organization whose Form 1 the students continue into.
   previewForm1Transition: (
     accessToken: string,
     schoolId: string,
-    body: { toClassId: string; toAcademicYearId: string; enrollmentIds: string[] },
+    body: { toClassId: string; toAcademicYearId: string; toSchoolId?: string; enrollmentIds: string[] },
   ) =>
     request<Form1TransitionPreview>(`/schools/${schoolId}/student-lifecycle/form-1-transition/preview`, {
       method: "POST",
@@ -2709,7 +2741,12 @@ export const api = {
   confirmForm1Transition: (
     accessToken: string,
     schoolId: string,
-    body: { toClassId: string; toAcademicYearId: string; assignments: { enrollmentId: string; sectionId: string }[] },
+    body: {
+      toClassId: string;
+      toAcademicYearId: string;
+      toSchoolId?: string;
+      assignments: { enrollmentId: string; sectionId: string }[];
+    },
   ) =>
     request<Form1TransitionResult>(`/schools/${schoolId}/student-lifecycle/form-1-transition/confirm`, {
       method: "POST",

@@ -264,7 +264,9 @@ describeWithDb("Student & Parent portals — results and attendance, real databa
       const report = await studentPortal.myResultsReport(studentA.actor, year2027);
 
       expect(marksOf(report, 0)).toEqual(expect.arrayContaining([[80, 100], [10, 50]]));
-      expect(report.terms[0].results).toHaveLength(2);
+      // The two marked results plus the absent student's Oral, listed as Incomplete.
+      expect(report.terms[0].results).toHaveLength(3);
+      expect(report.terms[0].results.filter((r) => r.status === "COMPLETED")).toHaveLength(2);
       expect(report.terms[0].percentage).toBe(60); // (80+10)/(100+50)
       expect(report.terms[0].results.find((r) => r.maxMarks === 100)!.percentage).toBe(80);
     });
@@ -280,11 +282,12 @@ describeWithDb("Student & Parent portals — results and attendance, real databa
       }
     });
 
-    dbIt("never shows an absent student as 0/max", async () => {
+    dbIt("never shows an absent student as 0/max — the result is Incomplete and left out of the average", async () => {
       const report = await studentPortal.myResultsReport(studentA.actor, year2027);
 
       const oral = report.terms[0].results.filter((r) => r.maxMarks === 40);
-      expect(oral).toEqual([]);
+      expect(oral).toHaveLength(1);
+      expect(oral[0]).toMatchObject({ status: "INCOMPLETE", marksObtained: null, percentage: null });
       expect(report.terms[0].percentage).toBe(60);
     });
 

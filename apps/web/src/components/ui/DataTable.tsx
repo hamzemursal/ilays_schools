@@ -165,7 +165,7 @@ export function DataTable<T>({
         />
       ) : (
         <>
-          <div className="overflow-x-auto rounded-xl border border-border">
+          <div className="overflow-x-auto rounded-2xl border border-border bg-background">
             <table className="w-full min-w-[560px] text-left text-sm">
               <thead className="bg-surface-soft">
                 <tr>

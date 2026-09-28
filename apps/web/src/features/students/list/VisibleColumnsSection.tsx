@@ -29,10 +29,10 @@ export function VisibleColumnsSection({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-background shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
+    <div className="rounded-2xl border border-border bg-background shadow-sm">
+      <div className={`flex flex-wrap items-center justify-between gap-3 p-4 sm:px-5 ${expanded ? "border-b border-border" : ""}`}>
         <div className="flex items-start gap-3">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
             <Eye className="size-4.5" />
           </div>
           <div>
@@ -60,7 +60,7 @@ export function VisibleColumnsSection({
       </div>
 
       {expanded && (
-        <div className="grid grid-cols-2 gap-x-6 gap-y-5 p-4 sm:grid-cols-3 xl:grid-cols-5">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-5 p-4 sm:grid-cols-3 sm:px-5 xl:grid-cols-5">
           {CATEGORY_ORDER.map((category) => {
             const columns = COLUMN_DEFS.filter((c) => c.category === category);
             return (

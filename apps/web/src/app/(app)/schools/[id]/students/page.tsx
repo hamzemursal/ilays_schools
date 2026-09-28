@@ -283,6 +283,7 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
   return (
     <div>
       <PageHeader
+        variant="plain"
         eyebrow="Students"
         title={schoolName}
         description="View and manage students in your school"
@@ -314,12 +315,13 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
           </>
         }
       />
-      <div className="space-y-5 p-4 sm:p-6 print:p-0">
+      <div className="space-y-5 px-3 pb-8 pt-4 sm:px-5 print:p-0">
         {error ? (
           <Alert tone="danger">{error}</Alert>
         ) : (
           accessToken && (
             <>
+              <div className="rounded-2xl border border-border bg-background p-4 shadow-sm print:hidden sm:p-5">
               <StudentListFilters
                 schoolId={schoolId}
                 schools={canSchoolsView ? schools : null}
@@ -330,6 +332,7 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
                 state={filters}
                 onChange={patchFilters}
               />
+              </div>
 
               <StudentListSummaryCards summary={summary} loading={!summary && !error} />
 
@@ -394,7 +397,7 @@ export default function StudentsListPage({ params }: { params: Promise<{ id: str
               />
 
               {result && total > 0 && (
-                <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-background px-4 py-3 shadow-sm print:hidden">
                   <p className="text-sm text-foreground-soft">
                     Showing {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, total)} of {total} students
                   </p>

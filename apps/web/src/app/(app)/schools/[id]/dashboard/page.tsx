@@ -81,12 +81,7 @@ export default function SchoolDashboardPage({ params }: { params: Promise<{ id: 
           <nav aria-label="Breadcrumb" className="text-sm text-foreground-soft">
             Dashboard
           </nav>
-          <h1 className="mt-2 text-balance text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-            <span aria-hidden className="mr-2">
-              👋
-            </span>
-            Welcome back, {schoolName}
-          </h1>
+          <h1 className="mt-2 text-balance text-2xl font-bold tracking-tight text-foreground sm:text-3xl">Welcome back, {schoolName}</h1>
           <p className="mt-1 text-sm text-foreground-soft">Here&apos;s what&apos;s happening in your school today.</p>
         </div>
         {summary && summary.academicYears.length > 0 && (

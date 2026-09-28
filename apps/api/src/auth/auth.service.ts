@@ -173,13 +173,20 @@ export class AuthService {
     // this ID format can't rule out — treated here as "no match" rather
     // than guessing, since logging in as the wrong student is far worse
     // than a rejected login.
+    //
+    // GRADUATED is matched too: a graduated student keeps read-only access to
+    // their own history (see StudentPortalService.getSelfOrThrow), so the
+    // Login ID they always used must keep working after graduation. Matches
+    // are de-duplicated by account, since one student can hold several
+    // enrollments under the same number.
     const matches = await this.prisma.studentEnrollment.findMany({
-      where: { studentNumber: identifier, status: "ACTIVE", student: { userId: { not: null } } },
+      where: { studentNumber: identifier, status: { in: ["ACTIVE", "GRADUATED"] }, student: { userId: { not: null } } },
       include: { student: true },
     });
-    if (matches.length !== 1) return null;
+    const userIds = [...new Set(matches.map((m) => m.student.userId!))];
+    if (userIds.length !== 1) return null;
 
-    return this.prisma.user.findUnique({ where: { id: matches[0].student.userId! } });
+    return this.prisma.user.findUnique({ where: { id: userIds[0] } });
   }
 
   async refresh(rawRefreshToken: string): Promise<TokenPair> {

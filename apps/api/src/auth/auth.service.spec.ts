@@ -113,4 +113,59 @@ describe("AuthService.login — TOTP branch (MFA_LOGIN_ENFORCED = false)", () =>
       expect(prisma.refreshToken.create).toHaveBeenCalled();
     });
   });
+
+  describe("login by Student Login ID", () => {
+    const studentUser = {
+      id: "student-user-1",
+      email: "stu@portal.local",
+      organizationId: "org-1",
+      status: "ACTIVE",
+      passwordHash: "",
+      totpEnabledAt: null,
+      roles: [],
+      schools: [],
+    };
+
+    beforeEach(() => {
+      studentUser.passwordHash = passwordHash;
+      prisma.user.findUnique.mockImplementation(({ where }: { where: { email?: string; id?: string } }) =>
+        Promise.resolve(where.id === studentUser.id ? studentUser : null),
+      );
+    });
+
+    it("matches ACTIVE and GRADUATED enrollments, so a graduated student can still sign in", async () => {
+      prisma.studentEnrollment.findMany.mockResolvedValue([
+        { status: "GRADUATED", student: { userId: studentUser.id } },
+      ]);
+
+      const result = await service.login("STU-2025-00012", "correct-password");
+
+      expect(prisma.studentEnrollment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ studentNumber: "STU-2025-00012", status: { in: ["ACTIVE", "GRADUATED"] } }),
+        }),
+      );
+      expect("mfaRequired" in result).toBe(false);
+    });
+
+    it("treats several enrollments of the same student as one match", async () => {
+      prisma.studentEnrollment.findMany.mockResolvedValue([
+        { status: "GRADUATED", student: { userId: studentUser.id } },
+        { status: "ACTIVE", student: { userId: studentUser.id } },
+      ]);
+
+      const result = await service.login("STU-2025-00012", "correct-password");
+
+      expect("mfaRequired" in result).toBe(false);
+    });
+
+    it("still refuses an ID shared by two different students' accounts", async () => {
+      prisma.studentEnrollment.findMany.mockResolvedValue([
+        { status: "ACTIVE", student: { userId: studentUser.id } },
+        { status: "GRADUATED", student: { userId: "other-user" } },
+      ]);
+
+      await expect(service.login("STU-2025-00012", "correct-password")).rejects.toThrow(UnauthorizedException);
+    });
+  });
 });

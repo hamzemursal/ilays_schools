@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { FormField, Input } from "@/components/ui/FormControls";
+import { PasswordInput } from "@/components/ui/PasswordInput";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 
@@ -221,9 +222,8 @@ export function TwoFactorSection({
           </p>
           <form onSubmit={confirmDisable} className="mt-4">
             <FormField label="Current password" htmlFor="totp-disable-password" required>
-              <Input
+              <PasswordInput
                 id="totp-disable-password"
-                type="password"
                 autoFocus
                 required
                 value={password}

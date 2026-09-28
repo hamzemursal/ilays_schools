@@ -5,7 +5,8 @@ import { useAuth, ApiError } from "@/lib/auth-context";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
-import { FormField, Input } from "@/components/ui/FormControls";
+import { FormField } from "@/components/ui/FormControls";
+import { PasswordInput } from "@/components/ui/PasswordInput";
 
 // Used two ways: as the forced full-page gate AppShell renders whenever
 // user.mustChangePassword is true (a Student Portal account's first login,
@@ -62,8 +63,7 @@ export function ChangePasswordForm({ forced, onSuccess }: { forced?: boolean; on
       {error && <Alert tone="danger">{error}</Alert>}
 
       <FormField label={forced ? "Temporary password" : "Current password"} required>
-        <Input
-          type="password"
+        <PasswordInput
           required
           value={currentPassword}
           onChange={(e) => setCurrentPassword(e.target.value)}
@@ -71,8 +71,7 @@ export function ChangePasswordForm({ forced, onSuccess }: { forced?: boolean; on
         />
       </FormField>
       <FormField label="New password" required>
-        <Input
-          type="password"
+        <PasswordInput
           required
           minLength={10}
           value={newPassword}
@@ -81,8 +80,7 @@ export function ChangePasswordForm({ forced, onSuccess }: { forced?: boolean; on
         />
       </FormField>
       <FormField label="Confirm new password" required>
-        <Input
-          type="password"
+        <PasswordInput
           required
           minLength={10}
           value={confirmPassword}

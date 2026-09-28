@@ -5,7 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { KeyRound } from "lucide-react";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { Button } from "@/components/ui/Button";
-import { FormField, Input } from "@/components/ui/FormControls";
+import { FormField } from "@/components/ui/FormControls";
+import { PasswordInput } from "@/components/ui/PasswordInput";
 import { Alert } from "@/components/ui/Alert";
 
 function AcceptInviteForm() {
@@ -60,9 +61,8 @@ function AcceptInviteForm() {
       <form onSubmit={onSubmit} className="rounded-xl border border-border bg-background p-6 shadow-sm">
         <div className="space-y-4">
           <FormField label="New password" htmlFor="password" required>
-            <Input
+            <PasswordInput
               id="password"
-              type="password"
               required
               autoFocus
               value={password}
@@ -71,9 +71,8 @@ function AcceptInviteForm() {
           </FormField>
 
           <FormField label="Confirm password" htmlFor="confirm" required>
-            <Input
+            <PasswordInput
               id="confirm"
-              type="password"
               required
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}

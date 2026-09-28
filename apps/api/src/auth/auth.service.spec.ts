@@ -104,6 +104,24 @@ describe("AuthService.login — TOTP branch (MFA_LOGIN_ENFORCED = false)", () =>
     await expect(service.login("admin@example.com", "wrong-password")).rejects.toThrow(UnauthorizedException);
   });
 
+  describe("which part of the sign-in is wrong", () => {
+    it("says Invalid password when the account exists but the password is wrong", async () => {
+      await expect(service.login("admin@example.com", "wrong-password")).rejects.toThrow("Invalid password");
+    });
+
+    it("says Invalid email for an email with no account", async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.studentEnrollment.findMany.mockResolvedValue([]);
+      await expect(service.login("nobody@example.com", "x")).rejects.toThrow("Invalid email");
+    });
+
+    it("says Invalid Login ID for a Student Login ID with no account", async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.studentEnrollment.findMany.mockResolvedValue([]);
+      await expect(service.login("STU-9999", "x")).rejects.toThrow("Invalid Login ID");
+    });
+  });
+
   describe("completeMfaLogin", () => {
     it("issues real tokens and records the LOGIN audit event", async () => {
       const result = await service.completeMfaLogin("user-1");

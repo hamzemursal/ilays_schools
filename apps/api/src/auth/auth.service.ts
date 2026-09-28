@@ -62,7 +62,10 @@ export class AuthService {
         severity: "WARNING",
         reason: "No matching account for this identifier",
       });
-      throw new UnauthorizedException("Invalid email or password");
+      // Tells the person WHICH part is wrong (a product decision). The
+      // trade-off — it confirms whether an email / Login ID exists — is
+      // limited by the strict per-IP throttle on POST /auth/login.
+      throw new UnauthorizedException(identifier.includes("@") ? "Invalid email" : "Invalid Login ID");
     }
 
     const actor = await resolveAuthenticatedUser(this.prisma, user.id);
@@ -101,7 +104,7 @@ export class AuthService {
         severity: "WARNING",
         reason: "Incorrect password",
       });
-      throw new UnauthorizedException("Invalid email or password");
+      throw new UnauthorizedException("Invalid password");
     }
 
     // Password alone was correct, but that's deliberately not enough to

@@ -69,7 +69,9 @@ export function LoginForm({
       }
       afterLogin(result);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
+      // Sign-in is rate limited (10 attempts a minute) — say so plainly.
+      if (err instanceof ApiError && err.status === 429) setError("Too many sign-in attempts. Wait a minute and try again.");
+      else setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
     } finally {
       setSubmitting(false);
     }

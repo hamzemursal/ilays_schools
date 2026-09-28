@@ -1,3 +1,4 @@
+import { Throttle } from "@nestjs/throttler";
 import { Body, Controller, Get, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { AuthService, TokenPair } from "./auth.service";
@@ -58,6 +59,9 @@ export class AuthController {
     private readonly documents: DocumentsService,
   ) {}
 
+  // Strict brute-force limit for sign-in: 10 attempts per minute per client,
+  // well below the app-wide default.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Public()
   @Post("login")
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {

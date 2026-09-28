@@ -33,7 +33,9 @@ export function Form1TransitionWizard({ schoolId, schoolName }: { schoolId: stri
   const [candidates, setCandidates] = useState<LifecycleEnrollmentRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [classes, setClasses] = useState<ClassWithSections[]>([]);
+  // Classes are academic-year scoped: these are the DESTINATION year's own
+  // classes (keyed by that year), loaded once a destination year is chosen.
+  const [loadedClasses, setLoadedClasses] = useState<{ yearId: string; classes: ClassWithSections[] } | null>(null);
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
   const [toClassId, setToClassId] = useState("");
   const [toAcademicYearId, setToAcademicYearId] = useState("");
@@ -53,18 +55,10 @@ export function Form1TransitionWizard({ schoolId, schoolName }: { schoolId: stri
   // destination class/year options, once up front.
   useEffect(() => {
     if (!accessToken) return;
-    Promise.all([
-      api.listAwaitingEnrollment(accessToken, { schoolId, pageSize: 100 }),
-      api.listClasses(accessToken, schoolId),
-      api.listAcademicYears(accessToken, schoolId),
-    ])
-      .then(([awaiting, classList, years]) => {
+    Promise.all([api.listAwaitingEnrollment(accessToken, { schoolId, pageSize: 100 }), api.listAcademicYears(accessToken, schoolId)])
+      .then(([awaiting, years]) => {
         setCandidates(awaiting.data);
-        setClasses(classList);
         setAcademicYears(years);
-
-        const form1Classes = classList.filter((c) => c.division.type === "SECONDARY" && c.level === 1);
-        if (form1Classes.length === 1) setToClassId(form1Classes[0].id);
 
         const initialIds = new Set<string>();
         const single = searchParams.get("enrollmentId");
@@ -78,6 +72,30 @@ export function Form1TransitionWizard({ schoolId, schoolName }: { schoolId: stri
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, schoolId]);
 
+  // Without the year the API would return only the CURRENT year's classes —
+  // so a Form 1 of any other destination year would be refused on preview.
+  useEffect(() => {
+    if (!accessToken || !toAcademicYearId) return;
+    let cancelled = false;
+    api
+      .listClasses(accessToken, schoolId, toAcademicYearId)
+      .then((classList) => {
+        if (cancelled) return;
+        setLoadedClasses({ yearId: toAcademicYearId, classes: classList });
+        const form1 = classList.filter((c) => c.division.type === "SECONDARY" && c.level === 1);
+        setToClassId(form1.length === 1 ? form1[0].id : "");
+      })
+      .catch((err) => !cancelled && setPreviewError(err instanceof ApiError ? err.message : "Failed to load Form 1 classes"));
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, schoolId, toAcademicYearId]);
+
+  const classes = useMemo(
+    () => (loadedClasses && loadedClasses.yearId === toAcademicYearId ? loadedClasses.classes : []),
+    [loadedClasses, toAcademicYearId],
+  );
+  const classesReady = !!toAcademicYearId && loadedClasses?.yearId === toAcademicYearId;
   const form1Classes = useMemo(() => classes.filter((c) => c.division.type === "SECONDARY" && c.level === 1), [classes]);
 
   async function runPreview() {
@@ -138,15 +156,6 @@ export function Form1TransitionWizard({ schoolId, schoolName }: { schoolId: stri
 
   if (loadError) return <Alert tone="danger">{loadError}</Alert>;
 
-  if (!loadingCandidates && form1Classes.length === 0) {
-    return (
-      <EmptyState
-        icon={Lock}
-        title="No Form 1 class found"
-        description={`${schoolName} has no level-1 Secondary class to transition students into. Set up a Secondary division and Form 1 class first, or use Transfer for students moving to a different school.`}
-      />
-    );
-  }
 
   return (
     <div className="space-y-5">
@@ -207,6 +216,13 @@ export function Form1TransitionWizard({ schoolId, schoolName }: { schoolId: stri
             <div className="rounded-lg border border-border bg-surface-soft p-3 text-sm text-foreground-soft">
               Destination: <span className="font-medium text-foreground">{schoolName}</span> → Secondary Division
             </div>
+            {classesReady && form1Classes.length === 0 && (
+              <EmptyState
+                icon={Lock}
+                title="No Form 1 class in that year"
+                description={`${schoolName} has no Form 1 class for ${toYear?.name ?? "that academic year"}. Create it (Academic → Classes) with its sections first, or use Transfer for students moving to a different school.`}
+              />
+            )}
             {form1Classes.length > 1 && (
               <FormField label="Form 1 class" required>
                 <Select value={toClassId} onChange={(e) => setToClassId(e.target.value)}>

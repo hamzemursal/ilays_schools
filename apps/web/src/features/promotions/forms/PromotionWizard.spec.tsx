@@ -646,3 +646,29 @@ describe("PromotionWizard — academic-year isolation", () => {
     expect(apiMock.previewPromotion).not.toHaveBeenCalledWith("token", "school-1", "section-a", "year-1", "year-1");
   });
 });
+
+describe("PromotionWizard — Class list follows the From academic year", () => {
+  it("loads the FROM year's own classes, so last year's students can be promoted after a new year is made current", async () => {
+    const newYearCurrent: AcademicYear[] = [
+      { id: "year-1", name: "2027", startDate: "2027-01-01", endDate: "2027-12-31", isCurrent: false, terms: [] },
+      { id: "year-2", name: "2028", startDate: "2028-01-01", endDate: "2028-12-31", isCurrent: true, terms: [] },
+    ];
+    apiMock.listAcademicYears.mockResolvedValue(newYearCurrent);
+    apiMock.listClasses.mockImplementation((_t: string, _s: string, yearId?: string) =>
+      Promise.resolve([{ ...CLASSES[0], id: `class-1-${yearId}`, name: `Class 1 (${yearId})` }]),
+    );
+    render(
+      <ToastProvider>
+        <PromotionWizard schoolId="school-1" />
+      </ToastProvider>,
+    );
+
+    // Current year first…
+    await waitFor(() => expect(apiMock.listClasses).toHaveBeenCalledWith("token", "school-1", "year-2"));
+    // …then switching From to last year loads last year's classes.
+    await userEvent.selectOptions(await screen.findByLabelText("From academic year"), "year-1");
+    await waitFor(() => expect(apiMock.listClasses).toHaveBeenLastCalledWith("token", "school-1", "year-1"));
+    expect(await screen.findByRole("option", { name: "Class 1 (year-1)" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Class 1 (year-2)" })).toBeNull();
+  });
+});

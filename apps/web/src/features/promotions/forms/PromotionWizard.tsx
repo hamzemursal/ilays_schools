@@ -148,20 +148,37 @@ export function PromotionWizard({
 
   useEffect(() => {
     if (!accessToken) return;
-    Promise.all([api.listAcademicYears(accessToken, schoolId), api.listClasses(accessToken, schoolId)])
-      .then(([y, c]) => {
+    api
+      .listAcademicYears(accessToken, schoolId)
+      .then((y) => {
         setYears(y);
-        setClasses(c);
         const current = y.find((yr) => yr.id === initialFromYearId) ?? y.find((yr) => yr.isCurrent) ?? y[0];
         if (current) setFromYearId(current.id);
-        const initialClass = c.find((cl) => cl.id === initialClassId) ?? c[0];
-        if (initialClass) {
-          setClassId(initialClass.id);
-          setSectionId(initialClass.sections[0]?.id ?? "");
-        }
       })
       .catch((err) => setLoadError(err instanceof ApiError ? err.message : "Failed to load form data"));
-  }, [accessToken, schoolId, initialClassId, initialFromYearId]);
+  }, [accessToken, schoolId, initialFromYearId]);
+
+  // Classes are academic-year scoped: the Class list must be the FROM year's
+  // own classes. Without the year the API returns only the CURRENT year's
+  // classes, so once a new year is made current, the previous year's
+  // students could no longer be promoted.
+  useEffect(() => {
+    if (!accessToken || !fromYearId) return;
+    let cancelled = false;
+    api
+      .listClasses(accessToken, schoolId, fromYearId)
+      .then((c) => {
+        if (cancelled) return;
+        setClasses(c);
+        const initialClass = c.find((cl) => cl.id === initialClassId) ?? c[0];
+        setClassId(initialClass?.id ?? "");
+        setSectionId(initialClass?.sections[0]?.id ?? "");
+      })
+      .catch((err) => !cancelled && setLoadError(err instanceof ApiError ? err.message : "Failed to load form data"));
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, schoolId, fromYearId, initialClassId]);
 
   const selectedClass = classes.find((c) => c.id === classId);
 

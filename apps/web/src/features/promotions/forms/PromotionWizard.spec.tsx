@@ -505,7 +505,8 @@ describe("PromotionWizard — Form 4 graduation without a destination academic y
     renderWizard();
 
     await waitFor(() => expect(screen.getByLabelText("From academic year", { exact: false })).toHaveValue("year-1"));
-    expect(screen.getByRole("button", { name: "Preview" })).toBeEnabled();
+    // The class list loads for that year right after — then Preview is ready.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Preview" })).toBeEnabled());
   });
 
   it("never shows the 'create the destination academic year first' blocking message for a final class", async () => {

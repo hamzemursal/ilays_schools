@@ -18,7 +18,8 @@ import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
-import { Mail, MapPin, Pencil, Phone, Plus, Send, Trash2, UserSquare2, X } from "lucide-react";
+import { Eye, GraduationCap, Mail, MapPin, Pencil, Phone, Plus, Send, Star, Trash2, UserSquare2, Users, X } from "lucide-react";
+import { Avatar } from "@/components/ui/Avatar";
 
 
 const PORTAL_TONE: Record<string, "success" | "warning" | "neutral"> = {
@@ -130,13 +131,14 @@ export default function ParentProfilePage({
   return (
     <div>
       <PageHeader
+        variant="plain"
         eyebrow="Parents"
         title={`${parent.firstName} ${parent.lastName}`}
-        description={parent.guardianCode ?? undefined}
+        description={schoolName}
         breadcrumbs={[
           { label: "Dashboard", href: "/dashboard" },
           { label: "Parents", href: `/schools/${schoolId}/parents` },
-          { label: schoolName },
+          { label: "Profile" },
         ]}
         actions={
           canManage && (
@@ -179,15 +181,55 @@ export default function ParentProfilePage({
         onCancel={() => setRemoveTarget(null)}
       />
 
-      <div className="space-y-5 p-4 sm:p-6">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge tone={parent.status === "ACTIVE" ? "success" : "neutral"}>{parent.status}</Badge>
-          {parent.user ? (
-            <Badge tone={PORTAL_TONE[parent.user.status] ?? "neutral"}>Portal: {parent.user.status.replace("_", " ")}</Badge>
-          ) : (
-            <Badge tone="neutral">No portal account</Badge>
-          )}
-        </div>
+      <div className="space-y-5 px-3 pb-8 pt-4 sm:px-5">
+        {/* Identity: initials, parent ID, status and the ways to reach them. */}
+        <section aria-label="Parent summary" className="rounded-2xl border border-border bg-background p-5 shadow-sm">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
+            <div className="flex min-w-0 flex-1 items-center gap-4">
+              <Avatar name={`${parent.firstName} ${parent.lastName}`} size="lg" />
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  {parent.guardianCode && (
+                    <span className="rounded-md bg-accent-soft px-2 py-0.5 font-mono text-xs font-semibold text-accent">{parent.guardianCode}</span>
+                  )}
+                  <Badge tone={parent.status === "ACTIVE" ? "success" : "neutral"}>{parent.status}</Badge>
+                  {parent.user ? (
+                    <Badge tone={PORTAL_TONE[parent.user.status] ?? "neutral"}>Portal: {parent.user.status.replace("_", " ")}</Badge>
+                  ) : (
+                    <Badge tone="neutral">No portal account</Badge>
+                  )}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {parent.phone && (
+                    <a
+                      href={`tel:${parent.phone}`}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-sm text-foreground-soft transition-colors hover:border-accent/40 hover:text-accent"
+                    >
+                      <Phone className="size-3.5" /> Call
+                    </a>
+                  )}
+                  {parent.email && (
+                    <a
+                      href={`mailto:${parent.email}`}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-sm text-foreground-soft transition-colors hover:border-accent/40 hover:text-accent"
+                    >
+                      <Mail className="size-3.5" /> Email
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+            <dl className="grid grid-cols-2 gap-3 sm:w-auto lg:w-[340px]">
+              <SummaryStat icon={Users} tone="bg-violet-50 text-violet-600" label="Children linked" value={activeChildren.length} />
+              <SummaryStat
+                icon={Star}
+                tone="bg-amber-50 text-amber-600"
+                label="Primary contact"
+                value={activeChildren.filter((s) => s.isPrimaryContact).length}
+              />
+            </dl>
+          </div>
+        </section>
 
         {editing ? (
           <EditParentForm
@@ -202,18 +244,105 @@ export default function ParentProfilePage({
             }}
           />
         ) : (
-          <Card padding="none">
+          <Card padding="none" className="rounded-2xl">
             <CardHeader title="Profile information" />
-            <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-3">
-              <Field icon={Phone} label="Phone" value={parent.phone ?? "—"} />
-              <Field icon={Mail} label="Email" value={parent.email ?? "—"} />
-              <Field icon={MapPin} label="Address" value={parent.address ?? "—"} />
+            <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-3">
+              <Field icon={Phone} tone="bg-accent-soft text-accent" label="Phone" value={parent.phone ?? "—"} />
+              <Field icon={Mail} tone="bg-teal-50 text-teal-600" label="Email" value={parent.email ?? "—"} />
+              <Field icon={MapPin} tone="bg-rose-50 text-rose-600" label="Address" value={parent.address ?? "—"} />
             </div>
           </Card>
         )}
 
+        <Card padding="none" className="rounded-2xl">
+          <CardHeader
+            title="Children"
+            description="Every student this parent is linked to."
+            actions={
+              canManage &&
+              !addingChild && (
+                <Button size="sm" variant="outline" icon={<Plus className="size-4" />} onClick={() => setAddingChild(true)}>
+                  Add Child
+                </Button>
+              )
+            }
+          />
+          <div className="space-y-3 p-5">
+            {addingChild && accessToken && (
+              <AddChildForm
+                accessToken={accessToken}
+                schoolId={schoolId}
+                guardianId={guardianId}
+                existingStudentIds={parent.students.filter((s) => s.status === "ACTIVE").map((s) => s.studentId)}
+                onCancel={() => setAddingChild(false)}
+                onAdded={() => {
+                  setAddingChild(false);
+                  load();
+                }}
+              />
+            )}
+
+            {activeChildren.length === 0 && !addingChild ? (
+              <EmptyState icon={UserSquare2} title="No children linked yet" description="Use Add Child to link a student." />
+            ) : (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {activeChildren.map((s, i) => {
+                  const enrollment = s.student.enrollments.find((e) => e.status === "ACTIVE") ?? s.student.enrollments[0];
+                  const tone = CHILD_TONES[i % CHILD_TONES.length];
+                  const childName = `${s.student.firstName} ${s.student.lastName}`;
+                  return (
+                    <div
+                      key={s.studentId}
+                      className="relative flex flex-col overflow-hidden rounded-2xl border border-border bg-background p-4 pl-5 shadow-sm transition-shadow hover:shadow-md"
+                    >
+                      <span className={`absolute inset-y-0 left-0 w-1.5 ${tone.bar}`} aria-hidden />
+                      <div className="flex items-start gap-3">
+                        <span className={`flex size-11 shrink-0 items-center justify-center rounded-xl text-sm font-bold ${tone.soft} ${tone.text}`} aria-hidden>
+                          {initials(childName)}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-semibold text-foreground">{childName}</p>
+                          {enrollment ? (
+                            <p className="mt-0.5 flex items-center gap-1.5 text-sm text-foreground-soft">
+                              <GraduationCap className="size-3.5 text-foreground-muted" />
+                              {enrollment.class.name} · {enrollment.section.name}
+                            </p>
+                          ) : (
+                            <p className="mt-0.5 text-sm text-foreground-muted">Not currently enrolled</p>
+                          )}
+                          {enrollment && <p className="text-xs text-foreground-muted">{enrollment.academicYear.name}</p>}
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                        <RelationshipBadge relationship={s.relationship} />
+                        {s.isPrimaryContact && <Badge tone="success">Primary</Badge>}
+                      </div>
+                      <div className="mt-4 flex gap-2 border-t border-border pt-3">
+                        <Link href={`/schools/${schoolId}/students/${s.studentId}`} className="flex-1">
+                          <Button size="sm" variant="secondary" className="w-full" icon={<Eye className="size-4" />}>
+                            View Student
+                          </Button>
+                        </Link>
+                        {canManage && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={<X className="size-4" />}
+                            aria-label={`Remove relationship with ${s.student.firstName}`}
+                            onClick={() => setRemoveTarget({ studentId: s.studentId, name: childName })}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </Card>
+
         {canManage && !parent.user && (
-          <Card padding="none">
+          <Card padding="none" className="rounded-2xl">
             <CardHeader title="Portal account" description="Give this parent secure access to the Parent Portal." />
             <div className="p-5">
               {invite ? (
@@ -248,85 +377,8 @@ export default function ParentProfilePage({
           />
         )}
 
-        <Card padding="none">
-          <CardHeader
-            title="Children"
-            description="Every student this parent is linked to."
-            actions={
-              canManage &&
-              !addingChild && (
-                <Button size="sm" variant="outline" icon={<Plus className="size-4" />} onClick={() => setAddingChild(true)}>
-                  Add Child
-                </Button>
-              )
-            }
-          />
-          <div className="space-y-3 p-5">
-            {addingChild && accessToken && (
-              <AddChildForm
-                accessToken={accessToken}
-                schoolId={schoolId}
-                guardianId={guardianId}
-                existingStudentIds={parent.students.filter((s) => s.status === "ACTIVE").map((s) => s.studentId)}
-                onCancel={() => setAddingChild(false)}
-                onAdded={() => {
-                  setAddingChild(false);
-                  load();
-                }}
-              />
-            )}
-
-            {activeChildren.length === 0 && !addingChild ? (
-              <EmptyState icon={UserSquare2} title="No children linked yet" description="Use Add Child to link a student." />
-            ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {activeChildren.map((s) => {
-                  const enrollment = s.student.enrollments.find((e) => e.status === "ACTIVE") ?? s.student.enrollments[0];
-                  return (
-                    <Card key={s.studentId} padding="sm">
-                      <p className="font-medium text-foreground">
-                        {s.student.firstName} {s.student.lastName}
-                      </p>
-                      {enrollment ? (
-                        <p className="mt-0.5 text-sm text-foreground-soft">
-                          {enrollment.class.name} · {enrollment.section.name}
-                        </p>
-                      ) : (
-                        <p className="mt-0.5 text-sm text-foreground-muted">Not currently enrolled</p>
-                      )}
-                      {enrollment && <p className="text-xs text-foreground-muted">{enrollment.academicYear.name}</p>}
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        <RelationshipBadge relationship={s.relationship} />
-                        {s.isPrimaryContact && <Badge tone="success">Primary</Badge>}
-                      </div>
-                      <div className="mt-3 flex gap-2">
-                        <Link href={`/schools/${schoolId}/students/${s.studentId}`} className="flex-1">
-                          <Button size="sm" variant="outline" className="w-full">
-                            View Student
-                          </Button>
-                        </Link>
-                        {canManage && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            icon={<X className="size-4" />}
-                            aria-label={`Remove relationship with ${s.student.firstName}`}
-                            onClick={() =>
-                              setRemoveTarget({ studentId: s.studentId, name: `${s.student.firstName} ${s.student.lastName}` })
-                            }
-                          />
-                        )}
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </Card>
-
         {inactiveChildren.length > 0 && (
-          <Card padding="none">
+          <Card padding="none" className="rounded-2xl">
             <CardHeader title="Relationships" description="Includes relationships that have since been removed." />
             <div className="divide-y divide-border">
               {parent.students.map((s) => (
@@ -346,22 +398,68 @@ export default function ParentProfilePage({
   );
 }
 
-function Field({
+// One color per child card (category only, never a status).
+const CHILD_TONES = [
+  { bar: "bg-accent", soft: "bg-accent-soft", text: "text-accent" },
+  { bar: "bg-violet-500", soft: "bg-violet-50", text: "text-violet-700" },
+  { bar: "bg-teal-500", soft: "bg-teal-50", text: "text-teal-700" },
+  { bar: "bg-amber-500", soft: "bg-amber-50", text: "text-amber-700" },
+  { bar: "bg-rose-500", soft: "bg-rose-50", text: "text-rose-700" },
+] as const;
+
+function initials(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
+function SummaryStat({
   icon: Icon,
+  tone,
   label,
   value,
 }: {
   icon: React.ComponentType<{ className?: string }>;
+  tone: string;
+  label: string;
+  value: number;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-surface-soft p-3">
+      <span className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${tone}`}>
+        <Icon className="size-4.5" />
+      </span>
+      <div className="min-w-0">
+        <dd className="text-xl font-bold leading-none tabular-nums text-foreground">{value}</dd>
+        <dt className="mt-1 truncate text-xs text-foreground-muted">{label}</dt>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  icon: Icon,
+  tone,
+  label,
+  value,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  tone: string;
   label: string;
   value: string;
 }) {
   return (
-    <div>
-      <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">{label}</p>
-      <p className="mt-0.5 flex items-center gap-1.5 text-sm font-medium text-foreground">
-        <Icon className="size-3.5 text-foreground-muted" />
-        {value}
-      </p>
+    <div className="flex min-w-0 items-center gap-3 rounded-xl border border-border p-3">
+      <span className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${tone}`}>
+        <Icon className="size-4.5" />
+      </span>
+      <div className="min-w-0">
+        <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">{label}</p>
+        <p className="mt-0.5 truncate text-sm font-medium text-foreground">{value}</p>
+      </div>
     </div>
   );
 }
@@ -412,7 +510,7 @@ function EditParentForm({
   }
 
   return (
-    <Card padding="none">
+    <Card padding="none" className="rounded-2xl">
       <CardHeader title="Edit parent" />
       <form onSubmit={onSubmit} className="space-y-4 p-5">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

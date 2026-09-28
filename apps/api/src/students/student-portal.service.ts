@@ -13,24 +13,53 @@ import { buildStudentResultsReport } from "../exams/student-results-report";
 export class StudentPortalService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // Re-verified on every single call, not just once at account creation —
-  // a student later transferred/promoted out of a SECONDARY division must
-  // lose portal access immediately, even though their account (and
-  // Student.userId link) still exists. This is the one gate every method
-  // in this service goes through first.
+  // Re-verified on every single call, not just once at account creation.
+  // Every method in this service is read-only (there is no mark-entry,
+  // attendance-marking, exam-submission or enrollment-changing endpoint
+  // anywhere in this service — those live in the Teacher/Admin-facing
+  // services instead), so there is nothing "live" here to protect by
+  // shutting the whole portal off.
+  //
+  // The ACTIVE enrollment is preferred (the ordinary case), but a student
+  // who has since been PROMOTED/RETAINED/COMPLETED/GRADUATED/TRANSFERRED_OUT
+  // has no ACTIVE row any more — their most recently started enrollment is
+  // used instead, same fallback buildStudentResultsReport() already applies
+  // for the results report. A GRADUATED student's account must keep reading
+  // its own historical academic information (profile, academic years,
+  // results, attendance) — see the Student Lifecycle audit. Only a student
+  // with NO enrollment at all, or whose anchor enrollment's division isn't
+  // SECONDARY (Student Portal is a SECONDARY-only feature — see
+  // StudentsService.createPortalAccount), is refused.
   private async getSelfOrThrow(actor: AuthenticatedUser) {
     const student = await this.prisma.student.findFirst({ where: { userId: actor.id } });
     if (!student) {
       throw new NotFoundException("No student profile linked to this account");
     }
 
-    const enrollment = await this.prisma.studentEnrollment.findFirst({
+    const enrollmentInclude = {
+      school: true,
+      academicYear: true,
+      class: { include: { division: true } },
+      section: true,
+    } as const;
+
+    let enrollment = await this.prisma.studentEnrollment.findFirst({
       where: { studentId: student.id, status: "ACTIVE" },
-      include: { school: true, academicYear: true, class: { include: { division: true } }, section: true },
+      include: enrollmentInclude,
       orderBy: { startDate: "desc" },
     });
+    // Only reached when there is no ACTIVE enrollment — the closed
+    // (GRADUATED/COMPLETED/PROMOTED/...) enrollment the student most
+    // recently started is their real "current standing" from here on.
     if (!enrollment) {
-      throw new ForbiddenException("No active enrollment found for this account");
+      enrollment = await this.prisma.studentEnrollment.findFirst({
+        where: { studentId: student.id },
+        include: enrollmentInclude,
+        orderBy: { startDate: "desc" },
+      });
+    }
+    if (!enrollment) {
+      throw new ForbiddenException("No enrollment found for this account");
     }
     if (enrollment.class.division.type !== "SECONDARY") {
       throw new ForbiddenException("Student Portal access is only available to secondary students");

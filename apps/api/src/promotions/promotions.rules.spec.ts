@@ -427,3 +427,250 @@ describe("PromotionsService.confirm — Phase 1 promotion rules", () => {
     });
   });
 });
+
+// Task 2 — a final class (Form 4 Secondary / Class 8 Primary) must be
+// gradable/completable even when the school has no later academic year yet.
+// PROMOTED and RETAINED are untouched: both still require a real destination
+// year, because both still create a new enrollment there.
+describe("PromotionsService.confirm — graduation/completion without a destination academic year", () => {
+  let prisma: MockPrisma;
+  let service: PromotionsService;
+  let exams: { getAnnualResult: jest.Mock };
+  let audit: { record: jest.Mock };
+
+  const FORM_4 = () => classRow("Form 4", 4, "SECONDARY");
+  const CLASS_8 = () => classRow("Class 8", 8, "PRIMARY");
+
+  // No later academic year exists in this school at all — academicYear.findFirst
+  // only ever resolves the FROM year; a pure graduation/completion dto never
+  // sends toAcademicYearId.
+  function arrangeNoLaterYear(cls: ReturnType<typeof classRow>) {
+    prisma.academicYear.findFirst.mockImplementation((args: { where: { id?: string } }) =>
+      Promise.resolve(args.where.id === "year-1" ? YEAR_ROWS["year-1"] : null),
+    );
+    prisma.section.findFirst.mockResolvedValue(sectionRow(cls));
+    prisma.studentEnrollment.findMany.mockResolvedValue([
+      { id: "enr-1", studentId: "student-1", organizationId: "org-1", studentNumber: "STU-1" },
+    ]);
+    prisma.promotionBatch.create.mockResolvedValue({ id: "batch-1" });
+    prisma.promotionBatch.findUniqueOrThrow.mockResolvedValue({ id: "batch-1", items: [] });
+  }
+
+  const eligible = { term1Percentage: 60, term2Percentage: 60, annualPercentage: 60, eligible: true };
+
+  beforeEach(() => {
+    prisma = createMockPrisma();
+    ({ service, exams, audit } = createService(prisma));
+  });
+
+  it("1. graduates a Form 4 section when the next academic year DOES NOT EXIST at all — no toAcademicYearId sent", async () => {
+    arrangeNoLaterYear(FORM_4());
+    exams.getAnnualResult.mockResolvedValue(eligible);
+
+    await expect(
+      service.confirm(ACTOR, "school-1", "section-1", {
+        fromAcademicYearId: "year-1",
+        assignments: [{ enrollmentId: "enr-1", outcome: "GRADUATED" }],
+      }),
+    ).resolves.toBeDefined();
+    expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it("3. creates NO new enrollment for the graduating student", async () => {
+    arrangeNoLaterYear(FORM_4());
+    exams.getAnnualResult.mockResolvedValue(eligible);
+
+    await service.confirm(ACTOR, "school-1", "section-1", {
+      fromAcademicYearId: "year-1",
+      assignments: [{ enrollmentId: "enr-1", outcome: "GRADUATED" }],
+    });
+
+    expect(prisma.studentEnrollment.create).not.toHaveBeenCalled();
+  });
+
+  it("4. the Form 4 enrollment becomes GRADUATED (and Student.currentStatus follows it) — same as the with-a-destination-year path", async () => {
+    arrangeNoLaterYear(FORM_4());
+    exams.getAnnualResult.mockResolvedValue(eligible);
+
+    await service.confirm(ACTOR, "school-1", "section-1", {
+      fromAcademicYearId: "year-1",
+      assignments: [{ enrollmentId: "enr-1", outcome: "GRADUATED" }],
+    });
+
+    expect(prisma.studentEnrollment.update).toHaveBeenCalledWith({
+      where: { id: "enr-1" },
+      data: { status: "GRADUATED", endDate: expect.any(Date) },
+    });
+    expect(prisma.student.update).toHaveBeenCalledWith({ where: { id: "student-1" }, data: { currentStatus: "GRADUATED" } });
+  });
+
+  it("5/6/7. results, attendance and academic history are never touched — only the enrollment's status/endDate and the student's currentStatus are written", async () => {
+    arrangeNoLaterYear(FORM_4());
+    exams.getAnnualResult.mockResolvedValue(eligible);
+
+    await service.confirm(ACTOR, "school-1", "section-1", {
+      fromAcademicYearId: "year-1",
+      assignments: [{ enrollmentId: "enr-1", outcome: "GRADUATED" }],
+    });
+
+    // Nothing in this transaction ever references a result/attendance/exam
+    // table — the only writes are the enrollment update (status + endDate)
+    // and the student's currentStatus, exactly like every other outcome.
+    expect(prisma.studentEnrollment.delete).not.toHaveBeenCalled();
+    expect(prisma.studentEnrollment.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.studentEnrollment.update).toHaveBeenCalledTimes(1);
+    const updateData = prisma.studentEnrollment.update.mock.calls[0][0].data;
+    expect(Object.keys(updateData).sort()).toEqual(["endDate", "status"]);
+  });
+
+  it("audit + history: the batch is recorded, anchored to the FROM year (never a fabricated later one), and no academic year is ever created", async () => {
+    arrangeNoLaterYear(FORM_4());
+    exams.getAnnualResult.mockResolvedValue(eligible);
+
+    await service.confirm(ACTOR, "school-1", "section-1", {
+      fromAcademicYearId: "year-1",
+      assignments: [{ enrollmentId: "enr-1", outcome: "GRADUATED" }],
+    });
+
+    expect(prisma.promotionBatch.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ fromAcademicYearId: "year-1", toAcademicYearId: "year-1" }) }),
+    );
+    expect(prisma.academicYear.create).not.toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: "SECONDARY_GRADUATION" }), prisma);
+  });
+
+  it("2. also graduates when the next academic year DOES exist — the batch is anchored to the REAL destination year in that case", async () => {
+    mockYears(prisma);
+    prisma.section.findFirst.mockResolvedValue(sectionRow(FORM_4()));
+    prisma.class.findFirst.mockImplementation(destinationLookup(FORM_4(), null));
+    // Form 4 is the final class: only its SAME level (RETAINED pool) is
+    // looked up in the destination year, never a next level.
+    prisma.section.findMany.mockResolvedValue([]);
+    prisma.studentEnrollment.findMany.mockResolvedValue([
+      { id: "enr-1", studentId: "student-1", organizationId: "org-1", studentNumber: "STU-1" },
+    ]);
+    prisma.promotionBatch.create.mockResolvedValue({ id: "batch-1" });
+    prisma.promotionBatch.findUniqueOrThrow.mockResolvedValue({ id: "batch-1", items: [] });
+    exams.getAnnualResult.mockResolvedValue(eligible);
+
+    await service.confirm(ACTOR, "school-1", "section-1", {
+      fromAcademicYearId: "year-1",
+      toAcademicYearId: "year-2",
+      assignments: [{ enrollmentId: "enr-1", outcome: "GRADUATED" }],
+    });
+
+    expect(prisma.promotionBatch.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ toAcademicYearId: "year-2" }) }),
+    );
+  });
+
+  it("10. Form 4 can never create Form 5 — no class row is ever created, and level 5 is never even looked up", async () => {
+    arrangeNoLaterYear(FORM_4());
+    exams.getAnnualResult.mockResolvedValue(eligible);
+
+    await service.confirm(ACTOR, "school-1", "section-1", {
+      fromAcademicYearId: "year-1",
+      assignments: [{ enrollmentId: "enr-1", outcome: "GRADUATED" }],
+    });
+
+    // The mock never defines class.create — if the service ever tried to
+    // create a class (a synthetic "Form 5"), this would be a TypeError, not
+    // a silent no-op.
+    expect((prisma.class as unknown as { create?: unknown }).create).toBeUndefined();
+    expect(prisma.class.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("11. still enforces school-access authorization before doing anything else", async () => {
+    arrangeNoLaterYear(FORM_4());
+    const schools = { findOneAccessibleOrThrow: jest.fn().mockRejectedValue(new Error("no access to this school")) };
+    const restrictedService = new PromotionsService(
+      prisma as unknown as PrismaService,
+      schools as unknown as SchoolsService,
+      exams as unknown as ExamsService,
+      audit as unknown as AuditService,
+    );
+
+    await expect(
+      restrictedService.confirm(ACTOR, "school-1", "section-1", {
+        fromAcademicYearId: "year-1",
+        assignments: [{ enrollmentId: "enr-1", outcome: "GRADUATED" }],
+      }),
+    ).rejects.toThrow("no access to this school");
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("Class 8 (Primary) completes the same way, with no destination year", async () => {
+    arrangeNoLaterYear(CLASS_8());
+    exams.getAnnualResult.mockResolvedValue(eligible);
+
+    await service.confirm(ACTOR, "school-1", "section-1", {
+      fromAcademicYearId: "year-1",
+      assignments: [{ enrollmentId: "enr-1", outcome: "COMPLETED" }],
+    });
+
+    expect(prisma.studentEnrollment.update).toHaveBeenCalledWith({
+      where: { id: "enr-1" },
+      data: { status: "COMPLETED", endDate: expect.any(Date) },
+    });
+    expect(prisma.studentEnrollment.create).not.toHaveBeenCalled();
+  });
+
+  it("8. PROMOTED still requires a real destination academic year — omitting it entirely is refused, nothing written", async () => {
+    mockYears(prisma);
+    prisma.section.findFirst.mockResolvedValue(sectionRow(FORM_2()));
+    prisma.class.findFirst.mockImplementation(destinationLookup(FORM_2(), FORM_3()));
+    prisma.studentEnrollment.findMany.mockResolvedValue([
+      { id: "enr-1", studentId: "student-1", organizationId: "org-1", studentNumber: "STU-1" },
+    ]);
+
+    await expect(
+      service.confirm(ACTOR, "school-1", "section-1", {
+        fromAcademicYearId: "year-1",
+        assignments: [{ enrollmentId: "enr-1", outcome: "PROMOTED", targetSectionId: "next-a" }],
+      }),
+    ).rejects.toThrow("The destination academic year doesn't exist in this school. Create it first");
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.studentEnrollment.create).not.toHaveBeenCalled();
+  });
+
+  it("9. RETAINED still requires a real destination academic year — omitting it entirely is refused, nothing written", async () => {
+    mockYears(prisma);
+    prisma.section.findFirst.mockResolvedValue(sectionRow(FORM_2()));
+    prisma.class.findFirst.mockImplementation(destinationLookup(FORM_2(), FORM_3()));
+    prisma.studentEnrollment.findMany.mockResolvedValue([
+      { id: "enr-1", studentId: "student-1", organizationId: "org-1", studentNumber: "STU-1" },
+    ]);
+
+    await expect(
+      service.confirm(ACTOR, "school-1", "section-1", {
+        fromAcademicYearId: "year-1",
+        assignments: [{ enrollmentId: "enr-1", outcome: "RETAINED", targetSectionId: "cur-a" }],
+      }),
+    ).rejects.toThrow("The destination academic year doesn't exist in this school. Create it first");
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.studentEnrollment.create).not.toHaveBeenCalled();
+  });
+
+  it("a mixed batch (one GRADUATED, one RETAINED) still requires a destination year — the RETAINED student needs one even if the GRADUATED one doesn't", async () => {
+    arrangeNoLaterYear(FORM_4());
+    prisma.studentEnrollment.findMany.mockResolvedValue([
+      { id: "enr-1", studentId: "student-1", organizationId: "org-1", studentNumber: "STU-1" },
+      { id: "enr-2", studentId: "student-2", organizationId: "org-1", studentNumber: "STU-2" },
+    ]);
+    exams.getAnnualResult.mockResolvedValue(eligible);
+
+    await expect(
+      service.confirm(ACTOR, "school-1", "section-1", {
+        fromAcademicYearId: "year-1",
+        assignments: [
+          { enrollmentId: "enr-1", outcome: "GRADUATED" },
+          { enrollmentId: "enr-2", outcome: "RETAINED", targetSectionId: "cur-a" },
+        ],
+      }),
+    ).rejects.toThrow("The destination academic year doesn't exist in this school. Create it first");
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  const FORM_2 = () => classRow("Form 2", 2, "SECONDARY");
+  const FORM_3 = () => classRow("Form 3", 3, "SECONDARY");
+});

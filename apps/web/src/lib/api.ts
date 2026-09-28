@@ -565,15 +565,19 @@ export interface MyChildResult {
 }
 
 // One published result inside a term (see GET /students/me/results-report and
-// GET /guardians/me/children/:studentId/results-report). Absent students are
-// never present here — an absent row has no mark and is never shown as 0.
+// GET /guardians/me/children/:studentId/results-report).
+// status distinguishes a REAL zero from no assessment at all: COMPLETED rows
+// carry a real marksObtained/percentage (0 included); INCOMPLETE rows (the
+// student didn't complete/attend) carry neither — never displayed or
+// averaged as 0.
 export interface PortalResultRow {
   id: string;
   examName: string;
   subjectName: string;
-  marksObtained: number;
+  status: "COMPLETED" | "INCOMPLETE";
+  marksObtained: number | null;
   maxMarks: number;
-  percentage: number;
+  percentage: number | null;
   examDate: string | null;
   publishedDate: string | null;
 }
@@ -2621,7 +2625,11 @@ export const api = {
     accessToken: string,
     schoolId: string,
     sectionId: string,
-    body: { fromAcademicYearId: string; toAcademicYearId: string; assignments: PromotionAssignment[] },
+    // toAcademicYearId is optional: a batch made entirely of a final class's
+    // own natural COMPLETED/GRADUATED outcome needs no destination year at
+    // all (see PromotionsService.confirm's needsDestinationYear) — required
+    // only for PROMOTED/RETAINED, which the backend still enforces.
+    body: { fromAcademicYearId: string; toAcademicYearId?: string; assignments: PromotionAssignment[] },
   ) =>
     request<PromotionBatchResult>(`/schools/${schoolId}/sections/${sectionId}/promotion/confirm`, {
       method: "POST",
@@ -2842,6 +2850,21 @@ export const api = {
     request<ResultsForSection>(
       `/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/results`,
       { method: "POST", body: { entries }, accessToken },
+    ),
+  // Admin-only single-result override — works regardless of the submission's
+  // status (including APPROVED/PUBLISHED), unlike enterMarks above which is
+  // refused once results have moved past DRAFT/NEEDS_CORRECTION.
+  adminEditResult: (
+    accessToken: string,
+    schoolId: string,
+    examSubjectId: string,
+    sectionId: string,
+    enrollmentId: string,
+    body: { marksObtained?: number; isAbsent?: boolean; reason?: string },
+  ) =>
+    request<ResultsForSection>(
+      `/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/results/${enrollmentId}`,
+      { method: "PATCH", body, accessToken },
     ),
   submitResultsForReview: (accessToken: string, schoolId: string, examSubjectId: string, sectionId: string) =>
     request<ResultsForSection>(`/schools/${schoolId}/exams/x/subjects/${examSubjectId}/sections/${sectionId}/submit`, {

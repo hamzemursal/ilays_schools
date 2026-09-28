@@ -61,6 +61,19 @@ const SECONDARY_ENROLLMENT = {
   section: { name: "A" },
 };
 
+// A student whose Form 4 enrollment was graduated (PromotionsService.confirm
+// sets status: "GRADUATED", never ACTIVE again) — the fallback case the
+// portal gate must resolve to instead of refusing outright.
+const GRADUATED_ENROLLMENT = {
+  ...SECONDARY_ENROLLMENT,
+  id: "enr-graduated",
+  status: "GRADUATED",
+  studentNumber: "STU-9",
+  rollNumber: 12,
+  academicYear: { name: "2027" },
+  class: { name: "Form 4", division: { type: "SECONDARY" } },
+};
+
 describe("StudentPortalService — getSelfOrThrow gate (re-verified on every call)", () => {
   let prisma: MockPrisma;
   let service: StudentPortalService;
@@ -75,10 +88,13 @@ describe("StudentPortalService — getSelfOrThrow gate (re-verified on every cal
     await expect(service.myProfile(ACTOR)).rejects.toThrow(NotFoundException);
   });
 
-  it("throws ForbiddenException when the student has no ACTIVE enrollment", async () => {
+  it("throws ForbiddenException when the student has no enrollment at all (active or historical)", async () => {
     prisma.student.findFirst.mockResolvedValue({ id: "student-1" });
     prisma.studentEnrollment.findFirst.mockResolvedValue(null);
-    await expect(service.myProfile(ACTOR)).rejects.toThrow("No active enrollment found for this account");
+    await expect(service.myProfile(ACTOR)).rejects.toThrow("No enrollment found for this account");
+    // Both the ACTIVE-preferring query and the historical-fallback query
+    // are attempted before giving up.
+    expect(prisma.studentEnrollment.findFirst).toHaveBeenCalledTimes(2);
   });
 
   it("throws ForbiddenException when the current enrollment's division is PRIMARY, not SECONDARY", async () => {
@@ -96,6 +112,31 @@ describe("StudentPortalService — getSelfOrThrow gate (re-verified on every cal
     prisma.student.findFirst.mockResolvedValue({ id: "student-1", firstName: "A", lastName: "One", dateOfBirth: new Date(), sex: "MALE", currentStatus: "ACTIVE" });
     prisma.studentEnrollment.findFirst.mockResolvedValue(SECONDARY_ENROLLMENT);
     await expect(service.myProfile(ACTOR)).resolves.toBeDefined();
+    // The ACTIVE row was found on the first query — no fallback lookup needed.
+    expect(prisma.studentEnrollment.findFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the most recent enrollment when the student has no ACTIVE one (GRADUATED)", async () => {
+    prisma.student.findFirst.mockResolvedValue({ id: "student-1", firstName: "A", lastName: "One", dateOfBirth: new Date(), sex: "MALE", currentStatus: "GRADUATED" });
+    prisma.studentEnrollment.findFirst
+      .mockResolvedValueOnce(null) // no ACTIVE enrollment
+      .mockResolvedValueOnce(GRADUATED_ENROLLMENT); // falls back to the closed one
+
+    const result = await service.myProfile(ACTOR);
+
+    expect(result.enrollment.status).toBe("GRADUATED");
+    expect(result.enrollment.className).toBe("Form 4");
+  });
+
+  it("still refuses a GRADUATED student whose last enrollment's division was PRIMARY", async () => {
+    prisma.student.findFirst.mockResolvedValue({ id: "student-1" });
+    prisma.studentEnrollment.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...GRADUATED_ENROLLMENT, status: "COMPLETED", class: { name: "Class 8", division: { type: "PRIMARY" } } });
+
+    await expect(service.myProfile(ACTOR)).rejects.toThrow(
+      "Student Portal access is only available to secondary students",
+    );
   });
 });
 
@@ -153,6 +194,23 @@ describe("StudentPortalService.myAcademicYears", () => {
     const result = await service.myAcademicYears(ACTOR);
 
     expect(result[0].hasAttendance).toBe(true);
+  });
+
+  it("still returns every historical year for a GRADUATED student (no ACTIVE enrollment)", async () => {
+    prisma.studentEnrollment.findFirst.mockReset();
+    prisma.studentEnrollment.findFirst
+      .mockResolvedValueOnce(null) // no ACTIVE enrollment — gate falls back
+      .mockResolvedValueOnce(GRADUATED_ENROLLMENT);
+    prisma.studentEnrollment.findMany.mockResolvedValue([
+      { id: "e1", academicYearId: "year-2025", academicYear: { name: "2025", isCurrent: false } },
+      { id: "e2", academicYearId: "year-2026", academicYear: { name: "2026", isCurrent: false } },
+      { id: "e3", academicYearId: "year-1", academicYear: { name: "2027", isCurrent: true } },
+    ]);
+    prisma.attendance.groupBy.mockResolvedValue([]);
+
+    const result = await service.myAcademicYears(ACTOR);
+
+    expect(result.map((y) => y.name)).toEqual(["2025", "2026", "2027"]);
   });
 });
 
@@ -261,6 +319,23 @@ describe("StudentPortalService.myAttendance — marker name resolution", () => {
       expect.objectContaining({ where: { userId: { in: ["teacher-user-1"] } } }),
     );
   });
+
+  it("still returns attendance history for a GRADUATED student (no ACTIVE enrollment)", async () => {
+    prisma.studentEnrollment.findFirst.mockReset();
+    prisma.studentEnrollment.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(GRADUATED_ENROLLMENT);
+    prisma.attendance.findMany.mockResolvedValue([
+      { id: "a1", status: "PRESENT", date: new Date(), note: null, markedByUserId: "u1", enrollment: { class: { name: "Form 4" }, section: { name: "A" } } },
+    ]);
+    prisma.teacher.findMany.mockResolvedValue([]);
+    prisma.userRole.findMany.mockResolvedValue([]);
+
+    const result = await service.myAttendance(ACTOR);
+
+    expect(result.records).toHaveLength(1);
+    // Attendance is queried by studentId alone (spanning every past
+    // enrollment) — never re-scoped to the now-closed anchor enrollment.
+    expect(prisma.attendance.findMany.mock.calls[0][0].where).toEqual({ enrollment: { studentId: "student-1" } });
+  });
 });
 
 describe("StudentPortalService.myResults", () => {
@@ -284,6 +359,26 @@ describe("StudentPortalService.myResults", () => {
       expect.objectContaining({ where: { enrollment: { studentId: "student-1" }, resultSubmission: { status: "PUBLISHED" }, isAbsent: false } }),
     );
     expect(result[0].percentage).toBe(80);
+  });
+
+  it("still returns published historical results for a GRADUATED student (no ACTIVE enrollment)", async () => {
+    const prisma = createMockPrisma();
+    prisma.student.findFirst.mockResolvedValue({ id: "student-1" });
+    prisma.studentEnrollment.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(GRADUATED_ENROLLMENT);
+    prisma.result.findMany.mockResolvedValue([
+      {
+        id: "res-1",
+        marksObtained: "45.00",
+        examSubject: { maxMarks: 50, examDate: new Date(), exam: { name: "Final", type: "FINAL", academicYear: { name: "2027" } }, subject: { name: "Math" } },
+        resultSubmission: { publishedAt: new Date() },
+      },
+    ]);
+    const service = createService(prisma);
+
+    const result = await service.myResults(ACTOR);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].percentage).toBe(90);
   });
 });
 
@@ -342,6 +437,36 @@ describe("StudentPortalService.myAnnouncements", () => {
   });
 });
 
+describe("StudentPortalService — read-only surface (no active-student actions)", () => {
+  // A GRADUATED student must be able to READ their historical data (the
+  // fallback above), but must never gain a way to act as if still active —
+  // there is deliberately no mark-entry, attendance-marking, exam-submission
+  // or enrollment-changing method anywhere on this service; those live only
+  // in the Teacher/Admin-facing services (TeachersService, ExamsService,
+  // AttendanceService, PromotionsService, ...), which are untouched by this
+  // fix and still require their own @RequirePermissions grants a Student
+  // account never has. This test pins that surface so a future change can't
+  // silently add one here.
+  it("exposes only read (\"my...\") methods — nothing that creates, updates or deletes", () => {
+    const PRIVATE_HELPERS = new Set(["constructor", "getSelfOrThrow", "resolveMarkerNames"]);
+    const methodNames = Object.getOwnPropertyNames(StudentPortalService.prototype).filter(
+      (name) => !PRIVATE_HELPERS.has(name),
+    );
+    expect(methodNames.sort()).toEqual(
+      [
+        "myProfile",
+        "myAcademicYears",
+        "mySubjects",
+        "myAttendance",
+        "myResults",
+        "myResultsReport",
+        "myInvoices",
+        "myAnnouncements",
+      ].sort(),
+    );
+  });
+});
+
 describe("StudentPortalService.myResultsReport — Term 1 / Term 2 / Annual, own data only", () => {
   const term = (id: string, name: string) => ({ id, name, weight: 50 });
   const row = (id: string, termId: string, marks: number, max: number) => ({
@@ -392,9 +517,12 @@ describe("StudentPortalService.myResultsReport — Term 1 / Term 2 / Annual, own
 
     await service.myResultsReport(ACTOR);
 
-    expect(prisma.result.findMany.mock.calls[0][0].where).toMatchObject({
+    // No isAbsent filter here anymore — a published Incomplete (isAbsent)
+    // result is still fetched so it can be shown as Incomplete, just never
+    // counted in any average (see student-results-report.spec.ts).
+    expect(prisma.result.findMany.mock.calls[0][0].where).toEqual({
+      enrollmentId: { in: expect.any(Array) as unknown as string[] },
       resultSubmission: { status: "PUBLISHED" },
-      isAbsent: false,
     });
   });
 

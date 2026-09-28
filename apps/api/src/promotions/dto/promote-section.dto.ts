@@ -24,8 +24,15 @@ export class PromoteSectionDto {
   @IsUUID()
   fromAcademicYearId!: string;
 
+  // Optional: PROMOTED and RETAINED both create a new enrollment in this
+  // year, so the service still requires it for those outcomes — but a batch
+  // made entirely of the section's natural COMPLETED/GRADUATED outcome
+  // creates no new enrollment at all and needs no destination year (see
+  // PromotionsService.confirm's needsDestinationYear). Left out entirely for
+  // a Form 4/Class 8 section when the school has no later academic year yet.
+  @IsOptional()
   @IsUUID()
-  toAcademicYearId!: string;
+  toAcademicYearId?: string;
 
   // One entry per student the Admin is confirming an outcome for — not
   // necessarily every active enrollment in the section; a student the

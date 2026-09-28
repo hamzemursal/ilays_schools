@@ -202,8 +202,17 @@ export class PromotionsService {
     );
 
     const warnings: string[] = [];
-    if (!toYear) warnings.push("There is no later academic year yet. Create the destination academic year first - Promotion never creates one.");
-    else if (!retainedClass) {
+    if (!toYear) {
+      // A destination year is only ever needed for PROMOTED/RETAINED — never
+      // for the section's own COMPLETED/GRADUATED outcome (see confirm's
+      // needsDestinationYear), so the wording must not tell an Admin
+      // graduating/completing a final class that they're blocked.
+      warnings.push(
+        naturalOutcome === "PROMOTED"
+          ? "There is no later academic year yet. Create the destination academic year first - Promotion never creates one."
+          : `There is no later academic year yet. Students being ${naturalOutcome === "GRADUATED" ? "graduated" : "completed"} do not need one — but any student you choose to retain instead does, so create the destination academic year first if you need to retain anyone.`,
+      );
+    } else if (!retainedClass) {
       warnings.push(`${currentClass.name} has not been created for ${toYear.name}, so students cannot be retained until it is.`);
     }
 
@@ -230,29 +239,37 @@ export class PromotionsService {
   async confirm(actor: AuthenticatedUser, schoolId: string, sectionId: string, dto: PromoteSectionDto) {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
 
-    // Promotion never creates an academic year — the Admin must have already
-    // created the destination year (and prepared its classes/sections).
-    const [fromAcademicYear, toAcademicYear] = await Promise.all([
-      this.prisma.academicYear.findFirst({ where: { id: dto.fromAcademicYearId, schoolId } }),
-      this.prisma.academicYear.findFirst({ where: { id: dto.toAcademicYearId, schoolId } }),
-    ]);
+    const fromAcademicYear = await this.prisma.academicYear.findFirst({ where: { id: dto.fromAcademicYearId, schoolId } });
     if (!fromAcademicYear) throw new BadRequestException("That academic year does not belong to this school");
-    if (!toAcademicYear) {
+
+    // Promotion never creates an academic year — the Admin must have already
+    // created the destination year (and prepared its classes/sections)
+    // before PROMOTING or RETAINING anyone into it. Resolved up front only
+    // when the client actually sent one: a graduation/completion-only batch
+    // (see needsDestinationYear below) can omit it entirely, since neither
+    // outcome creates a new enrollment anywhere.
+    const toAcademicYear = dto.toAcademicYearId
+      ? await this.prisma.academicYear.findFirst({ where: { id: dto.toAcademicYearId, schoolId } })
+      : null;
+    if (dto.toAcademicYearId && !toAcademicYear) {
       throw new BadRequestException(
         "The destination academic year doesn't exist in this school. Create it first — Promotion never creates a new academic year.",
       );
     }
-    if (toAcademicYear.id === fromAcademicYear.id || toAcademicYear.startDate <= fromAcademicYear.startDate) {
+    if (toAcademicYear && (toAcademicYear.id === fromAcademicYear.id || toAcademicYear.startDate <= fromAcademicYear.startDate)) {
       throw new BadRequestException("The destination academic year must be a later year than the one being promoted from");
     }
 
     // Source class must be of the year being promoted; PROMOTED targets come
     // from the destination year's next level, RETAINED from its same level.
+    // toAcademicYear may be null here (no year picked yet) — resolvePlan
+    // already tolerates that for preview()'s "no later year" case, and
+    // simply leaves nextClass/retainedClass null.
     const { currentClass, nextClass, retainedClass, naturalOutcome } = await this.resolvePlan(
       schoolId,
       sectionId,
       dto.fromAcademicYearId,
-      toAcademicYear,
+      toAcademicYear ? { id: toAcademicYear.id, name: toAcademicYear.name } : null,
     );
 
     if (dto.assignments.length === 0) {
@@ -261,6 +278,23 @@ export class PromotionsService {
     const enrollmentIds = dto.assignments.map((a) => a.enrollmentId);
     if (new Set(enrollmentIds).size !== enrollmentIds.length) {
       throw new BadRequestException("The same enrollment can't be assigned twice");
+    }
+
+    // A destination academic year is only genuinely needed by PROMOTED and
+    // RETAINED — both create a new enrollment THERE. A batch made entirely
+    // of the section's own natural COMPLETED/GRADUATED outcome (the only
+    // outcomes a final class — Form 4 / Class 8 — can ever produce alongside
+    // RETAINED) needs no destination year at all: nothing is enrolled
+    // anywhere new, so a Form 4 section can be graduated even when the
+    // school has no next academic year yet. Checked here, before any of the
+    // nextClass/retainedClass structural checks below run, so a mixed batch
+    // (some GRADUATED, some RETAINED) still gets this one clear message
+    // instead of a confusing null-year crash further down.
+    const needsDestinationYear = dto.assignments.some((a) => a.outcome === "PROMOTED" || a.outcome === "RETAINED");
+    if (needsDestinationYear && !toAcademicYear) {
+      throw new BadRequestException(
+        "The destination academic year doesn't exist in this school. Create it first — Promotion never creates a new academic year.",
+      );
     }
 
     const enrollments = await this.prisma.studentEnrollment.findMany({
@@ -303,14 +337,16 @@ export class PromotionsService {
         }
         incomingBySection.set(a.targetSectionId, (incomingBySection.get(a.targetSectionId) ?? 0) + 1);
       } else if (a.outcome === "RETAINED") {
+        // RETAINED is one of the outcomes needsDestinationYear checks for,
+        // so reaching this branch already guarantees toAcademicYear is set.
         if (!retainedClass) {
           throw new BadRequestException(
-            `${currentClass.name} has not been created for ${toAcademicYear.name}. Create it (with its sections) in that academic year before retaining students.`,
+            `${currentClass.name} has not been created for ${toAcademicYear!.name}. Create it (with its sections) in that academic year before retaining students.`,
           );
         }
         if (!a.targetSectionId || !retainedSectionIds.has(a.targetSectionId)) {
           throw new BadRequestException(
-            `A valid section in ${retainedClass.name} (${toAcademicYear.name}) is required to retain this student`,
+            `A valid section in ${retainedClass.name} (${toAcademicYear!.name}) is required to retain this student`,
           );
         }
         incomingBySection.set(a.targetSectionId, (incomingBySection.get(a.targetSectionId) ?? 0) + 1);
@@ -335,9 +371,12 @@ export class PromotionsService {
     for (const [targetSectionId, incoming] of incomingBySection) {
       const section = await this.prisma.section.findUniqueOrThrow({ where: { id: targetSectionId } });
       if (section.capacity !== null) {
-        // Only the DESTINATION academic year's roster counts against capacity.
+        // Only the DESTINATION academic year's roster counts against
+        // capacity. incomingBySection is only ever populated by a
+        // PROMOTED/RETAINED assignment, which needsDestinationYear has
+        // already guaranteed comes with a real toAcademicYear.
         const currentActive = await this.prisma.studentEnrollment.count({
-          where: { sectionId: targetSectionId, academicYearId: dto.toAcademicYearId, status: "ACTIVE" },
+          where: { sectionId: targetSectionId, academicYearId: toAcademicYear!.id, status: "ACTIVE" },
         });
         if (currentActive + incoming > section.capacity) {
           throw new BadRequestException(
@@ -357,23 +396,38 @@ export class PromotionsService {
           data: {
             schoolId,
             fromAcademicYearId: dto.fromAcademicYearId,
-            toAcademicYearId: dto.toAcademicYearId,
+            // PromotionBatch.toAcademicYearId is a required (non-nullable)
+            // plain column — see schema.prisma — with no FK relation to
+            // AcademicYear (same shape as Transfer.fromSchoolId/toSchoolId),
+            // so it always needs SOME real academic-year id belonging to
+            // this school, never a schema change just to allow null. A
+            // graduation/completion-only batch (toAcademicYear === null:
+            // no PROMOTED/RETAINED assignment needed one — see
+            // needsDestinationYear) has no real destination year to record,
+            // so the batch is anchored back to the year it was confirmed
+            // FROM instead: an honest "no year transition happened" value,
+            // never surfaced to the Admin (the natural-outcome audit entry
+            // below never includes a year name) and never read back anywhere
+            // that assumes toAcademicYearId is later than fromAcademicYearId.
+            toAcademicYearId: toAcademicYear?.id ?? fromAcademicYear.id,
             initiatedByUserId: actor.id,
             status: "CONFIRMED",
             confirmedAt: new Date(),
           },
         });
 
-        // Roll numbers are scoped by toAcademicYearId — a section reused
+        // Roll numbers are scoped by the destination year — a section reused
         // across years resets its numbering each year rather than carrying
         // it forward (see StudentsService.generateRollNumber for the same
         // rule) — tracked per target section since promoted and retained
         // students can land in different sections within the same batch.
+        // Only ever called for PROMOTED/RETAINED (see below), so
+        // toAcademicYear is guaranteed non-null here.
         const nextRollBySection = new Map<string, number>();
         const nextRollFor = async (targetSectionId: string) => {
           if (!nextRollBySection.has(targetSectionId)) {
             const maxRoll = await tx.studentEnrollment.aggregate({
-              where: { sectionId: targetSectionId, academicYearId: dto.toAcademicYearId, status: "ACTIVE" },
+              where: { sectionId: targetSectionId, academicYearId: toAcademicYear!.id, status: "ACTIVE" },
               _max: { rollNumber: true },
             });
             nextRollBySection.set(targetSectionId, (maxRoll._max.rollNumber ?? 0) + 1);
@@ -402,7 +456,7 @@ export class PromotionsService {
                 studentId: enrollment.studentId,
                 organizationId: enrollment.organizationId,
                 schoolId,
-                academicYearId: dto.toAcademicYearId,
+                academicYearId: toAcademicYear!.id,
                 classId: targetClassId,
                 sectionId: a.targetSectionId!,
                 // Student number carries over across years by design — see
@@ -461,7 +515,10 @@ export class PromotionsService {
               module: AuditModuleName.PROMOTIONS,
               resourceType: "PromotionBatch",
               resourceId: batch.id,
-              after: { outcome: "RETAINED", studentCount: retainedCount, class: currentClass.name, toAcademicYear: toAcademicYear.name },
+              // retainedCount > 0 implies at least one RETAINED assignment,
+              // which needsDestinationYear has already guaranteed came with
+              // a real toAcademicYear.
+              after: { outcome: "RETAINED", studentCount: retainedCount, class: currentClass.name, toAcademicYear: toAcademicYear!.name },
             },
             tx,
           );

@@ -31,6 +31,37 @@ const NATURAL_OUTCOME_LABEL: Record<PromotionPreview["naturalOutcome"], string> 
   GRADUATED: "Graduate",
 };
 
+// Mirrors PromotionsService's FINAL_LEVEL_BY_DIVISION — used ONLY as a
+// client-side hint, before Preview has run, to decide whether the "To
+// academic year" step can be skipped (a final class needs no destination
+// year to graduate/complete). It never drives the actual outcome: once
+// Preview returns, every label below keys off preview.naturalOutcome, the
+// backend's own authoritative answer, never this guess.
+const FINAL_LEVEL_BY_DIVISION = { PRIMARY: 8, SECONDARY: 4 } as const;
+
+const SUMMARY_TITLE_LABEL: Record<PromotionPreview["naturalOutcome"], string> = {
+  PROMOTED: "Promotion Summary",
+  COMPLETED: "Completion Summary",
+  GRADUATED: "Graduation Summary",
+};
+
+const CONFIRM_BUTTON_LABEL: Record<PromotionPreview["naturalOutcome"], string> = {
+  PROMOTED: "Confirm Promotion",
+  COMPLETED: "Confirm Completion",
+  GRADUATED: "Confirm Graduation",
+};
+
+const CONFIRM_DIALOG_DESCRIPTION: Record<PromotionPreview["naturalOutcome"], string> = {
+  PROMOTED: "Students will be moved into new enrollment records for the selected academic year. Existing historical records will remain unchanged.",
+  COMPLETED: "Students completing this division will be marked Primary Completed. No new enrollment or destination academic year is created for them — existing historical records remain unchanged.",
+  GRADUATED: "Students graduating will be marked Graduated / Alumni. No new enrollment or destination academic year is created for them — existing historical records, results and attendance remain unchanged.",
+};
+
+const DESTINATION_STATUS_LABEL: Record<"COMPLETED" | "GRADUATED", string> = {
+  COMPLETED: "Primary Completed",
+  GRADUATED: "Graduated / Alumni",
+};
+
 function formatPercent(value: number | null): string {
   return value === null ? "—" : `${value.toFixed(2)}%`;
 }
@@ -128,6 +159,15 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
   const fromYear = years.find((y) => y.id === fromYearId);
   const laterYears = fromYear ? years.filter((y) => new Date(y.startDate) > new Date(fromYear.startDate)) : [];
 
+  // A client-side hint only (see FINAL_LEVEL_BY_DIVISION above) — whether the
+  // selected class LOOKS like a division's final class, so Step 1 can let the
+  // Admin skip picking a destination year before Preview has even run. Never
+  // used to decide what actually happens; that's always preview.naturalOutcome.
+  const isFinalClassSelected = selectedClass
+    ? selectedClass.level >= FINAL_LEVEL_BY_DIVISION[selectedClass.division.type]
+    : false;
+  const sourceSectionName = selectedClass?.sections.find((s) => s.id === sectionId)?.name;
+
   function resetSource() {
     setPreview(null);
     setDecisions(new Map());
@@ -212,14 +252,19 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
   }
 
   async function onPreview() {
-    if (!accessToken || !sectionId || !fromYearId || !toYearId) return;
+    // A destination year is required to preview PROMOTED/RETAINED targets —
+    // except when the selected class looks like a division's final class
+    // (see isFinalClassSelected), which needs no destination year at all to
+    // graduate/complete. Previewing without one is always safe: the backend
+    // already tolerates a missing toAcademicYearId (see PromotionsService.preview).
+    if (!accessToken || !sectionId || !fromYearId || (!toYearId && !isFinalClassSelected)) return;
     setError(null);
     setDestinationNotReadyMessage(null);
     setConfirmedCount(null);
     setPreview(null);
     setPreviewing(true);
     try {
-      const result = await api.previewPromotion(accessToken, schoolId, sectionId, fromYearId, toYearId);
+      const result = await api.previewPromotion(accessToken, schoolId, sectionId, fromYearId, toYearId || undefined);
       setPreview(result);
       const initialDecisions = new Map<string, Decision>(
         result.students.map((s) => [s.enrollmentId, s.suggestedOutcome ?? ""]),
@@ -254,7 +299,14 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
     : false;
 
   async function onConfirm() {
-    if (!accessToken || !preview || !toYearId || !allDecided) return;
+    // toYearId is NOT required here — a batch made entirely of the section's
+    // natural COMPLETED/GRADUATED outcome needs no destination year at all
+    // (see PromotionsService.confirm's needsDestinationYear). allDecided is
+    // still the real gate: any PROMOTED/RETAINED decision without a real
+    // destination section (which can't exist without a destination year)
+    // already leaves allDecided false, so this can never silently confirm a
+    // promotion/retention with no year picked.
+    if (!accessToken || !preview || !allDecided) return;
     setError(null);
     setConfirming(true);
     try {
@@ -265,7 +317,7 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
       });
       const result = await api.confirmPromotion(accessToken, schoolId, sectionId, {
         fromAcademicYearId: fromYearId,
-        toAcademicYearId: toYearId,
+        toAcademicYearId: toYearId || undefined,
         assignments,
       });
       setConfirmedCount(result.items.length);
@@ -293,6 +345,12 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
   }
 
   if (loadError) return <Alert tone="danger">{loadError}</Alert>;
+
+  // The always-rendered ConfirmDialog reads this even in the brief render
+  // where preview has already been cleared (onConfirm's own setPreview(null))
+  // but the dialog is still animating closed — falls back to the ordinary
+  // Promotion wording rather than reading naturalOutcome off a null preview.
+  const naturalOutcome = preview?.naturalOutcome ?? "PROMOTED";
 
   const totalStudents = preview?.students.length ?? 0;
   const promoteCount = preview ? preview.students.filter((s) => effectiveOutcome(s.enrollmentId) === preview.naturalOutcome).length : 0;
@@ -504,17 +562,17 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
           <div className="rounded-xl border border-accent/30 bg-accent-soft/15 p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-accent">To (Destination Year)</p>
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <FormField label="To academic year" htmlFor="toAcademicYearId" required>
+              <FormField label="To academic year" htmlFor="toAcademicYearId" required={!isFinalClassSelected}>
                 <Select
                   id="toAcademicYearId"
-                  required
+                  required={!isFinalClassSelected}
                   value={toYearId}
                   onChange={(e) => {
                     setToYearId(e.target.value);
                     resetSource();
                   }}
                 >
-                  <option value="">Select…</option>
+                  <option value="">{isFinalClassSelected ? "Not needed for graduation/completion" : "Select…"}</option>
                   {laterYears.map((y) => (
                     <option key={y.id} value={y.id}>
                       {y.name}
@@ -524,22 +582,38 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
               </FormField>
               <FormField label="Class">
                 <p className="flex h-10 items-center text-sm text-foreground-soft">
-                  {preview ? (preview.nextClass?.name ?? "—") : "Preview to see"}
+                  {preview
+                    ? preview.naturalOutcome === "PROMOTED"
+                      ? (preview.nextClass?.name ?? "—")
+                      : DESTINATION_STATUS_LABEL[preview.naturalOutcome]
+                    : "Preview to see"}
                 </p>
               </FormField>
               <FormField label="Section">
                 <p className="flex h-10 items-center text-sm text-foreground-soft">
-                  {preview ? (promotedSectionNames.length > 0 ? promotedSectionNames.join(", ") : "—") : "Preview to see"}
+                  {preview
+                    ? preview.naturalOutcome === "PROMOTED"
+                      ? (promotedSectionNames.length > 0 ? promotedSectionNames.join(", ") : "—")
+                      : "No new enrollment"
+                    : "Preview to see"}
                 </p>
               </FormField>
             </div>
           </div>
         </div>
 
-        {fromYear && laterYears.length === 0 && (
+        {fromYear && laterYears.length === 0 && !isFinalClassSelected && (
           <Alert tone="warning" className="mt-4">
             There is no academic year after {fromYear.name} yet. Create it first (Academic → Years) and prepare its
             classes and sections — Promotion never creates an academic year for you.
+          </Alert>
+        )}
+
+        {fromYear && laterYears.length === 0 && isFinalClassSelected && (
+          <Alert tone="info" className="mt-4">
+            {selectedClass?.name} looks like the final class of its division — Preview can graduate/complete its
+            students without a later academic year. You'll only need one (Academic → Years) if you choose to retain
+            a student in {selectedClass?.name} instead.
           </Alert>
         )}
 
@@ -547,7 +621,7 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
           className="mt-4"
           icon={<ArrowUpCircle className="size-4" />}
           loading={previewing}
-          disabled={!classId || !sectionId || !fromYearId || !toYearId}
+          disabled={!classId || !sectionId || !fromYearId || (!toYearId && !isFinalClassSelected)}
           onClick={onPreview}
         >
           Preview
@@ -591,6 +665,16 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
             </Alert>
           )}
 
+          {preview.naturalOutcome !== "PROMOTED" && (
+            <Alert tone="info">
+              This is a <span className="font-medium">{preview.naturalOutcome === "GRADUATED" ? "Graduation" : "Primary Completion"}</span> action —{" "}
+              {preview.currentClass.name} is the final class of its division. Students confirmed with this outcome
+              need no destination academic year, class or section: they are simply marked{" "}
+              <span className="font-medium">{DESTINATION_STATUS_LABEL[preview.naturalOutcome]}</span>, and no new
+              enrollment is created for them.
+            </Alert>
+          )}
+
           <Card padding="none">
             <CardHeader
               title={
@@ -629,12 +713,51 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
                   <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-white">
                     3
                   </span>
-                  <h2 className="text-sm font-semibold text-foreground">Promotion Summary</h2>
+                  <h2 className="text-sm font-semibold text-foreground">{SUMMARY_TITLE_LABEL[preview.naturalOutcome]}</h2>
                 </div>
+
+                {preview.naturalOutcome !== "PROMOTED" && (
+                  <div
+                    data-testid="graduation-summary-details"
+                    className="mt-4 rounded-lg border border-accent/30 bg-accent-soft/10 p-4 text-sm"
+                  >
+                    <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+                      <div>
+                        <dt className="text-xs text-foreground-muted">Academic Year</dt>
+                        <dd className="font-medium text-foreground">{fromYear?.name ?? "—"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-foreground-muted">Class</dt>
+                        <dd className="font-medium text-foreground">{preview.currentClass.name}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-foreground-muted">Section</dt>
+                        <dd className="font-medium text-foreground">{sourceSectionName ?? "—"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-foreground-muted">
+                          Students {preview.naturalOutcome === "GRADUATED" ? "graduating" : "completing"}
+                        </dt>
+                        <dd className="font-medium text-foreground">{promoteCount}</dd>
+                      </div>
+                    </dl>
+                    <div className="mt-3 border-t border-border pt-3">
+                      <p className="text-xs text-foreground-muted">Destination</p>
+                      <p className="font-medium text-foreground">{DESTINATION_STATUS_LABEL[preview.naturalOutcome]}</p>
+                    </div>
+                    <p className="mt-3 text-foreground-soft">No next-year enrollment will be created.</p>
+                  </div>
+                )}
 
                 <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <StatCard icon={Users} label="Total Students" value={totalStudents} />
-                  <StatCard icon={CheckCircle2} label="Will be Promoted" value={promoteCount} tone="success" hint={`${totalStudents ? Math.round((promoteCount / totalStudents) * 100) : 0}%`} />
+                  <StatCard
+                    icon={CheckCircle2}
+                    label={preview.naturalOutcome === "GRADUATED" ? "Will Graduate" : preview.naturalOutcome === "COMPLETED" ? "Will Complete" : "Will be Promoted"}
+                    value={promoteCount}
+                    tone="success"
+                    hint={`${totalStudents ? Math.round((promoteCount / totalStudents) * 100) : 0}%`}
+                  />
                   <StatCard icon={RotateCcw} label="Will be Retained" value={retainCount} tone="warning" hint={`${totalStudents ? Math.round((retainCount / totalStudents) * 100) : 0}%`} />
                   <StatCard icon={Eye} label="Manual Review" value={manualReviewCount} tone="neutral" />
                 </div>
@@ -642,7 +765,7 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
                 <div className="mt-4 rounded-lg bg-surface-soft p-4 text-sm text-foreground-soft">
                   <p className="font-medium text-foreground">What will happen?</p>
                   <ul className="mt-2 list-inside list-disc space-y-1">
-                    {promoteCount > 0 && (
+                    {promoteCount > 0 && preview.naturalOutcome === "PROMOTED" && (
                       <li>
                         {promoteCount} student{promoteCount === 1 ? "" : "s"} will receive new enrollments in{" "}
                         <span className="font-medium text-foreground">
@@ -650,6 +773,13 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
                           {promotedSectionNames.length > 0 ? ` · ${promotedSectionNames.join("/")}` : ""}
                         </span>{" "}
                         for {preview.targetAcademicYear?.name}.
+                      </li>
+                    )}
+                    {promoteCount > 0 && preview.naturalOutcome !== "PROMOTED" && (
+                      <li>
+                        {promoteCount} student{promoteCount === 1 ? "" : "s"} will be marked{" "}
+                        <span className="font-medium text-foreground">{DESTINATION_STATUS_LABEL[preview.naturalOutcome]}</span>. No new
+                        enrollment or destination academic year is created for them.
                       </li>
                     )}
                     {retainCount > 0 && (
@@ -667,8 +797,15 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
                     )}
                     <li>Existing historical enrollments will not be deleted.</li>
                     <li>Student permanent IDs remain unchanged.</li>
-                    <li>New academic-year enrollment records are created.</li>
-                    <li>Student numbers carry over unchanged; roll numbers are assigned fresh in the destination section.</li>
+                    {(retainCount > 0 || (promoteCount > 0 && preview.naturalOutcome === "PROMOTED")) && (
+                      <>
+                        <li>New academic-year enrollment records are created for promoted/retained students.</li>
+                        <li>Student numbers carry over unchanged; roll numbers are assigned fresh in the destination section.</li>
+                      </>
+                    )}
+                    {promoteCount > 0 && preview.naturalOutcome !== "PROMOTED" && (
+                      <li>Results, attendance and academic history for graduating/completing students remain fully accessible.</li>
+                    )}
                   </ul>
                 </div>
               </Card>
@@ -678,7 +815,7 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
                   Cancel
                 </Button>
                 <Button icon={<CheckCircle2 className="size-4" />} disabled={!allDecided} onClick={() => setShowConfirmDialog(true)}>
-                  Confirm Promotion
+                  {CONFIRM_BUTTON_LABEL[preview.naturalOutcome]}
                 </Button>
               </div>
               {!allDecided && (
@@ -693,9 +830,9 @@ export function PromotionWizard({ schoolId }: { schoolId: string }) {
 
       <ConfirmDialog
         open={showConfirmDialog}
-        title="Confirm Promotion"
-        description="Students will be moved into new enrollment records for the selected academic year. Existing historical records will remain unchanged."
-        confirmLabel="Confirm Promotion"
+        title={CONFIRM_BUTTON_LABEL[naturalOutcome]}
+        description={CONFIRM_DIALOG_DESCRIPTION[naturalOutcome]}
+        confirmLabel={CONFIRM_BUTTON_LABEL[naturalOutcome]}
         tone="primary"
         loading={confirming}
         onConfirm={onConfirm}

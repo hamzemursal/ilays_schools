@@ -451,6 +451,177 @@ describe("PromotionWizard — confirmation summary and submit", () => {
   });
 });
 
+// Task 2 — a final class (Form 4 Secondary here; Class 8 Primary works the
+// same way) must be gradable without a destination academic year.
+const FINAL_CLASSES: ClassWithSections[] = [
+  {
+    id: "class-form4",
+    name: "Form 4",
+    level: 4,
+    division: { id: "div-secondary", type: "SECONDARY" },
+    sections: [{ id: "section-c", name: "C", capacity: 30, _count: { enrollments: 25 } }],
+    _count: { classSubjects: 6 },
+  },
+];
+
+function graduationPreview(overrides: Partial<PromotionPreview> = {}): PromotionPreview {
+  return {
+    naturalOutcome: "GRADUATED",
+    currentClass: { id: "class-form4", name: "Form 4" },
+    nextClass: null,
+    retainedClass: null,
+    targetAcademicYear: null,
+    currentClassSections: [],
+    nextClassSections: [],
+    warnings: [
+      "There is no later academic year yet. Students being graduated do not need one — but any student you choose to retain instead does, so create the destination academic year first if you need to retain anyone.",
+    ],
+    students: [eligibleStudent({ suggestedOutcome: "GRADUATED" })],
+    ...overrides,
+  };
+}
+
+describe("PromotionWizard — Form 4 graduation without a destination academic year (Task 2)", () => {
+  beforeEach(() => {
+    apiMock.listAcademicYears.mockResolvedValue([YEARS[0]]); // only the current year exists — no later one
+    apiMock.listClasses.mockResolvedValue(FINAL_CLASSES);
+  });
+
+  it("Preview is enabled for a final class even with no destination year picked — never blocked on it", async () => {
+    renderWizard();
+
+    await waitFor(() => expect(screen.getByLabelText("From academic year", { exact: false })).toHaveValue("year-1"));
+    expect(screen.getByRole("button", { name: "Preview" })).toBeEnabled();
+  });
+
+  it("never shows the 'create the destination academic year first' blocking message for a final class", async () => {
+    renderWizard();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Preview" })).toBeEnabled());
+    expect(screen.queryByText(/Promotion never creates an academic year for you/)).not.toBeInTheDocument();
+  });
+
+  it("calls preview with no toAcademicYearId when none is picked", async () => {
+    apiMock.previewPromotion.mockResolvedValue(graduationPreview());
+    const user = userEvent.setup();
+    renderWizard();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Preview" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+
+    await waitFor(() => expect(apiMock.previewPromotion).toHaveBeenCalledWith("token", "school-1", "section-c", "year-1", undefined));
+  });
+
+  it("clearly labels this as a Graduation action once previewed", async () => {
+    apiMock.previewPromotion.mockResolvedValue(graduationPreview());
+    const user = userEvent.setup();
+    renderWizard();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Preview" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+
+    await screen.findByText(/This is a/);
+    expect(document.body.textContent).toMatch(/This is a Graduation action/);
+  });
+
+  it("shows a Graduation Summary with Academic Year, Class, Section, student count and destination — no next-year enrollment note", async () => {
+    apiMock.previewPromotion.mockResolvedValue(graduationPreview());
+    const user = userEvent.setup();
+    renderWizard();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Preview" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(await screen.findByText("Graduation Summary")).toBeInTheDocument();
+    const details = within(await screen.findByTestId("graduation-summary-details"));
+    expect(details.getByText("2027")).toBeInTheDocument(); // Academic Year
+    expect(details.getByText("Form 4")).toBeInTheDocument(); // Class
+    expect(details.getByText("C")).toBeInTheDocument(); // Section
+    expect(details.getByText("1")).toBeInTheDocument(); // Students graduating
+    expect(details.getByText("Graduated / Alumni")).toBeInTheDocument(); // Destination
+    expect(details.getByText(/No next-year enrollment will be created/)).toBeInTheDocument();
+  });
+
+  it("the Confirm button and dialog read 'Confirm Graduation', not the generic Promotion wording", async () => {
+    apiMock.previewPromotion.mockResolvedValue(graduationPreview());
+    const user = userEvent.setup();
+    renderWizard();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Preview" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    await screen.findByText("Preview Students");
+
+    const confirmButton = await screen.findByRole("button", { name: "Confirm Graduation" });
+    await user.click(confirmButton);
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByRole("heading", { name: "Confirm Graduation" })).toBeInTheDocument();
+    expect(within(dialog).getByText(/marked Graduated \/ Alumni/)).toBeInTheDocument();
+  });
+
+  it("confirms with toAcademicYearId omitted entirely — the real request the backend now accepts for graduation", async () => {
+    apiMock.previewPromotion.mockResolvedValue(graduationPreview());
+    apiMock.confirmPromotion.mockResolvedValue({ id: "batch-1", items: [{ id: "item-1", studentId: "student-1", outcome: "GRADUATED" }] });
+    const user = userEvent.setup();
+    renderWizard();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Preview" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    await screen.findByText("Preview Students");
+
+    await user.click(await screen.findByRole("button", { name: "Confirm Graduation" }));
+    const dialog = screen.getByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Confirm Graduation" }));
+
+    await waitFor(() =>
+      expect(apiMock.confirmPromotion).toHaveBeenCalledWith("token", "school-1", "section-c", {
+        fromAcademicYearId: "year-1",
+        toAcademicYearId: undefined,
+        assignments: [{ enrollmentId: "enr-1", outcome: "GRADUATED", targetSectionId: undefined }],
+      }),
+    );
+  });
+
+  it("also works when a destination year IS picked — the real id is sent, not omitted", async () => {
+    apiMock.listAcademicYears.mockResolvedValue(YEARS); // a later year exists too
+    apiMock.previewPromotion.mockResolvedValue(graduationPreview({ targetAcademicYear: { id: "year-2", name: "2028" }, warnings: [] }));
+    apiMock.confirmPromotion.mockResolvedValue({ id: "batch-1", items: [{ id: "item-1", studentId: "student-1", outcome: "GRADUATED" }] });
+    const user = userEvent.setup();
+    renderWizard();
+    await waitFor(() => expect(screen.getByLabelText("To academic year", { exact: false })).toBeInTheDocument());
+    await user.selectOptions(screen.getByLabelText("To academic year", { exact: false }), "2028");
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    await screen.findByText("Preview Students");
+
+    await user.click(await screen.findByRole("button", { name: "Confirm Graduation" }));
+    const dialog = screen.getByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Confirm Graduation" }));
+
+    await waitFor(() =>
+      expect(apiMock.confirmPromotion).toHaveBeenCalledWith(
+        "token",
+        "school-1",
+        "section-c",
+        expect.objectContaining({ toAcademicYearId: "year-2" }),
+      ),
+    );
+  });
+});
+
+describe("PromotionWizard — normal (non-final class) promotion still requires a destination year, unaffected by Task 2", () => {
+  it("Preview stays disabled without a destination year for an ordinary Class 1 promotion", async () => {
+    apiMock.previewPromotion.mockResolvedValue(basePreview());
+    renderWizard();
+
+    await waitFor(() => expect(screen.getByLabelText("From academic year", { exact: false })).toHaveValue("year-1"));
+    expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
+  });
+
+  it("still shows the blocking 'create it first' message when no later year exists for a non-final class", async () => {
+    apiMock.listAcademicYears.mockResolvedValue([YEARS[0]]);
+    renderWizard();
+
+    await waitFor(() => expect(screen.getByText(/no academic year after 2027 yet/i)).toBeInTheDocument());
+    expect(screen.getByText(/Promotion never creates an academic year for you/)).toBeInTheDocument();
+  });
+});
+
 describe("PromotionWizard — academic-year isolation", () => {
   it("changing the source class/section/year resets any existing preview, never mixing two years' students", async () => {
     apiMock.previewPromotion.mockResolvedValue(basePreview());

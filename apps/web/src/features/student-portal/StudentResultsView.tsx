@@ -37,14 +37,26 @@ function TermAccentIcon({ tone }: { tone: "term1" | "term2" }) {
 }
 
 function SubjectRow({ row }: { row: PortalResultRow }) {
+  const isIncomplete = row.status === "INCOMPLETE";
   return (
     <div className="flex items-center justify-between gap-3 py-2.5">
       <p className="min-w-0 truncate text-sm font-medium text-foreground">{row.subjectName}</p>
       <div className="flex shrink-0 items-center gap-3">
-        <span className="text-sm tabular-nums text-foreground-soft">
-          {row.marksObtained} / {row.maxMarks}
-        </span>
-        <Badge tone="accent">{row.percentage}%</Badge>
+        {isIncomplete ? (
+          <>
+            <span className="text-sm text-foreground-muted">—</span>
+            <Badge tone="neutral">Incomplete</Badge>
+          </>
+        ) : (
+          <>
+            <span className="text-sm tabular-nums text-foreground-soft">
+              {row.marksObtained} / {row.maxMarks}
+            </span>
+            {/* A real, completed 0% is a genuine percentage like any other —
+                Incomplete above is the only case that never shows one. */}
+            <Badge tone="accent">{row.percentage}%</Badge>
+          </>
+        )}
       </div>
     </div>
   );

@@ -256,7 +256,7 @@ describeWithDb("Student & Parent portals — results and attendance, real databa
     }
   }, 60_000);
 
-  const marksOf = (report: { terms: Array<{ results: Array<{ marksObtained: number; maxMarks: number }> }> }, i: 0 | 1) =>
+  const marksOf = (report: { terms: Array<{ results: Array<{ marksObtained: number | null; maxMarks: number }> }> }, i: 0 | 1) =>
     report.terms[i].results.map((r) => [r.marksObtained, r.maxMarks]);
 
   describe("Student Portal — own published results", () => {

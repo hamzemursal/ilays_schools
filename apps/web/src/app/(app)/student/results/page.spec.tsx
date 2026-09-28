@@ -44,6 +44,7 @@ const MATHS_ROW = {
   id: "r1",
   examName: "Term 1 Exam",
   subjectName: "Mathematics",
+  status: "COMPLETED" as const,
   marksObtained: 85,
   maxMarks: 100,
   percentage: 85,
@@ -142,6 +143,51 @@ describe("StudentResultsPage — Term 1 published only", () => {
 
     expect(screen.getByText("No results available for Term 2 yet.")).toBeInTheDocument();
     expect(screen.getByText("-")).toBeInTheDocument();
+  });
+});
+
+describe("StudentResultsPage — Incomplete vs a real zero", () => {
+  it("shows Incomplete and — for a subject the student didn't complete, never a mark or 0%", async () => {
+    apiMock.getMyStudentResultsReport.mockResolvedValue(
+      report({
+        terms: [
+          {
+            name: "Term 1",
+            termId: "t1",
+            weight: 50,
+            results: [{ ...MATHS_ROW, id: "r-abs", subjectName: "Science", status: "INCOMPLETE", marksObtained: null, percentage: null }],
+            percentage: null,
+          },
+          { name: "Term 2", termId: "t2", weight: 50, results: [], percentage: null },
+        ],
+      }),
+    );
+    render(<StudentResultsPage />);
+    const term1Card = (await screen.findByText("Term 1 Results")).closest("div.overflow-hidden") as HTMLElement;
+
+    expect(within(term1Card).getByText("Science")).toBeInTheDocument();
+    // Appears twice here: the subject row's own badge and the (also
+    // Incomplete, since nothing counted) Term 1 Average footer — both real.
+    expect(within(term1Card).getAllByText("Incomplete").length).toBeGreaterThanOrEqual(1);
+    expect(within(term1Card).queryByText(/\d+ \/ \d+/)).not.toBeInTheDocument();
+    expect(within(term1Card).queryByText(/^0%$/)).not.toBeInTheDocument();
+  });
+
+  it("shows a real completed 0 as 0/100 and 0%, distinct from Incomplete", async () => {
+    apiMock.getMyStudentResultsReport.mockResolvedValue(
+      report({
+        terms: [
+          { name: "Term 1", termId: "t1", weight: 50, results: [{ ...MATHS_ROW, marksObtained: 0, percentage: 0 }], percentage: 0 },
+          { name: "Term 2", termId: "t2", weight: 50, results: [], percentage: null },
+        ],
+      }),
+    );
+    render(<StudentResultsPage />);
+    const term1Card = (await screen.findByText("Term 1 Results")).closest("div.overflow-hidden") as HTMLElement;
+
+    expect(within(term1Card).getByText("0 / 100")).toBeInTheDocument();
+    expect(within(term1Card).getByText("0%")).toBeInTheDocument();
+    expect(within(term1Card).queryByText("Incomplete")).not.toBeInTheDocument();
   });
 });
 

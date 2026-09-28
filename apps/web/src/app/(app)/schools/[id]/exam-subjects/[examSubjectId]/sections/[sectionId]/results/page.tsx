@@ -20,7 +20,8 @@ import { ReturnForCorrectionDialog } from "@/features/exams/ReturnForCorrectionD
 import { ApproveResultsDialog } from "@/features/exams/ApproveResultsDialog";
 import { PublishResultsDialog } from "@/features/exams/PublishResultsDialog";
 import { UnpublishResultsDialog } from "@/features/exams/UnpublishResultsDialog";
-import { CheckCircle2, Megaphone, Printer, RotateCcw, Save, Send, Undo2 } from "lucide-react";
+import { AdminEditResultDialog, type AdminEditResultTarget } from "@/features/exams/AdminEditResultDialog";
+import { CheckCircle2, Megaphone, Pencil, Printer, RotateCcw, Save, Send, Undo2 } from "lucide-react";
 
 export default function ResultsPage({
   params,
@@ -47,6 +48,13 @@ export default function ResultsPage({
   const [publishing, setPublishing] = useState(false);
   const [unpublishDialogOpen, setUnpublishDialogOpen] = useState(false);
   const [unpublishing, setUnpublishing] = useState(false);
+  // Admin-only per-result override — independent of the bulk Save Draft/
+  // Submit flow above and of `editable`: it works at ANY submission status,
+  // including APPROVED and PUBLISHED (see ExamsService.adminEditResult).
+  const [editTarget, setEditTarget] = useState<AdminEditResultTarget | null>(null);
+  const [adminEditSaving, setAdminEditSaving] = useState(false);
+  const [adminEditError, setAdminEditError] = useState<string | null>(null);
+  const [adminEditedMessage, setAdminEditedMessage] = useState(false);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -198,6 +206,23 @@ export default function ResultsPage({
     }
   }
 
+  async function confirmAdminEdit(input: { marksObtained?: number; isAbsent?: boolean; reason?: string }) {
+    if (!accessToken || !editTarget) return;
+    setAdminEditSaving(true);
+    setAdminEditError(null);
+    try {
+      const updated = await api.adminEditResult(accessToken, schoolId, examSubjectId, sectionId, editTarget.enrollmentId, input);
+      setData(updated);
+      syncFromServer(updated);
+      setEditTarget(null);
+      setAdminEditedMessage(true);
+    } catch (err) {
+      setAdminEditError(err instanceof ApiError ? err.message : "Failed to save the edited result");
+    } finally {
+      setAdminEditSaving(false);
+    }
+  }
+
   const examContext: ExamContext | null = data
     ? {
         examName: data.context.examName,
@@ -230,6 +255,12 @@ export default function ResultsPage({
 
       <div className="mx-auto max-w-3xl space-y-5 p-4 sm:p-6">
         {error && <Alert tone="danger">{error}</Alert>}
+        {adminEditedMessage && (
+          <Alert tone="success">
+            Result updated.
+            {data?.submission.status === "PUBLISHED" && " It stays published — students and parents now see the new value."}
+          </Alert>
+        )}
 
         {!data ? (
           <SkeletonCards count={2} />
@@ -343,6 +374,29 @@ export default function ResultsPage({
                         <Badge tone={s.isAbsent ? "warning" : s.hasMark ? "success" : "neutral"}>
                           {s.isAbsent ? "Absent" : s.hasMark ? "Entered" : "Missing"}
                         </Badge>
+                        {/* Admin-only: works regardless of `editable`, including
+                            an already-published result — never require an
+                            unpublish/return/resubmit/republish round trip.
+                            Never shown to a Teacher, even one who also holds
+                            results.approve (canApprove already excludes them). */}
+                        {canApprove && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={<Pencil className="size-4" />}
+                            aria-label={`Edit result for ${s.firstName} ${s.lastName}`}
+                            onClick={() => {
+                              setAdminEditError(null);
+                              setAdminEditedMessage(false);
+                              setEditTarget({
+                                enrollmentId: s.enrollmentId,
+                                studentName: `${s.firstName} ${s.lastName}`,
+                                currentMark: s.marksObtained,
+                                isAbsent: s.isAbsent,
+                              });
+                            }}
+                          />
+                        )}
                       </div>
                     </div>
                   </Card>
@@ -453,6 +507,21 @@ export default function ResultsPage({
             loading={unpublishing}
             onConfirm={confirmUnpublish}
             onCancel={() => setUnpublishDialogOpen(false)}
+          />
+          <AdminEditResultDialog
+            open={!!editTarget}
+            target={editTarget}
+            examName={data.context.examName}
+            termName={data.context.termName}
+            subjectName={data.context.subjectName}
+            maxMarks={data.maxMarks}
+            loading={adminEditSaving}
+            error={adminEditError}
+            onConfirm={confirmAdminEdit}
+            onCancel={() => {
+              setEditTarget(null);
+              setAdminEditError(null);
+            }}
           />
         </>
       )}

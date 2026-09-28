@@ -60,13 +60,21 @@ function setup(actor: AuthenticatedUser = SCHOOL_ADMIN) {
       findFirst: jest.fn().mockResolvedValue({ id: SECTION_ID, classId: "class-1" }),
       findUnique: jest.fn().mockResolvedValue({ id: SECTION_ID, name: "A" }),
     },
-    studentEnrollment: { findMany: jest.fn().mockResolvedValue([ENROLLMENT]) },
+    studentEnrollment: {
+      findMany: jest.fn().mockResolvedValue([ENROLLMENT]),
+      findFirst: jest.fn().mockResolvedValue(ENROLLMENT),
+    },
     resultSubmission: {
       findUnique: jest.fn().mockResolvedValue({ id: "sub-1", status: "DRAFT", returnReason: null }),
       upsert: jest.fn().mockResolvedValue({ id: "sub-1" }),
       update: jest.fn().mockResolvedValue({}),
     },
-    result: { findMany: jest.fn().mockResolvedValue([]), upsert: jest.fn().mockImplementation((a: unknown) => a) },
+    result: {
+      findMany: jest.fn().mockResolvedValue([]),
+      upsert: jest.fn().mockImplementation((a: unknown) => a),
+      findUnique: jest.fn().mockResolvedValue({ id: "result-1", marksObtained: new Prisma.Decimal(72), isAbsent: false }),
+      update: jest.fn().mockImplementation((a: unknown) => a),
+    },
     teacher: { findFirst: jest.fn().mockResolvedValue(actor.roles.includes("TEACHER") ? { id: "teacher-1" } : null) },
     teacherAssignment: { findFirst: jest.fn().mockResolvedValue({ id: "assignment-1", teacherId: "teacher-1" }) },
     term: { findMany: jest.fn() },
@@ -559,5 +567,161 @@ describe("Mark validation messages name the student, the value and the limit", (
     await expect(save(s, [{ enrollmentId: "e1", isAbsent: true, marksObtained: 0 }])).rejects.toThrow(
       "Hodan Ali (#1) can't be both absent and have a mark",
     );
+  });
+});
+
+// The Admin-only single-result override: the one path that can touch a mark
+// while its ResultSubmission is APPROVED or PUBLISHED, with no unpublish/
+// return/resubmit/republish round trip (see the "editing is still refused
+// while the submission is %s" test above, which proves enterMarks itself is
+// unchanged and still refuses those same statuses).
+describe("Admin edit — post-publish override (adminEditResult)", () => {
+  const edit = (
+    s: ReturnType<typeof setup>,
+    dto: { marksObtained?: number; isAbsent?: boolean; reason?: string },
+    schoolId = SCHOOL_ID,
+  ) => s.service.adminEditResult(s.actor, schoolId, EXAM_SUBJECT_ID, SECTION_ID, "e1", dto);
+
+  it("edits a result while its submission is APPROVED (not yet published) — no unpublish needed", async () => {
+    const s = setup(SCHOOL_ADMIN);
+    s.prisma.resultSubmission.findUnique.mockResolvedValue({ id: "sub-1", status: "APPROVED" });
+    s.prisma.result.findUnique.mockResolvedValue({ id: "result-1", marksObtained: new Prisma.Decimal(40), isAbsent: false });
+
+    await edit(s, { marksObtained: 90 });
+
+    expect(s.prisma.result.update).toHaveBeenCalledWith({
+      where: { id: "result-1" },
+      data: { marksObtained: 90, isAbsent: false, enteredByUserId: SCHOOL_ADMIN.id },
+    });
+    expect(s.prisma.resultSubmission.update).not.toHaveBeenCalled();
+  });
+
+  it("edits a result while its submission is PUBLISHED — no unpublish, no republish, submission status untouched", async () => {
+    const s = setup(SCHOOL_ADMIN);
+    s.prisma.resultSubmission.findUnique.mockResolvedValue({ id: "sub-1", status: "PUBLISHED" });
+    s.prisma.result.findUnique.mockResolvedValue({ id: "result-1", marksObtained: new Prisma.Decimal(72), isAbsent: false });
+
+    await edit(s, { marksObtained: 78 });
+
+    expect(s.prisma.result.update).toHaveBeenCalledWith({
+      where: { id: "result-1" },
+      data: { marksObtained: 78, isAbsent: false, enteredByUserId: SCHOOL_ADMIN.id },
+    });
+    expect(s.prisma.resultSubmission.update).not.toHaveBeenCalled();
+    expect(s.prisma.resultSubmission.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("does not require assertCanAccessSectionForSubject's per-teacher-assignment check — school-wide, like approve/publish", async () => {
+    const s = setup(SCHOOL_ADMIN);
+    s.prisma.teacherAssignment.findFirst.mockResolvedValue(null);
+
+    await edit(s, { marksObtained: 78 });
+
+    expect(s.prisma.teacherAssignment.findFirst).not.toHaveBeenCalled();
+    expect(s.prisma.result.update).toHaveBeenCalled();
+  });
+
+  it("is still restricted to the actor's own school", async () => {
+    const s = setup(SCHOOL_ADMIN);
+    s.schools.findOneAccessibleOrThrow.mockRejectedValue(new NotFoundException("School not found"));
+
+    await expect(edit(s, { marksObtained: 78 }, OTHER_SCHOOL_ID)).rejects.toThrow("School not found");
+    expect(s.prisma.result.update).not.toHaveBeenCalled();
+  });
+
+  it("the published, student-facing value reflects the new mark, and the old value is preserved only in the audit record", async () => {
+    const s = setup(SCHOOL_ADMIN);
+    s.prisma.resultSubmission.findUnique.mockResolvedValue({ id: "sub-1", status: "PUBLISHED" });
+    s.prisma.result.findUnique.mockResolvedValue({ id: "result-1", marksObtained: new Prisma.Decimal(72), isAbsent: false });
+
+    await edit(s, { marksObtained: 78, reason: "Re-marked after a student appeal" });
+
+    // The audit record is the only place the old value (72) appears.
+    expect(s.audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "RESULTS_ADMIN_EDITED",
+        module: "Results",
+        resourceType: "Result",
+        resourceId: "result-1",
+        severity: "WARNING",
+        reason: "Re-marked after a student appeal",
+        before: { marksObtained: 72, isAbsent: false },
+        after: expect.objectContaining({ marksObtained: 78, isAbsent: false, studentId: "student-1", enrollmentId: "e1" }),
+      }),
+    );
+    // The stored row itself only ever holds the new value going forward.
+    expect(s.prisma.result.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ marksObtained: 78 }) }),
+    );
+  });
+
+  it("rejects editing a mark that was never entered — there is nothing to override", async () => {
+    const s = setup(SCHOOL_ADMIN);
+    s.prisma.result.findUnique.mockResolvedValue(null);
+
+    await expect(edit(s, { marksObtained: 78 })).rejects.toThrow(NotFoundException);
+    expect(s.prisma.result.update).not.toHaveBeenCalled();
+    expect(s.audit.record).not.toHaveBeenCalled();
+  });
+
+  it("rejects Incomplete (isAbsent) combined with a mark — 0 is a real mark, Incomplete has none", async () => {
+    const s = setup(SCHOOL_ADMIN);
+
+    await expect(edit(s, { isAbsent: true, marksObtained: 0 })).rejects.toThrow("can't be both marked Incomplete and have a mark");
+    expect(s.prisma.result.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a mark above the maximum or below 0", async () => {
+    const s = setup(SCHOOL_ADMIN);
+
+    await expect(edit(s, { marksObtained: 150 })).rejects.toThrow("is above the maximum of 100");
+    await expect(edit(s, { marksObtained: -5 })).rejects.toThrow("can't be negative");
+    expect(s.prisma.result.update).not.toHaveBeenCalled();
+  });
+
+  it("can mark an existing completed result as Incomplete", async () => {
+    const s = setup(SCHOOL_ADMIN);
+    s.prisma.result.findUnique.mockResolvedValue({ id: "result-1", marksObtained: new Prisma.Decimal(72), isAbsent: false });
+
+    await edit(s, { isAbsent: true });
+
+    expect(s.prisma.result.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ marksObtained: null, isAbsent: true }) }),
+    );
+  });
+
+  it("a genuine 0 is accepted and stored as a real mark, not Incomplete", async () => {
+    const s = setup(SCHOOL_ADMIN);
+    s.prisma.result.findUnique.mockResolvedValue({ id: "result-1", marksObtained: new Prisma.Decimal(50), isAbsent: false });
+
+    await edit(s, { marksObtained: 0 });
+
+    expect(s.prisma.result.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { marksObtained: 0, isAbsent: false, enteredByUserId: SCHOOL_ADMIN.id } }),
+    );
+  });
+
+  it("is a no-op (no write, no audit) when the submitted value matches what's already stored", async () => {
+    const s = setup(SCHOOL_ADMIN);
+    s.prisma.result.findUnique.mockResolvedValue({ id: "result-1", marksObtained: new Prisma.Decimal(72), isAbsent: false });
+
+    await edit(s, { marksObtained: 72 });
+
+    expect(s.prisma.result.update).not.toHaveBeenCalled();
+    expect(s.audit.record).not.toHaveBeenCalled();
+  });
+
+  it("only edits the enrollment scoped to this exact section and academic year", async () => {
+    const s = setup(SCHOOL_ADMIN);
+    s.prisma.studentEnrollment.findFirst.mockResolvedValue(null);
+
+    await expect(edit(s, { marksObtained: 78 })).rejects.toThrow(
+      "This enrollment does not belong to this section for this exam's academic year",
+    );
+    expect(s.prisma.studentEnrollment.findFirst).toHaveBeenCalledWith({
+      where: { id: "e1", sectionId: SECTION_ID, academicYearId: "year-1" },
+      select: expect.anything(),
+    });
+    expect(s.prisma.result.update).not.toHaveBeenCalled();
   });
 });

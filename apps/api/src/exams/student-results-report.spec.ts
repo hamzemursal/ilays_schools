@@ -61,18 +61,15 @@ describe("buildStudentResultsReport", () => {
     prisma.result.findMany.mockResolvedValue([]);
   });
 
-  describe("published-only, real marks only", () => {
-    it("queries only PUBLISHED, non-absent results", async () => {
+  describe("published-only, incomplete shown but never counted", () => {
+    it("queries only PUBLISHED results — deliberately including isAbsent ones, so Incomplete can still be shown", async () => {
       await buildStudentResultsReport(asPrisma(prisma), "student-1");
 
-      expect(prisma.result.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            resultSubmission: { status: "PUBLISHED" },
-            isAbsent: false,
-          }),
-        }),
-      );
+      const where = prisma.result.findMany.mock.calls[0][0].where;
+      expect(where.resultSubmission).toEqual({ status: "PUBLISHED" });
+      // No isAbsent filter at the query level anymore — see the isAbsent/null
+      // mark test below for why.
+      expect(where.isAbsent).toBeUndefined();
     });
 
     it("scopes the results query to the student's enrollment(s) in the resolved year — never to the student id alone", async () => {
@@ -83,13 +80,43 @@ describe("buildStudentResultsReport", () => {
       expect(where.enrollment).toBeUndefined();
     });
 
-    it("never turns a null mark into a 0 row", async () => {
-      prisma.result.findMany.mockResolvedValue([{ ...result("r1", "term-1", "Math", 0, 100), marksObtained: null }]);
+    it("a published isAbsent/null-mark result is shown as an INCOMPLETE row (never dropped, never a 0)", async () => {
+      prisma.result.findMany.mockResolvedValue([{ ...result("r1", "term-1", "Math", 0, 100), marksObtained: null, isAbsent: true }]);
 
       const report = await buildStudentResultsReport(asPrisma(prisma), "student-1");
 
-      expect(report.terms[0].results).toEqual([]);
+      expect(report.terms[0].results).toEqual([
+        expect.objectContaining({ id: "r1", subjectName: "Math", status: "INCOMPLETE", marksObtained: null, percentage: null }),
+      ]);
+      // Still contributes nothing to the term average — never counted as 0.
       expect(report.terms[0].percentage).toBeNull();
+    });
+
+    it("an Incomplete row never drags down a term that also has real completed marks", async () => {
+      prisma.result.findMany.mockResolvedValue([
+        { ...result("r1", "term-1", "Math", 0, 100), marksObtained: null, isAbsent: true },
+        result("r2", "term-1", "English", 80, 100),
+      ]);
+
+      const report = await buildStudentResultsReport(asPrisma(prisma), "student-1");
+
+      // SUM/SUM over the one COMPLETED row only: 80/100 = 80, not diluted by
+      // the Incomplete row as if it were a 0/100.
+      expect(report.terms[0].percentage).toBe(80);
+      expect(report.terms[0].results.map((r) => r.status)).toEqual(
+        expect.arrayContaining(["INCOMPLETE", "COMPLETED"]),
+      );
+    });
+
+    it("marks every real result COMPLETED, 0 included", async () => {
+      prisma.result.findMany.mockResolvedValue([result("r1", "term-1", "Math", 0, 100)]);
+
+      const report = await buildStudentResultsReport(asPrisma(prisma), "student-1");
+
+      expect(report.terms[0].results).toEqual([
+        expect.objectContaining({ status: "COMPLETED", marksObtained: 0, percentage: 0 }),
+      ]);
+      expect(report.terms[0].percentage).toBe(0);
     });
   });
 

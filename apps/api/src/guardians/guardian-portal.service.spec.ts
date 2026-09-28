@@ -496,9 +496,12 @@ describe("GuardianPortalService.myChildResultsReport — linked child only, Term
 
     await service.myChildResultsReport(ACTOR, "child-1");
 
-    expect(prisma.result.findMany.mock.calls[0][0].where).toMatchObject({
+    // No isAbsent filter here anymore — a published Incomplete (isAbsent)
+    // result is still fetched so it can be shown as Incomplete, just never
+    // counted in any average (see student-results-report.spec.ts).
+    expect(prisma.result.findMany.mock.calls[0][0].where).toEqual({
+      enrollmentId: { in: expect.any(Array) as unknown as string[] },
       resultSubmission: { status: "PUBLISHED" },
-      isAbsent: false,
     });
   });
 

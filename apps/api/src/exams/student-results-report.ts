@@ -1,16 +1,25 @@
 import { NotFoundException } from "@nestjs/common";
 import type { PrismaService } from "../prisma/prisma.service";
-import { combineTermPercentages, percentageFromMarks, publishedMarkedResultWhere } from "./result-calculation";
+import { combineTermPercentages, percentageFromMarks } from "./result-calculation";
 
 // Deliberately carries no exam type: the Term the row is grouped under is the
 // only academic period a student or parent should see.
+//
+// status distinguishes a REAL zero from no assessment at all:
+//   COMPLETED  — marksObtained/percentage are real numbers, 0 included.
+//   INCOMPLETE — the student didn't complete/attend (Result.isAbsent);
+//                marksObtained and percentage are null, never 0. A published
+//                INCOMPLETE row is still shown (the subject was assessed and
+//                the school published a verdict for it) — it just never
+//                contributes to any average (see buildTerm below).
 export interface PortalResultRow {
   id: string;
   examName: string;
   subjectName: string;
-  marksObtained: number;
+  status: "COMPLETED" | "INCOMPLETE";
+  marksObtained: number | null;
   maxMarks: number;
-  percentage: number;
+  percentage: number | null;
   examDate: Date | null;
   publishedDate: Date | null;
 }
@@ -73,35 +82,42 @@ export async function buildStudentResultsReport(
 
   const [terms, results] = await Promise.all([
     prisma.term.findMany({ where: { academicYearId: anchor.academicYearId } }),
+    // PUBLISHED only — same bar as everywhere else (promotion, the old
+    // publishedMarkedResultWhere()) — but deliberately WITHOUT excluding
+    // isAbsent here: an incomplete result the school already published is
+    // still real, reportable information ("Incomplete", not "nothing"), it
+    // just must never be counted below.
     prisma.result.findMany({
       where: {
         enrollmentId: { in: yearEnrollments.map((e) => e.id) },
-        ...publishedMarkedResultWhere(),
+        resultSubmission: { status: "PUBLISHED" },
       },
       include: { examSubject: { include: { exam: true, subject: true } }, resultSubmission: true },
       orderBy: { createdAt: "asc" },
     }),
   ]);
 
-  const rows = results
-    .filter((r) => r.marksObtained !== null)
-    .map((r) => {
-      const marksObtained = Number(r.marksObtained);
-      const maxMarks = r.examSubject.maxMarks;
-      return {
-        termId: r.examSubject.exam.termId,
-        row: {
-          id: r.id,
-          examName: r.examSubject.exam.name,
-          subjectName: r.examSubject.subject.name,
-          marksObtained,
-          maxMarks,
-          percentage: Math.round((marksObtained / maxMarks) * 1000) / 10,
-          examDate: r.examSubject.examDate,
-          publishedDate: r.resultSubmission.publishedAt,
-        } satisfies PortalResultRow,
-      };
-    });
+  const rows = results.map((r) => {
+    const isIncomplete = r.isAbsent || r.marksObtained === null;
+    const marksObtained = isIncomplete ? null : Number(r.marksObtained);
+    const maxMarks = r.examSubject.maxMarks;
+    return {
+      termId: r.examSubject.exam.termId,
+      row: {
+        id: r.id,
+        examName: r.examSubject.exam.name,
+        subjectName: r.examSubject.subject.name,
+        status: isIncomplete ? "INCOMPLETE" : "COMPLETED",
+        marksObtained,
+        maxMarks,
+        // 0 is a real percentage (a real, completed zero); Incomplete has no
+        // percentage at all — never displayed or averaged as 0%.
+        percentage: isIncomplete ? null : Math.round((marksObtained! / maxMarks) * 1000) / 10,
+        examDate: r.examSubject.examDate,
+        publishedDate: r.resultSubmission.publishedAt,
+      } satisfies PortalResultRow,
+    };
+  });
 
   const byExamThenSubject = (a: PortalResultRow, b: PortalResultRow) =>
     a.examName.localeCompare(b.examName) || a.subjectName.localeCompare(b.subjectName);
@@ -109,12 +125,19 @@ export async function buildStudentResultsReport(
   const buildTerm = (name: "Term 1" | "Term 2"): PortalTermResults => {
     const term = terms.find((t) => t.name === name);
     const termRows = term ? rows.filter((r) => r.termId === term.id).map((r) => r.row) : [];
+    // The average is computed from COMPLETED rows only — an Incomplete
+    // result contributes to neither the marks sum nor the max-marks sum,
+    // exactly like ExamsService.getTermPercentage's own isAbsent exclusion.
+    // It is never treated as a 0.
+    const completedRows = termRows.filter(
+      (r): r is PortalResultRow & { status: "COMPLETED"; marksObtained: number } => r.status === "COMPLETED",
+    );
     return {
       name,
       termId: term?.id ?? null,
       weight: term?.weight ?? null,
       results: termRows.sort(byExamThenSubject),
-      percentage: percentageFromMarks(termRows),
+      percentage: percentageFromMarks(completedRows),
     };
   };
 

@@ -13,6 +13,7 @@ import { CreateExamSubjectDto } from "./dto/create-exam-subject.dto";
 import { UpdateExamSubjectDto } from "./dto/update-exam-subject.dto";
 import { UpdateExamTermDto } from "./dto/update-exam-term.dto";
 import { EnterMarksDto } from "./dto/enter-marks.dto";
+import { AdminEditResultDto } from "./dto/admin-edit-result.dto";
 import { ReturnForCorrectionDto } from "./dto/return-for-correction.dto";
 import { UnpublishResultsDto } from "./dto/unpublish-results.dto";
 import { assertClassInYear } from "../academic/class-year";
@@ -655,6 +656,96 @@ export class ExamsService {
         },
       });
     }
+
+    return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
+  }
+
+  // The one path that can change an already-existing result's mark
+  // regardless of its ResultSubmission's status — including APPROVED and
+  // PUBLISHED, with no unpublish/return/resubmit/republish round trip.
+  // enterMarks (above) deliberately refuses exactly that case (see its own
+  // comment) because it's a teacher's bulk-sheet save; this is the narrower,
+  // single-result Admin override the workflow doesn't otherwise allow.
+  // Gated by results.approve at the controller, not results.enter, and NOT
+  // routed through assertCanAccessSectionForSubject's per-teacher-assignment
+  // check — same "school-wide, not per-assignment" authorization every other
+  // approve/publish/unpublish action here already uses.
+  async adminEditResult(
+    actor: AuthenticatedUser,
+    schoolId: string,
+    examSubjectId: string,
+    sectionId: string,
+    enrollmentId: string,
+    dto: AdminEditResultDto,
+  ) {
+    const examSubject = await this.getExamSubjectInSchoolOrThrow(schoolId, examSubjectId);
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+    await this.assertSectionBelongsToClass(sectionId, examSubject.classId);
+
+    const enrollment = await this.prisma.studentEnrollment.findFirst({
+      where: { id: enrollmentId, sectionId, academicYearId: examSubject.exam.academicYearId },
+      select: { id: true, studentId: true, rollNumber: true, student: { select: { firstName: true, lastName: true } } },
+    });
+    if (!enrollment) {
+      throw new BadRequestException("This enrollment does not belong to this section for this exam's academic year");
+    }
+    const who = `${enrollment.student.firstName} ${enrollment.student.lastName} (#${enrollment.rollNumber})`;
+
+    // Same one-value-or-the-other rule as EnterMarksDto — 0 is a real,
+    // storable mark; only Incomplete (isAbsent) has no mark at all.
+    if (dto.isAbsent) {
+      if (dto.marksObtained !== undefined && dto.marksObtained !== null) {
+        throw new BadRequestException(`${who} can't be both marked Incomplete and have a mark`);
+      }
+    } else if (dto.marksObtained === undefined || dto.marksObtained === null) {
+      throw new BadRequestException(`${who} needs a mark, or must be marked Incomplete`);
+    } else if (dto.marksObtained < 0) {
+      throw new BadRequestException(`${who}: ${dto.marksObtained} is below 0 - a mark can't be negative`);
+    } else if (dto.marksObtained > examSubject.maxMarks) {
+      throw new BadRequestException(`${who}: ${dto.marksObtained} is above the maximum of ${examSubject.maxMarks}`);
+    }
+
+    // An edit corrects an EXISTING result — there is nothing to "edit" if
+    // this student was never entered at all; that first entry still goes
+    // through the normal enterMarks/submit/approve/publish workflow.
+    const existing = await this.prisma.result.findUnique({
+      where: { examSubjectId_enrollmentId: { examSubjectId, enrollmentId } },
+    });
+    if (!existing) {
+      throw new NotFoundException(`${who} has no existing result for this exam subject to edit`);
+    }
+
+    const isAbsent = !!dto.isAbsent;
+    const marksObtained = isAbsent ? null : (dto.marksObtained as number);
+    if (Number(existing.marksObtained ?? NaN) === marksObtained && existing.isAbsent === isAbsent) {
+      // Nothing actually changed — same "silent no-op" behavior enterMarks
+      // has (its own audit only fires for real changes), just for one row.
+      return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
+    }
+
+    const before = { marksObtained: existing.isAbsent ? null : Number(existing.marksObtained), isAbsent: existing.isAbsent };
+    const after = { marksObtained, isAbsent };
+
+    await this.prisma.result.update({
+      where: { id: existing.id },
+      data: { marksObtained, isAbsent, enteredByUserId: actor.id },
+    });
+
+    const section = await this.prisma.section.findUnique({ where: { id: sectionId } });
+    await this.audit.record({
+      actor,
+      organizationId: actor.organizationId,
+      schoolId,
+      action: AuditAction.RESULTS_ADMIN_EDITED,
+      module: AuditModuleName.RESULTS,
+      resourceType: "Result",
+      resourceId: existing.id,
+      resourceName: `${who} · ${examSubject.exam.name} · ${examSubject.class.name} · Section ${section?.name ?? ""} · ${examSubject.subject.name}`,
+      severity: "WARNING",
+      reason: dto.reason ?? null,
+      before,
+      after: { ...after, studentId: enrollment.studentId, enrollmentId },
+    });
 
     return this.getResultsForSection(actor, schoolId, examSubjectId, sectionId);
   }

@@ -48,6 +48,12 @@ export const AuditAction = {
   RESULTS_RESUBMITTED: "RESULTS_RESUBMITTED",
   RESULTS_PUBLISHED: "RESULTS_PUBLISHED",
   RESULTS_UNPUBLISHED: "RESULTS_UNPUBLISHED",
+  // An Admin correcting a single already-existing result in place — the one
+  // path that can touch a mark while its ResultSubmission is APPROVED or
+  // PUBLISHED, never going through submit/approve/publish again. Distinct
+  // from RESULTS_CORRECTED (a teacher's own bulk-sheet fix while still
+  // DRAFT/NEEDS_CORRECTION) so this more sensitive action is easy to find.
+  RESULTS_ADMIN_EDITED: "RESULTS_ADMIN_EDITED",
   EXAM_SUBJECT_UPDATED: "EXAM_SUBJECT_UPDATED",
   EXAM_TERM_CHANGED: "EXAM_TERM_CHANGED",
 

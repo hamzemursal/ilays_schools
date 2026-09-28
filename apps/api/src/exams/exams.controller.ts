@@ -6,6 +6,7 @@ import { CreateExamSubjectDto } from "./dto/create-exam-subject.dto";
 import { UpdateExamSubjectDto } from "./dto/update-exam-subject.dto";
 import { UpdateExamTermDto } from "./dto/update-exam-term.dto";
 import { EnterMarksDto } from "./dto/enter-marks.dto";
+import { AdminEditResultDto } from "./dto/admin-edit-result.dto";
 import { ReturnForCorrectionDto } from "./dto/return-for-correction.dto";
 import { UnpublishResultsDto } from "./dto/unpublish-results.dto";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
@@ -95,6 +96,22 @@ export class ExamsController {
     @Body() dto: EnterMarksDto,
   ) {
     return this.exams.enterMarks(user, schoolId, examSubjectId, sectionId, dto);
+  }
+
+  // Admin-only single-result override — see ExamsService.adminEditResult for
+  // why this is separate from enterMarks (the only path that can touch a
+  // mark once its submission is APPROVED or PUBLISHED, no unpublish first).
+  @RequirePermissions("results.approve")
+  @Patch(":examId/subjects/:examSubjectId/sections/:sectionId/results/:enrollmentId")
+  adminEditResult(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("examSubjectId") examSubjectId: string,
+    @Param("sectionId") sectionId: string,
+    @Param("enrollmentId") enrollmentId: string,
+    @Body() dto: AdminEditResultDto,
+  ) {
+    return this.exams.adminEditResult(user, schoolId, examSubjectId, sectionId, enrollmentId, dto);
   }
 
   @RequirePermissions("results.enter")

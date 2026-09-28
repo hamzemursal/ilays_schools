@@ -29,7 +29,7 @@ vi.mock("@/lib/api", () => ({ api: apiMock }));
 
 function reportFor(subject: string, marks: number, yearName = "2027"): MyResultsReport {
   const r = {
-    id: `r-${subject}`, examName: "Term 1 Exam", subjectName: subject, marksObtained: marks, maxMarks: 100,
+    id: `r-${subject}`, examName: "Term 1 Exam", subjectName: subject, status: "COMPLETED" as const, marksObtained: marks, maxMarks: 100,
     percentage: marks, examDate: null, publishedDate: null,
   };
   return {

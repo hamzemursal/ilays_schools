@@ -109,6 +109,9 @@ function ResultsTab({ accessToken, studentId }: { accessToken: string; studentId
 function subjectAverages(terms: PortalTermResults[]) {
   const bySubject = new Map<string, { marks: number; max: number }>();
   for (const r of terms.flatMap((t) => t.results)) {
+    // Incomplete has no mark at all — it must never enter this sum (not even
+    // as a 0), exactly like the server's own term/annual average excludes it.
+    if (r.status === "INCOMPLETE" || r.marksObtained === null) continue;
     const totals = bySubject.get(r.subjectName) ?? { marks: 0, max: 0 };
     totals.marks += r.marksObtained;
     totals.max += r.maxMarks;

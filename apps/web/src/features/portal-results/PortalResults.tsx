@@ -66,6 +66,7 @@ export function ResultsTable({ rows }: { rows: PortalResultRow[] }) {
           <tr>
             <th className="px-5 py-2.5">Exam</th>
             <th className="px-5 py-2.5">Subject</th>
+            <th className="px-5 py-2.5">Status</th>
             <th className="px-5 py-2.5">Marks</th>
             <th className="px-5 py-2.5">Percentage</th>
             <th className="px-5 py-2.5">Exam Date</th>
@@ -73,26 +74,35 @@ export function ResultsTable({ rows }: { rows: PortalResultRow[] }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {rows.map((r) => (
-            <tr key={r.id}>
-              <td className="px-5 py-3 text-foreground">
-                {r.examName}
-              </td>
-              <td className="px-5 py-3 text-foreground-soft">{r.subjectName}</td>
-              <td className="px-5 py-3 whitespace-nowrap text-foreground-soft">
-                {r.marksObtained} / {r.maxMarks}
-              </td>
-              <td className="px-5 py-3">
-                <Badge tone="accent">{r.percentage}%</Badge>
-              </td>
-              <td className="px-5 py-3 text-foreground-muted">
-                {r.examDate ? new Date(r.examDate).toLocaleDateString() : "—"}
-              </td>
-              <td className="px-5 py-3 text-foreground-muted">
-                {r.publishedDate ? new Date(r.publishedDate).toLocaleDateString() : "—"}
-              </td>
-            </tr>
-          ))}
+          {rows.map((r) => {
+            const isIncomplete = r.status === "INCOMPLETE";
+            return (
+              <tr key={r.id}>
+                <td className="px-5 py-3 text-foreground">
+                  {r.examName}
+                </td>
+                <td className="px-5 py-3 text-foreground-soft">{r.subjectName}</td>
+                <td className="px-5 py-3">
+                  <Badge tone={isIncomplete ? "neutral" : "success"}>{isIncomplete ? "Incomplete" : "Completed"}</Badge>
+                </td>
+                <td className="px-5 py-3 whitespace-nowrap text-foreground-soft">
+                  {isIncomplete ? "—" : `${r.marksObtained} / ${r.maxMarks}`}
+                </td>
+                <td className="px-5 py-3">
+                  {/* A real, completed 0% is shown as a percentage like any
+                      other; Incomplete never gets a percentage at all —
+                      never displayed or implied as 0%. */}
+                  {isIncomplete ? <span className="text-foreground-muted">—</span> : <Badge tone="accent">{r.percentage}%</Badge>}
+                </td>
+                <td className="px-5 py-3 text-foreground-muted">
+                  {r.examDate ? new Date(r.examDate).toLocaleDateString() : "—"}
+                </td>
+                <td className="px-5 py-3 text-foreground-muted">
+                  {r.publishedDate ? new Date(r.publishedDate).toLocaleDateString() : "—"}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

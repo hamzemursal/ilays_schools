@@ -23,6 +23,7 @@ function row(overrides: Partial<PortalResultRow> = {}): PortalResultRow {
     id: "r1",
     examName: "Midterm",
     subjectName: "Mathematics",
+    status: "COMPLETED",
     marksObtained: 80,
     maxMarks: 100,
     percentage: 80,
@@ -123,6 +124,56 @@ describe("PortalResults", () => {
     expect(screen.getAllByText("Incomplete").length).toBeGreaterThanOrEqual(2); // Term 2 Result and Annual / Combined Result
     expect(screen.queryByText("0.00%")).not.toBeInTheDocument();
     expect(screen.getByText(/appears once both Term 1 and Term 2 results have been published/)).toBeInTheDocument();
+  });
+
+  it("shows an individual published Incomplete result as Incomplete/— alongside a real completed one, without dragging down the term average", async () => {
+    renderResults({
+      loadReport: () =>
+        Promise.resolve(
+          report({
+            terms: [
+              {
+                name: "Term 1",
+                termId: "t1",
+                weight: 50,
+                results: [
+                  row(),
+                  row({ id: "r-abs", examName: "Midterm", subjectName: "Chemistry", status: "INCOMPLETE", marksObtained: null, percentage: null }),
+                ],
+                percentage: 80,
+              },
+              { name: "Term 2", termId: "t2", weight: 50, results: [], percentage: null },
+            ],
+          }),
+        ),
+    });
+
+    expect(await screen.findByText("Chemistry")).toBeInTheDocument();
+    expect(screen.getByText("Incomplete")).toBeInTheDocument();
+    // "80 / 100" for Mathematics still shows; Chemistry never shows a mark or 0%.
+    expect(screen.getByText("80 / 100")).toBeInTheDocument();
+    expect(screen.getByText("Term average: 80.00% · weight 50%")).toBeInTheDocument();
+    expect(screen.queryByText("0%")).not.toBeInTheDocument();
+    expect(screen.queryByText("null%")).not.toBeInTheDocument();
+  });
+
+  it("a genuine completed 0 is shown as a real mark and percentage, never mistaken for Incomplete", async () => {
+    renderResults({
+      loadReport: () =>
+        Promise.resolve(
+          report({
+            terms: [
+              { name: "Term 1", termId: "t1", weight: 50, results: [row({ marksObtained: 0, percentage: 0 })], percentage: 0 },
+              { name: "Term 2", termId: "t2", weight: 50, results: [], percentage: null },
+            ],
+          }),
+        ),
+    });
+
+    expect(await screen.findByText("0 / 100")).toBeInTheDocument();
+    expect(screen.getByText("0%")).toBeInTheDocument();
+    expect(screen.getByText("Term average: 0.00% · weight 50%")).toBeInTheDocument();
+    expect(screen.queryByText("Incomplete")).not.toBeInTheDocument();
   });
 
   it("lists term-less published results separately and says they are outside the averages — not as a third term", async () => {

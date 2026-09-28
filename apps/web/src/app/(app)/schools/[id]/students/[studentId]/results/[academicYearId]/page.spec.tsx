@@ -105,8 +105,8 @@ describe("StudentResultsDetailPage — published year", () => {
     apiMock.getStudentResultsReport.mockResolvedValue(
       report({
         terms: [
-          { name: "Term 1", termId: "t1", weight: 50, results: [{ id: "r1", examName: "Midterm", subjectName: "Mathematics", marksObtained: 78, maxMarks: 100, percentage: 78, examDate: null, publishedDate: null }], percentage: 78 },
-          { name: "Term 2", termId: "t2", weight: 50, results: [{ id: "r2", examName: "Final", subjectName: "Mathematics", marksObtained: 82, maxMarks: 100, percentage: 82, examDate: null, publishedDate: null }], percentage: 82 },
+          { name: "Term 1", termId: "t1", weight: 50, results: [{ id: "r1", examName: "Midterm", subjectName: "Mathematics", status: "COMPLETED" as const, marksObtained: 78, maxMarks: 100, percentage: 78, examDate: null, publishedDate: null }], percentage: 78 },
+          { name: "Term 2", termId: "t2", weight: 50, results: [{ id: "r2", examName: "Final", subjectName: "Mathematics", status: "COMPLETED" as const, marksObtained: 82, maxMarks: 100, percentage: 82, examDate: null, publishedDate: null }], percentage: 82 },
         ],
         annual: { term1Percentage: 78, term2Percentage: 82, annualPercentage: 80 },
       }),
@@ -145,7 +145,7 @@ describe("StudentResultsDetailPage — published year", () => {
     apiMock.getStudentResultsReport.mockResolvedValue(
       report({
         terms: [
-          { name: "Term 1", termId: "t1", weight: 50, results: [{ id: "r1", examName: "Midterm", subjectName: "Mathematics", marksObtained: 78, maxMarks: 100, percentage: 78, examDate: null, publishedDate: null }], percentage: 78 },
+          { name: "Term 1", termId: "t1", weight: 50, results: [{ id: "r1", examName: "Midterm", subjectName: "Mathematics", status: "COMPLETED" as const, marksObtained: 78, maxMarks: 100, percentage: 78, examDate: null, publishedDate: null }], percentage: 78 },
           emptyTerm("Term 2"),
         ],
       }),
@@ -162,7 +162,7 @@ describe("StudentResultsDetailPage — published year", () => {
       report({
         terms: [
           emptyTerm("Term 1"),
-          { name: "Term 2", termId: "t2", weight: 50, results: [{ id: "r2", examName: "Final", subjectName: "English", marksObtained: 65, maxMarks: 100, percentage: 65, examDate: null, publishedDate: null }], percentage: 65 },
+          { name: "Term 2", termId: "t2", weight: 50, results: [{ id: "r2", examName: "Final", subjectName: "English", status: "COMPLETED" as const, marksObtained: 65, maxMarks: 100, percentage: 65, examDate: null, publishedDate: null }], percentage: 65 },
         ],
       }),
     );
@@ -177,8 +177,8 @@ describe("StudentResultsDetailPage — published year", () => {
     apiMock.getStudentResultsReport.mockResolvedValue(
       report({
         terms: [
-          { name: "Term 1", termId: "t1", weight: 50, results: [{ id: "r1", examName: "M", subjectName: "Math", marksObtained: 78, maxMarks: 100, percentage: 78, examDate: null, publishedDate: null }], percentage: 78 },
-          { name: "Term 2", termId: "t2", weight: 50, results: [{ id: "r2", examName: "F", subjectName: "Math", marksObtained: 82, maxMarks: 100, percentage: 82, examDate: null, publishedDate: null }], percentage: 82 },
+          { name: "Term 1", termId: "t1", weight: 50, results: [{ id: "r1", examName: "M", subjectName: "Math", status: "COMPLETED" as const, marksObtained: 78, maxMarks: 100, percentage: 78, examDate: null, publishedDate: null }], percentage: 78 },
+          { name: "Term 2", termId: "t2", weight: 50, results: [{ id: "r2", examName: "F", subjectName: "Math", status: "COMPLETED" as const, marksObtained: 82, maxMarks: 100, percentage: 82, examDate: null, publishedDate: null }], percentage: 82 },
         ],
         annual: { term1Percentage: 78, term2Percentage: 82, annualPercentage: 80 },
       }),

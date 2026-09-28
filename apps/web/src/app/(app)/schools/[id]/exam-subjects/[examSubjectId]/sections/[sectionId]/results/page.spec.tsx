@@ -29,6 +29,7 @@ const apiMock = vi.hoisted(() => ({
   approveResultsSubmission: vi.fn(),
   publishResultsSubmission: vi.fn(),
   unpublishResultsSubmission: vi.fn(),
+  adminEditResult: vi.fn(),
 }));
 vi.mock("@/lib/api", () => ({ api: apiMock }));
 
@@ -330,6 +331,166 @@ describe("Results page - mark validation is visible and enforced", () => {
     await user.type(screen.getByLabelText("Mark for Hodan Test"), "75");
 
     expect(screen.getByRole("button", { name: "Save Draft" })).toBeDisabled();
+  });
+});
+
+// The Admin-only single-result override (ExamsService.adminEditResult) —
+// works at any submission status, including PUBLISHED, with no unpublish.
+describe("Results page — admin Edit Result", () => {
+  const openEdit = async (user: ReturnType<typeof userEvent.setup>, name = "Hodan Test") => {
+    await user.click(screen.getByRole("button", { name: `Edit result for ${name}` }));
+    return screen.findByRole("dialog", { name: "Edit Result" });
+  };
+
+  it("an admin sees an Edit action on every row, at any status", async () => {
+    await renderPage(ADMIN, results("PUBLISHED", [HODAN(), AMINA()]));
+
+    expect(screen.getByRole("button", { name: "Edit result for Hodan Test" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit result for Amina Test" })).toBeInTheDocument();
+  });
+
+  it.each(["DRAFT", "PUBLISHED"] as const)("a teacher never sees the admin Edit action (%s)", async (status) => {
+    await renderPage(TEACHER, results(status, [HODAN()]));
+
+    expect(screen.queryByRole("button", { name: /Edit result for/ })).not.toBeInTheDocument();
+  });
+
+  it("the dialog shows the student, subject, exam/term and the current mark", async () => {
+    const user = userEvent.setup();
+    await renderPage(ADMIN, withContext(results("PUBLISHED", [HODAN()]), { termName: "Term 1" }));
+
+    const dialog = await openEdit(user);
+    expect(within(dialog).getByText("Hodan Test · Mathematics")).toBeInTheDocument();
+    expect(within(dialog).getByText("Term 2 Exam · Term 1")).toBeInTheDocument();
+    expect(within(dialog).getByText("40 / 50")).toBeInTheDocument();
+    expect((within(dialog).getByLabelText(/New mark/) as HTMLInputElement).value).toBe("40");
+  });
+
+  it("edits an unpublished (APPROVED) result through adminEditResult", async () => {
+    const user = userEvent.setup();
+    apiMock.adminEditResult.mockResolvedValue(results("APPROVED", [student("e1", "Hodan", 1, { marksObtained: "45", percentage: 90, hasMark: true })]));
+    await renderPage(ADMIN, results("APPROVED", [HODAN()]));
+
+    const dialog = await openEdit(user);
+    await user.clear(within(dialog).getByLabelText(/New mark/));
+    await user.type(within(dialog).getByLabelText(/New mark/), "45");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(apiMock.adminEditResult).toHaveBeenCalledWith("token", "school-1", "es-1", "sec-1", "e1", { marksObtained: 45, reason: undefined }),
+    );
+    expect(apiMock.enterMarks).not.toHaveBeenCalled();
+  });
+
+  it("edits a PUBLISHED result with a reason, keeps it published and shows the new mark immediately", async () => {
+    const user = userEvent.setup();
+    apiMock.adminEditResult.mockResolvedValue(results("PUBLISHED", [student("e1", "Hodan", 1, { marksObtained: "48", percentage: 96, hasMark: true })]));
+    await renderPage(ADMIN, results("PUBLISHED", [HODAN()]));
+
+    const dialog = await openEdit(user);
+    await user.clear(within(dialog).getByLabelText(/New mark/));
+    await user.type(within(dialog).getByLabelText(/New mark/), "48");
+    await user.type(within(dialog).getByLabelText(/Reason/), "Re-marked after appeal");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(apiMock.adminEditResult).toHaveBeenCalledWith("token", "school-1", "es-1", "sec-1", "e1", {
+        marksObtained: 48,
+        reason: "Re-marked after appeal",
+      }),
+    );
+    // No unpublish / return round trip.
+    expect(apiMock.unpublishResultsSubmission).not.toHaveBeenCalled();
+    expect(apiMock.returnResultsForCorrection).not.toHaveBeenCalled();
+    // Dialog closes, the row shows the refreshed value, status stays Published.
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit Result" })).not.toBeInTheDocument());
+    expect((screen.getByLabelText("Mark for Hodan Test") as HTMLInputElement).value).toBe("48");
+    expect(screen.getByText("96%")).toBeInTheDocument();
+    expect(screen.getByText(/It stays published/)).toBeInTheDocument();
+    expect(screen.getByText("Published — visible to students and parents.")).toBeInTheDocument();
+  });
+
+  it("accepts 0 as a real Completed mark", async () => {
+    const user = userEvent.setup();
+    apiMock.adminEditResult.mockResolvedValue(results("PUBLISHED", [student("e1", "Hodan", 1, { marksObtained: "0", percentage: 0, hasMark: true })]));
+    await renderPage(ADMIN, results("PUBLISHED", [HODAN()]));
+
+    const dialog = await openEdit(user);
+    await user.clear(within(dialog).getByLabelText(/New mark/));
+    await user.type(within(dialog).getByLabelText(/New mark/), "0");
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeEnabled();
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(apiMock.adminEditResult).toHaveBeenCalledWith("token", "school-1", "es-1", "sec-1", "e1", { marksObtained: 0, reason: undefined }),
+    );
+  });
+
+  it("Incomplete is sent with no mark at all, and the mark field disappears so Incomplete + a mark (even 0) can't be sent", async () => {
+    const user = userEvent.setup();
+    apiMock.adminEditResult.mockResolvedValue(results("PUBLISHED", [student("e1", "Hodan", 1, { isAbsent: true })]));
+    await renderPage(ADMIN, results("PUBLISHED", [HODAN()]));
+
+    const dialog = await openEdit(user);
+    await user.selectOptions(within(dialog).getByLabelText("Status"), "INCOMPLETE");
+    expect(within(dialog).queryByLabelText(/New mark/)).not.toBeInTheDocument();
+    expect(within(dialog).getByText(/Incomplete has no mark/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(apiMock.adminEditResult).toHaveBeenCalled());
+    const body = apiMock.adminEditResult.mock.calls[0][5];
+    expect(body).toEqual({ isAbsent: true, reason: undefined });
+    expect(body).not.toHaveProperty("marksObtained");
+  });
+
+  it("an existing Incomplete result opens as Incomplete, with no mark shown", async () => {
+    const user = userEvent.setup();
+    await renderPage(ADMIN, results("PUBLISHED", [student("e1", "Hodan", 1, { isAbsent: true })]));
+
+    const dialog = await openEdit(user);
+    expect((within(dialog).getByLabelText("Status") as HTMLSelectElement).value).toBe("INCOMPLETE");
+    expect(within(dialog).getByText("Incomplete", { selector: "span" })).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/New mark/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["51", "Above the maximum of 50"],
+    ["-1", "A mark can't be negative"],
+  ])("blocks Save for an out-of-range Completed mark (%s)", async (typed, message) => {
+    const user = userEvent.setup();
+    await renderPage(ADMIN, results("PUBLISHED", [HODAN()]));
+
+    const dialog = await openEdit(user);
+    await user.clear(within(dialog).getByLabelText(/New mark/));
+    await user.type(within(dialog).getByLabelText(/New mark/), typed);
+
+    expect(within(dialog).getByText(message)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(apiMock.adminEditResult).not.toHaveBeenCalled();
+  });
+
+  it("a Completed status with no mark can't be saved", async () => {
+    const user = userEvent.setup();
+    await renderPage(ADMIN, results("PUBLISHED", [HODAN()]));
+
+    const dialog = await openEdit(user);
+    await user.clear(within(dialog).getByLabelText(/New mark/));
+
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("shows the server's error inside the dialog and keeps it open", async () => {
+    const user = userEvent.setup();
+    apiMock.adminEditResult.mockRejectedValue(new ApiError("Hodan Test (#1) has no existing result for this exam subject to edit", 404));
+    await renderPage(ADMIN, results("PUBLISHED", [AMINA(), HODAN()]));
+
+    const dialog = await openEdit(user);
+    await user.clear(within(dialog).getByLabelText(/New mark/));
+    await user.type(within(dialog).getByLabelText(/New mark/), "30");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    expect(await within(dialog).findByText(/has no existing result/)).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Edit Result" })).toBeInTheDocument();
   });
 });
 

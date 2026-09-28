@@ -13,3 +13,11 @@ export function slugify(name: string): string {
 export function classSlug(divisionType: "PRIMARY" | "SECONDARY", level: number): string {
   return `${divisionType.toLowerCase()}-${level}`;
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// True for a real database id (UUID) — anything else in an id segment is a
+// readable slug that still has to be resolved.
+export function isEntityId(segment: string): boolean {
+  return UUID.test(segment);
+}

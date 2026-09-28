@@ -28,7 +28,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ActionsMenu } from "@/components/ui/ActionsMenu";
 import { useToast } from "@/components/ui/Toast";
 import { ClassRosterTable } from "@/features/students/tables/ClassRosterTable";
-import { classSlug as toClassSlug, slugify } from "@/lib/slug";
+import { classSlug as toClassSlug } from "@/lib/slug";
 import {
   ArrowLeftRight,
   ArrowRight,
@@ -875,7 +875,7 @@ function ClassDetailPageInner({
               search={sectionSearch}
               onSearchChange={setSectionSearch}
               cls={cls}
-              schoolName={schoolName}
+              schoolId={schoolId}
               yearName={yearName}
               isCurrentYear={years.find((y) => y.id === yearId)?.isCurrent ?? false}
               assignmentsBySection={assignmentsBySection}
@@ -1087,7 +1087,7 @@ export function SectionsPanel({
   search,
   onSearchChange,
   cls,
-  schoolName,
+  schoolId,
   yearName,
   isCurrentYear,
   assignmentsBySection,
@@ -1111,7 +1111,7 @@ export function SectionsPanel({
   search: string;
   onSearchChange: (v: string) => void;
   cls: ClassWithSections | null;
-  schoolName: string;
+  schoolId: string;
   yearName: string;
   isCurrentYear: boolean;
   assignmentsBySection: Record<string, SectionTeacherAssignment[]>;
@@ -1179,7 +1179,7 @@ export function SectionsPanel({
                 isCurrentYear={isCurrentYear}
                 subjectsCount={rows ? subjectsHere : null}
                 teachersCount={rows ? teachersHere : null}
-                openHref={`/schools/${slugify(schoolName)}/academic/classes/${cls ? toClassSlug(cls.division.type, cls.level) : ""}/sections/${slugify(s.name)}${yearName ? `?year=${encodeURIComponent(yearName)}` : ""}`}
+                openHref={`/schools/${schoolId}/academic/classes/${cls ? toClassSlug(cls.division.type, cls.level) : ""}/sections/${s.id}${yearName ? `?year=${encodeURIComponent(yearName)}` : ""}`}
                 canManage={canManage}
                 isEditing={editingSectionId === s.id}
                 editName={sectionEditName}

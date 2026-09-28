@@ -25,7 +25,7 @@ import { Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { DECORATIVE_TONE_CLASSES } from "@/components/ui/decorativeTones";
-import { classSlug as toClassSlug, slugify } from "@/lib/slug";
+import { classSlug as toClassSlug } from "@/lib/slug";
 import {
   BookOpen,
   CalendarCheck,
@@ -56,7 +56,6 @@ export default function SectionWorkspacePage({
 
   const [resolved, setResolved] = useState<{
     schoolId: string;
-    schoolName: string;
     classId: string;
     sectionId: string;
     yearId: string | null;
@@ -82,7 +81,6 @@ export default function SectionWorkspacePage({
         if (!cancelled) {
           setResolved({
             schoolId: school.id,
-            schoolName: school.name,
             classId: cls.id,
             sectionId: section.id,
             yearId: year?.id ?? null,
@@ -103,7 +101,6 @@ export default function SectionWorkspacePage({
   return (
     <SectionWorkspacePageInner
       schoolId={resolved.schoolId}
-      schoolName={resolved.schoolName}
       classId={resolved.classId}
       sectionId={resolved.sectionId}
       initialYearId={resolved.yearId}
@@ -113,13 +110,11 @@ export default function SectionWorkspacePage({
 
 function SectionWorkspacePageInner({
   schoolId,
-  schoolName,
   classId,
   sectionId,
   initialYearId,
 }: {
   schoolId: string;
-  schoolName: string;
   classId: string;
   sectionId: string;
   initialYearId: string | null;
@@ -229,7 +224,7 @@ function SectionWorkspacePageInner({
             // Same reasoning as attendanceHref's backHref above — without
             // ?year=, re-resolving a non-current year's class defaults to
             // the current year and can wrongly report "Class not found".
-            href: `/schools/${slugify(schoolName)}/academic/classes/${toClassSlug(cls.division.type, cls.level)}${
+            href: `/schools/${schoolId}/academic/classes/${toClassSlug(cls.division.type, cls.level)}${
               yearName ? `?year=${encodeURIComponent(yearName)}` : ""
             }`,
           },

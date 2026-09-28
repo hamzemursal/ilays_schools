@@ -45,7 +45,7 @@ const BASE_PROPS = {
   search: "",
   onSearchChange: vi.fn(),
   cls: classFixture(),
-  schoolName: "Saamalay Secondary",
+  schoolId: "school-1",
   yearName: "2027",
   isCurrentYear: true,
   assignmentsBySection: {} as Record<string, SectionTeacherAssignment[]>,
@@ -120,13 +120,12 @@ describe("SectionsPanel — Current Year / Previous Year", () => {
 });
 
 describe("SectionsPanel — Open Section preserves year/class scoping", () => {
-  it("builds the Open Section link with the class slug, section slug, and ?year=", () => {
+  it("builds the Open Section link with the school id, class slug, section id, and ?year=", () => {
     renderPanel({ yearName: "2027", cls: classFixture({ level: 3 }) });
     const link = screen.getByRole("link", { name: /Open Section/ });
-    expect(link).toHaveAttribute(
-      "href",
-      "/schools/saamalay-secondary/academic/classes/secondary-3/sections/a?year=2027",
-    );
+    // Ids, not names, for school and section: a section named "a/b" or a
+    // school slug can never send the page to the wrong (or no) record.
+    expect(link).toHaveAttribute("href", "/schools/school-1/academic/classes/secondary-3/sections/section-a?year=2027");
   });
 });
 

@@ -15,7 +15,7 @@ export function SchoolCard({ school, selected = false }: { school: TeachingSchoo
   return (
     <Link href={`/my-classes/${school.id}`}>
       <Card
-        className={`flex items-center gap-4 transition-all hover:shadow-md ${
+        className={`flex items-center gap-4 rounded-2xl transition-all hover:shadow-md ${
           selected ? "border-accent bg-accent-soft/30 ring-1 ring-accent/30" : "hover:border-accent hover:bg-accent-soft/40"
         }`}
       >

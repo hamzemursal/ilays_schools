@@ -18,9 +18,11 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import {
   Award,
+  BookOpen,
   Briefcase,
   Cake,
   GraduationCap,
+  Layers,
   MapPin,
   Pencil,
   Phone,
@@ -28,6 +30,7 @@ import {
   School as SchoolIcon,
   ShieldAlert,
   User,
+  Users,
 } from "lucide-react";
 
 const STATUS_TONE: Record<Teacher["status"], "success" | "warning" | "neutral"> = {
@@ -88,9 +91,15 @@ export default function MyClassesPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Teaching" title="My classes" breadcrumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "My classes" }]} />
+      <PageHeader
+        variant="plain"
+        eyebrow="Teaching"
+        title="My classes"
+        description="Your profile, schools, classes and subjects"
+        breadcrumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "My classes" }]}
+      />
 
-      <div className="space-y-5 p-4 sm:p-6">
+      <div className="space-y-5 px-3 pb-8 pt-4 sm:px-5">
         {error ? (
           <Alert tone="danger">
             <p className="font-medium">Unable to load your schools</p>
@@ -107,7 +116,7 @@ export default function MyClassesPage() {
           <>
             <SummaryStats schoolCount={schools.length} assignments={teacher.assignments} totalStudents={totalStudents} />
 
-            <Card>
+            <Card className="rounded-2xl">
               <div className="flex flex-wrap items-center gap-4">
                 <MyPhotoUpload accessToken={accessToken} name={`${teacher.firstName} ${teacher.lastName}`} size="lg" photoUrl={photoUrl} onUploaded={setPhotoUrl} />
                 <div className="min-w-0 flex-1">
@@ -176,7 +185,7 @@ export default function MyClassesPage() {
               />
             )}
 
-            <Card padding="none">
+            <Card padding="none" className="rounded-2xl">
               <CardHeader
                 title="My schools"
                 description={
@@ -262,21 +271,26 @@ function SummaryStats({
   const totalSections = new Set(assignments.map((a) => a.section.id)).size;
   const totalSubjects = new Set(assignments.map((a) => a.subject.id)).size;
 
-  const stats: { label: string; value: number | null; icon?: React.ComponentType<{ className?: string }> }[] = [
-    { label: "Schools", value: schoolCount, icon: SchoolIcon },
-    { label: "Classes", value: totalClasses },
-    { label: "Sections", value: totalSections },
-    { label: "Subjects", value: totalSubjects },
-    { label: "Students", value: totalStudents },
+  const stats: { label: string; value: number | null; icon: React.ComponentType<{ className?: string }>; tone: string }[] = [
+    { label: "Schools", value: schoolCount, icon: SchoolIcon, tone: "bg-accent-soft text-accent" },
+    { label: "Classes", value: totalClasses, icon: GraduationCap, tone: "bg-violet-50 text-violet-600" },
+    { label: "Sections", value: totalSections, icon: Layers, tone: "bg-teal-50 text-teal-600" },
+    { label: "Subjects", value: totalSubjects, icon: BookOpen, tone: "bg-amber-50 text-amber-600" },
+    { label: "Students", value: totalStudents, icon: Users, tone: "bg-success-soft text-success" },
   ];
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
       {stats.map((s) => (
-        <Card key={s.label} padding="sm" className="text-center">
-          <p className="text-2xl font-semibold text-foreground">{s.value ?? "—"}</p>
-          <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">{s.label}</p>
-        </Card>
+        <div key={s.label} className="flex items-center gap-3 rounded-2xl border border-border bg-background p-4 shadow-sm">
+          <span className={`flex size-11 shrink-0 items-center justify-center rounded-xl ${s.tone}`}>
+            <s.icon className="size-5" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-2xl font-bold leading-none tabular-nums text-foreground">{s.value ?? "—"}</p>
+            <p className="mt-1 truncate text-xs font-medium uppercase tracking-wide text-foreground-muted">{s.label}</p>
+          </div>
+        </div>
       ))}
     </div>
   );

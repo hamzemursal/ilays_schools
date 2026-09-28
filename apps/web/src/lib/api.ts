@@ -2753,6 +2753,13 @@ export const api = {
       body,
       accessToken,
     }),
+  // Undo a Graduation / Primary Completion recorded by mistake (see
+  // StudentLifecycleService.reverseFinalOutcome).
+  reverseFinalOutcome: (accessToken: string, schoolId: string, enrollmentId: string, body: { reason?: string }) =>
+    request<{ enrollmentId: string; restoredFrom: "GRADUATED" | "COMPLETED"; academicYear: string; className: string; sectionName: string }>(
+      `/schools/${schoolId}/student-lifecycle/enrollments/${enrollmentId}/reverse-final-outcome`,
+      { method: "POST", body, accessToken },
+    ),
   getTransfer: (accessToken: string, transferId: string) =>
     request<Transfer>(`/transfers/${transferId}`, { accessToken }),
 

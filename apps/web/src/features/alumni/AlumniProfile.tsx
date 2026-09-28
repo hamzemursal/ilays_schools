@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Award, BookOpen, CalendarDays, ClipboardList, GraduationCap, Hash, Layers, Lock, School as SchoolIcon, User } from "lucide-react";
 import { ApiError, useAuth } from "@/lib/auth-context";
 import { api, type MyResultsReport, type PortalResultRow, type StudentAttendanceHistoryRecord, type StudentDetail, type StudentEnrollmentRecord } from "@/lib/api";
@@ -103,6 +104,7 @@ function AlumniProfileBody({
 
   const canViewResults = user?.permissions.includes("results.view") ?? false;
   const canViewAttendance = user?.permissions.includes("attendance.view") ?? false;
+  const canUndoOutcome = user?.permissions.includes("promotions.execute") ?? false;
 
   useEffect(() => {
     if (!accessToken) return;
@@ -254,6 +256,15 @@ function AlumniProfileBody({
               <Row label={graduated ? "Graduation date" : "Completion date"} value={formatDate(finish.endDate)} />
               <Row label="Student ID" value={finish.studentNumber} mono />
             </dl>
+            {canUndoOutcome && finish.status === student.currentStatus && (
+              <p className="border-t border-border px-5 py-3 text-xs text-foreground-muted">
+                Recorded by mistake? It can be undone from the{" "}
+                <Link href={`/schools/${finish.school.id}/students/${student.id}`} className="font-medium text-accent hover:underline">
+                  student profile
+                </Link>
+                .
+              </p>
+            )}
           </Card>
         ) : (
           <Card>

@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { Prisma } from "@school-erp/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
@@ -7,6 +7,7 @@ import { AuditAction, AuditModuleName } from "../audit/audit-actions";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { PreviewForm1TransitionDto } from "./dto/preview-form1-transition.dto";
 import { ConfirmForm1TransitionDto } from "./dto/confirm-form1-transition.dto";
+import { ReverseFinalOutcomeDto } from "./dto/reverse-final-outcome.dto";
 
 const MAX_PAGE_SIZE = 100;
 
@@ -772,6 +773,114 @@ export class StudentLifecycleService {
     );
 
     return { ...batch, results };
+  }
+
+  // Undo a Graduation (Form 4) or Primary Completion (Class 8) that was
+  // recorded by mistake: the finishing enrollment goes back to ACTIVE in the
+  // very same school, year, class and section, the student back to ACTIVE,
+  // and the promotion record of that outcome is removed so the student can be
+  // progressed again later. Only while nothing has happened since — never
+  // once the student continued to Form 1, transferred, was archived or holds
+  // another active enrollment. The Student ID never changes; results,
+  // attendance and history are untouched. Audited with the reason.
+  async reverseFinalOutcome(actor: AuthenticatedUser, schoolId: string, enrollmentId: string, dto: ReverseFinalOutcomeDto) {
+    await this.schools.findOneAccessibleOrThrow(actor, schoolId);
+
+    const enrollment = await this.prisma.studentEnrollment.findFirst({
+      where: { id: enrollmentId, schoolId },
+      include: { student: true, academicYear: true, class: true, section: true, promotionFrom: true },
+    });
+    if (!enrollment) throw new NotFoundException("Enrollment not found in this school");
+
+    if (enrollment.status !== "GRADUATED" && enrollment.status !== "COMPLETED") {
+      throw new BadRequestException("Only a Graduated or Completed enrollment can be restored");
+    }
+    if (enrollment.student.currentStatus !== enrollment.status) {
+      throw new BadRequestException(
+        `This student has moved on since (currently ${enrollment.student.currentStatus}) — the ${enrollment.status.toLowerCase()} outcome can no longer be undone here`,
+      );
+    }
+    const item = enrollment.promotionFrom[0] ?? null;
+    if (item?.toEnrollmentId) {
+      throw new BadRequestException("This student has already continued to Form 1 — the completion can no longer be undone here");
+    }
+    const otherActive = await this.prisma.studentEnrollment.findFirst({
+      where: { studentId: enrollment.studentId, status: "ACTIVE" },
+    });
+    if (otherActive) {
+      throw new BadRequestException("This student already has an active enrollment — the outcome can no longer be undone here");
+    }
+    const numberTaken = await this.prisma.studentEnrollment.findFirst({
+      where: { schoolId, academicYearId: enrollment.academicYearId, studentNumber: enrollment.studentNumber, status: "ACTIVE" },
+    });
+    if (numberTaken) {
+      throw new BadRequestException(`Student ID ${enrollment.studentNumber} is already active in ${enrollment.academicYear.name}`);
+    }
+
+    // Keep the old roll number unless another active student took it meanwhile.
+    const rollTaken = await this.prisma.studentEnrollment.findFirst({
+      where: {
+        sectionId: enrollment.sectionId,
+        academicYearId: enrollment.academicYearId,
+        rollNumber: enrollment.rollNumber,
+        status: "ACTIVE",
+      },
+    });
+    let rollNumber = enrollment.rollNumber;
+    if (rollTaken) {
+      const max = await this.prisma.studentEnrollment.aggregate({
+        where: { sectionId: enrollment.sectionId, academicYearId: enrollment.academicYearId, status: "ACTIVE" },
+        _max: { rollNumber: true },
+      });
+      rollNumber = (max._max.rollNumber ?? 0) + 1;
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.studentEnrollment.update({
+        where: { id: enrollment.id },
+        data: { status: "ACTIVE", endDate: null, rollNumber },
+      });
+      await tx.student.update({ where: { id: enrollment.studentId }, data: { currentStatus: "ACTIVE" } });
+      if (item) await tx.promotionItem.delete({ where: { id: item.id } });
+
+      await this.audit.record(
+        {
+          actor,
+          organizationId: actor.organizationId,
+          schoolId,
+          action: AuditAction.FINAL_OUTCOME_REVERSED,
+          module: AuditModuleName.STUDENT_LIFECYCLE,
+          resourceType: "StudentEnrollment",
+          resourceId: enrollment.id,
+          before: {
+            enrollmentStatus: enrollment.status,
+            studentStatus: enrollment.student.currentStatus,
+            promotionBatchId: item?.batchId ?? null,
+            rollNumber: enrollment.rollNumber,
+          },
+          after: {
+            enrollmentStatus: "ACTIVE",
+            studentStatus: "ACTIVE",
+            class: enrollment.class.name,
+            section: enrollment.section.name,
+            academicYear: enrollment.academicYear.name,
+            rollNumber,
+            reason: dto.reason?.trim() || null,
+          },
+        },
+        tx,
+      );
+
+      return {
+        enrollmentId: enrollment.id,
+        studentId: enrollment.studentId,
+        restoredFrom: enrollment.status,
+        academicYear: enrollment.academicYear.name,
+        className: enrollment.class.name,
+        sectionName: enrollment.section.name,
+        rollNumber,
+      };
+    });
   }
 
   // The destination must be the Form 1 OF THE DESTINATION ACADEMIC YEAR: a

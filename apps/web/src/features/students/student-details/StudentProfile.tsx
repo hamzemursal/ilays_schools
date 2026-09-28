@@ -41,6 +41,7 @@ import { FormField, Select, Textarea } from "@/components/ui/FormControls";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { GuardianCard } from "@/features/guardians/components/GuardianCard";
 import { ResetPortalPasswordCard } from "@/features/portal-accounts/ResetPortalPasswordCard";
+import { UndoFinalOutcomeCard } from "@/features/student-lifecycle/UndoFinalOutcomeCard";
 import { GuardianForm } from "@/features/guardians/forms/GuardianForm";
 import { useToast } from "@/components/ui/Toast";
 import { TabBar } from "@/components/ui/TabBar";
@@ -383,6 +384,27 @@ export function StudentProfile({ studentId }: { studentId: string }) {
               }}
             />
           )}
+
+          {/* A Graduation / Class 8 Completion recorded by mistake can be
+              undone — the student's own finishing enrollment, only for
+              someone allowed to run Year-End Progression. */}
+          {accessToken &&
+            (user?.permissions.includes("promotions.execute") ?? false) &&
+            (student.currentStatus === "GRADUATED" || student.currentStatus === "COMPLETED") &&
+            (() => {
+              const finishing = student.enrollments.find((e) => e.status === student.currentStatus);
+              return finishing ? (
+                <UndoFinalOutcomeCard
+                  accessToken={accessToken}
+                  enrollment={finishing}
+                  studentName={`${student.firstName} ${student.lastName}`}
+                  onRestored={() => {
+                    studentsApi.getOne(accessToken, student.id).then(setStudent).catch(() => undefined);
+                    show(`${student.firstName} ${student.lastName} is an active student again.`);
+                  }}
+                />
+              ) : null;
+            })()}
 
           {canTransfer && activeEnrollment && accessToken && (
             <TransferRequestCard accessToken={accessToken} studentId={student.id} fromSchoolName={activeEnrollment.school.name} />

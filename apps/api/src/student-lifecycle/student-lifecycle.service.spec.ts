@@ -500,3 +500,95 @@ describe("StudentLifecycleService — fixed final classes and the Alumni Directo
     expect(where.AND[0]).toEqual(expect.objectContaining({ organizationId: "org-1", schoolId: { in: ["school-1"] } }));
   });
 });
+
+describe("StudentLifecycleService.reverseFinalOutcome — undo a mistaken graduation/completion", () => {
+  function graduated(over: Record<string, unknown> = {}) {
+    return {
+      id: "enr-f4",
+      schoolId: "school-1",
+      studentId: "st-1",
+      academicYearId: "y-2030",
+      sectionId: "sec-f4a",
+      studentNumber: "STU-2026-2027-00022",
+      rollNumber: 1,
+      status: "GRADUATED",
+      student: { currentStatus: "GRADUATED" },
+      academicYear: { name: "2029-2030" },
+      class: { name: "Form 4" },
+      section: { name: "A" },
+      promotionFrom: [{ id: "item-1", batchId: "batch-1", toEnrollmentId: null }],
+      ...over,
+    };
+  }
+
+  function setup(enrollment: unknown, activeLookups: unknown[] = [null, null, null]) {
+    const findFirst = jest.fn().mockResolvedValueOnce(enrollment);
+    for (const r of activeLookups) findFirst.mockResolvedValueOnce(r);
+    const prisma = {
+      studentEnrollment: { findFirst, update: jest.fn(), aggregate: jest.fn().mockResolvedValue({ _max: { rollNumber: 7 } }) },
+      student: { update: jest.fn() },
+      promotionItem: { delete: jest.fn() },
+    } as Record<string, unknown>;
+    prisma.$transaction = jest.fn((cb: (tx: unknown) => unknown) => cb(prisma));
+    const { service, audit } = createService(prisma as unknown as MockPrisma);
+    return { service, audit, prisma: prisma as never as {
+      studentEnrollment: { findFirst: jest.Mock; update: jest.Mock; aggregate: jest.Mock };
+      student: { update: jest.Mock };
+      promotionItem: { delete: jest.Mock };
+    } };
+  }
+
+  it("restores a graduated student to ACTIVE in the same class, keeps the Student ID, frees the outcome and audits the reason", async () => {
+    const { service, prisma, audit } = setup(graduated());
+    const result = await service.reverseFinalOutcome(ACTOR, "school-1", "enr-f4", { reason: "Graduated by mistake — no Form 4 results" });
+
+    expect(prisma.studentEnrollment.update).toHaveBeenCalledWith({
+      where: { id: "enr-f4" },
+      data: { status: "ACTIVE", endDate: null, rollNumber: 1 },
+    });
+    expect(prisma.student.update).toHaveBeenCalledWith({ where: { id: "st-1" }, data: { currentStatus: "ACTIVE" } });
+    expect(prisma.promotionItem.delete).toHaveBeenCalledWith({ where: { id: "item-1" } });
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "FINAL_OUTCOME_REVERSED",
+        before: expect.objectContaining({ enrollmentStatus: "GRADUATED", promotionBatchId: "batch-1" }),
+        after: expect.objectContaining({ enrollmentStatus: "ACTIVE", reason: "Graduated by mistake — no Form 4 results" }),
+      }),
+      expect.anything(),
+    );
+    expect(result).toMatchObject({ restoredFrom: "GRADUATED", className: "Form 4", sectionName: "A" });
+  });
+
+  it("gives a fresh roll number if the old one was taken meanwhile", async () => {
+    const { service, prisma } = setup(graduated(), [null, null, { id: "someone-else" }]);
+    await service.reverseFinalOutcome(ACTOR, "school-1", "enr-f4", {});
+    expect(prisma.studentEnrollment.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ rollNumber: 8 }) }));
+  });
+
+  it("refuses anything that is not a Graduated/Completed enrollment", async () => {
+    const { service } = setup(graduated({ status: "PROMOTED" }));
+    await expect(service.reverseFinalOutcome(ACTOR, "school-1", "enr-f4", {})).rejects.toThrow("Only a Graduated or Completed enrollment can be restored");
+  });
+
+  it("refuses once the student has moved on (e.g. transferred or archived)", async () => {
+    const { service } = setup(graduated({ student: { currentStatus: "ARCHIVED" } }));
+    await expect(service.reverseFinalOutcome(ACTOR, "school-1", "enr-f4", {})).rejects.toThrow(/moved on since/);
+  });
+
+  it("refuses a Class 8 completion that already continued to Form 1", async () => {
+    const { service } = setup(
+      graduated({ status: "COMPLETED", student: { currentStatus: "COMPLETED" }, promotionFrom: [{ id: "i", batchId: "b", toEnrollmentId: "enr-form1" }] }),
+    );
+    await expect(service.reverseFinalOutcome(ACTOR, "school-1", "enr-f4", {})).rejects.toThrow(/already continued to Form 1/);
+  });
+
+  it("refuses when the student already holds another active enrollment", async () => {
+    const { service } = setup(graduated(), [{ id: "enr-other" }]);
+    await expect(service.reverseFinalOutcome(ACTOR, "school-1", "enr-f4", {})).rejects.toThrow(/already has an active enrollment/);
+  });
+
+  it("is scoped to the given school", async () => {
+    const { service } = setup(null);
+    await expect(service.reverseFinalOutcome(ACTOR, "school-1", "enr-x", {})).rejects.toThrow("Enrollment not found in this school");
+  });
+});

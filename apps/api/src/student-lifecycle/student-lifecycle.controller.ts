@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { StudentLifecycleService, type LifecycleListFilters } from "./student-lifecycle.service";
 import { PreviewForm1TransitionDto } from "./dto/preview-form1-transition.dto";
 import { ConfirmForm1TransitionDto } from "./dto/confirm-form1-transition.dto";
+import { ReverseFinalOutcomeDto } from "./dto/reverse-final-outcome.dto";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { RequirePermissions } from "../auth/decorators/require-permissions.decorator";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
@@ -89,6 +90,19 @@ export class StudentLifecycleController {
   @Get("student-lifecycle/alumni-directory")
   listAlumniDirectory(@CurrentUser() user: AuthenticatedUser, @Query() query: LifecycleListQuery) {
     return this.lifecycle.listAlumniDirectory(user, parseListFilters(query));
+  }
+
+  // Undo a Graduation / Primary Completion recorded by mistake — same
+  // permission as recording it (Year-End Progression).
+  @RequirePermissions("promotions.execute")
+  @Post("schools/:schoolId/student-lifecycle/enrollments/:enrollmentId/reverse-final-outcome")
+  reverseFinalOutcome(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("schoolId") schoolId: string,
+    @Param("enrollmentId") enrollmentId: string,
+    @Body() dto: ReverseFinalOutcomeDto,
+  ) {
+    return this.lifecycle.reverseFinalOutcome(user, schoolId, enrollmentId, dto);
   }
 
   @RequirePermissions("promotions.execute")

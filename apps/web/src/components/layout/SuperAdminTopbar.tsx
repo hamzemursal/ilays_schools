@@ -203,7 +203,6 @@ export function SuperAdminTopbar({
           >
             <Search className="size-4 shrink-0" />
             <span className="hidden truncate sm:inline">Search schools and pages…</span>
-            <span className="ml-auto hidden rounded border border-border bg-background px-1.5 py-0.5 text-xs sm:inline">Ctrl K</span>
           </button>
         )}
       </div>

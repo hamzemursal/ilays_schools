@@ -75,12 +75,12 @@ describe("SuperAdminTopbar — organization-level header", () => {
     expect(crumbs).toHaveTextContent("Students");
   });
 
-  it("offers one search for schools and pages, with the Ctrl K shortcut", async () => {
+  it("offers one search for schools and pages; Ctrl K still opens it, without a visible hint", async () => {
     const user = userEvent.setup();
     renderBar();
 
     expect(screen.getByText("Search schools and pages…")).toBeInTheDocument();
-    expect(screen.getByText("Ctrl K")).toBeInTheDocument();
+    expect(screen.queryByText("Ctrl K")).toBeNull();
 
     await user.keyboard("{Control>}k{/Control}");
     const input = await screen.findByPlaceholderText("Search schools and pages…");

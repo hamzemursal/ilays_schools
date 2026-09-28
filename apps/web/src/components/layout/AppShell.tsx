@@ -137,7 +137,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       data-theme={superAdmin ? "super-admin" : undefined}
       className="flex h-screen overflow-hidden bg-surface print:h-auto print:overflow-visible"
     >
-      <aside className={`hidden w-64 shrink-0 border-r lg:block print:hidden ${superAdmin ? "border-sa-navy" : "border-border"}`}>
+      <aside
+        className={`hidden w-64 shrink-0 lg:block print:hidden ${
+          superAdmin ? "border-r border-sa-navy" : "z-10 border-r border-border/70 shadow-[4px_0_24px_-12px_rgb(20_33_61/0.12)]"
+        }`}
+      >
         {superAdmin ? (
           <SuperAdminSidebar user={user} resolvedCurrentSchool={resolvedCurrentSchool} />
         ) : (
@@ -193,12 +197,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               schools={schools}
             />
           ) : (
-            <Topbar
-              onMenuClick={() => setDrawerOpen(true)}
-              canSwitchSchools={canSwitchSchools}
-              resolvedCurrentSchool={resolvedCurrentSchool}
-              schools={schools}
-            />
+            // Floating header card: inset from the page edges, above the
+            // scrolling content (it lives outside <main>, so it stays put).
+            <div className="px-3 pt-3 sm:px-5 sm:pt-4">
+              <Topbar
+                onMenuClick={() => setDrawerOpen(true)}
+                canSwitchSchools={canSwitchSchools}
+                resolvedCurrentSchool={resolvedCurrentSchool}
+                schools={schools}
+              />
+            </div>
           )}
         </div>
         <SelectedChildProvider>

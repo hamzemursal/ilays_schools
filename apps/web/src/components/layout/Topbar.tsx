@@ -6,6 +6,7 @@ import Link from "next/link";
 import {
   ArrowRight,
   Bell,
+  Building2,
   Check,
   ChevronDown,
   GraduationCap,
@@ -25,6 +26,19 @@ import { contextRoleLabel } from "./Sidebar";
 import { orgNavItems, schoolNavItems, type NavItem } from "./nav-config";
 import { SchoolTypeBadge } from "@/features/my-classes/components/SchoolTypeBadge";
 import { DECORATIVE_TONE_PARTS } from "@/components/ui/decorativeTones";
+import { useSchoolIdentity } from "@/lib/useSchoolIdentity";
+
+// "SCHOOL_ADMIN" -> "School Admin" — the account's first role, as shown
+// under the email in the header.
+function roleDisplay(roles: string[]): string {
+  const role = roles[0];
+  if (!role) return "No role";
+  return role
+    .toLowerCase()
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
 
 export function Topbar({
   onMenuClick,
@@ -46,6 +60,13 @@ export function Topbar({
   // (search + notifications only), exactly like a School Admin's header
   // always does.
   const showSwitcher = canSwitchSchools && !!resolvedCurrentSchool;
+  // A school-scoped account (e.g. School Admin) sees its own school's name
+  // and address — from the school record itself, never hard-coded.
+  const identity = useSchoolIdentity(
+    accessToken,
+    !showSwitcher ? (resolvedCurrentSchool?.id ?? null) : null,
+    !!user?.permissions.includes("academic.view"),
+  );
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -119,7 +140,7 @@ export function Topbar({
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b border-accent/15 bg-accent-soft/90 px-4 backdrop-blur sm:px-6">
+    <header className="relative z-30 flex h-16 shrink-0 items-center gap-3 rounded-2xl border border-border bg-background/95 px-3 shadow-sm backdrop-blur sm:px-4">
       <button
         onClick={onMenuClick}
         className="rounded-lg p-2 text-foreground-soft hover:bg-surface-hover lg:hidden"
@@ -137,7 +158,23 @@ export function Topbar({
         />
       )}
 
-      <div className="relative flex-1 max-w-md">
+      {!showSwitcher && resolvedCurrentSchool && (
+        <div className="flex min-w-0 items-center gap-2.5 pr-1 sm:pr-3" data-testid="school-identity">
+          <span className="hidden size-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent sm:flex">
+            <Building2 className="size-5" />
+          </span>
+          <span className="flex min-w-0 flex-col leading-tight">
+            <span className="max-w-[150px] truncate text-sm font-semibold text-foreground sm:max-w-[240px] sm:text-base">
+              {identity?.name ?? resolvedCurrentSchool.name}
+            </span>
+            {identity?.address && (
+              <span className="hidden max-w-[240px] truncate text-xs text-foreground-muted sm:block">{identity.address}</span>
+            )}
+          </span>
+        </div>
+      )}
+
+      <div className="relative min-w-0 flex-1 max-w-xl">
         {searchOpen ? (
           <div className="absolute inset-x-0 top-0 z-40">
             <div className="relative">
@@ -146,7 +183,7 @@ export function Topbar({
                 ref={searchRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Jump to a page…"
+                placeholder="search menu..."
                 className="w-full rounded-lg border border-accent bg-background py-2 pl-9 pr-9 text-sm text-foreground outline-none ring-2 ring-accent/15"
               />
               <button
@@ -174,25 +211,23 @@ export function Topbar({
         ) : (
           <button
             onClick={() => setSearchOpen(true)}
-            className="flex w-full max-w-xs items-center gap-2 rounded-lg border border-border bg-surface-soft px-3 py-2 text-sm text-foreground-muted hover:border-border-strong"
+            aria-label="Jump to a page"
+            className="flex w-full items-center gap-2.5 rounded-xl border border-border bg-surface-soft px-3.5 py-2.5 text-sm text-foreground-muted transition-colors hover:border-border-strong hover:bg-background"
           >
-            <Search className="size-4" />
-            <span className="hidden sm:inline">Jump to a page…</span>
-            <span className="ml-auto hidden rounded border border-border bg-background px-1.5 py-0.5 text-xs sm:inline">
-              Ctrl K
-            </span>
+            <Search className="size-4 shrink-0 text-foreground-soft" />
+            <span className="hidden truncate sm:inline">Jump to a page…</span>
           </button>
         )}
       </div>
 
-      <div className="ml-auto flex items-center gap-1.5">
+      <div className="ml-auto flex items-center gap-1 sm:gap-2">
         <div className="relative">
           <button
             onClick={() => {
               setNotifOpen((v) => !v);
               setUserMenuOpen(false);
             }}
-            className="relative rounded-lg p-2 text-foreground-soft hover:bg-surface-hover"
+            className="relative rounded-xl p-2.5 text-foreground-soft hover:bg-surface-hover"
             aria-label="Notifications"
           >
             <Bell className="size-5" />
@@ -234,6 +269,8 @@ export function Topbar({
           )}
         </div>
 
+        <span className="hidden h-8 w-px bg-border sm:block" aria-hidden />
+
         <div className="relative">
           <button
             onClick={() => {
@@ -241,9 +278,16 @@ export function Topbar({
               setNotifOpen(false);
             }}
             aria-label="Account menu"
-            className="flex items-center gap-2 rounded-lg p-1.5 hover:bg-surface-hover"
+            className="flex items-center gap-2.5 rounded-xl p-1.5 hover:bg-surface-hover sm:pr-2"
           >
             <Avatar name={user.email} size="sm" />
+            <span className="hidden min-w-0 flex-col items-start leading-tight md:flex">
+              <span className="max-w-[180px] truncate text-sm font-semibold text-foreground">{user.email}</span>
+              <span className="mt-0.5 rounded-md bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
+                {roleDisplay(user.roles)}
+              </span>
+            </span>
+            <ChevronDown className="hidden size-4 text-foreground-muted md:block" />
           </button>
           {userMenuOpen && (
             <>

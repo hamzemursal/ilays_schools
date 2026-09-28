@@ -3,7 +3,8 @@
 :root {
   color-scheme: light;
   --background: #ffffff;
-  --surface: #f5f6f9;
+  /* Page background: a very light blue-gray behind the white cards. */
+  --surface: #f3f6fb;
   --surface-soft: #fafbfc;
   --surface-hover: #eef1f6;
   --border: #dde1e8;

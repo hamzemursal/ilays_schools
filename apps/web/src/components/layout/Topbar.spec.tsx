@@ -3,7 +3,10 @@ import { render, screen } from "@testing-library/react";
 import type { School } from "@/lib/api";
 import { Topbar } from "./Topbar";
 
-const apiMock = vi.hoisted(() => ({ listMyAppNotifications: vi.fn().mockResolvedValue([]) }));
+const apiMock = vi.hoisted(() => ({
+  listMyAppNotifications: vi.fn().mockResolvedValue([]),
+  resolveSchool: vi.fn().mockResolvedValue({ id: "school-a", name: "Saamalay Primary School", address: "Bino, Somalia" }),
+}));
 vi.mock("@/lib/api", () => ({ api: apiMock }));
 
 const authMock = vi.hoisted(() => ({ useAuth: vi.fn() }));
@@ -167,5 +170,33 @@ describe("Topbar — school switcher dropdown", () => {
     await user.keyboard("{Escape}");
 
     expect(screen.queryByText("Masalla Primary School")).not.toBeInTheDocument();
+  });
+});
+
+describe("Topbar — floating header for a school-scoped account", () => {
+  function schoolAdmin(permissions = ["academic.view", "students.view"]) {
+    return { id: "u2", email: "swl@gmail.com", permissions, roles: ["SCHOOL_ADMIN"], schools: [{ id: "school-a", name: "SYL Schools", logoUrl: null }] };
+  }
+
+  it("shows the school's own name and address from the school record, the account email and role — and no Ctrl K hint", async () => {
+    apiMock.resolveSchool.mockResolvedValue({ id: "school-a", name: "SYL Schools", address: "Bino, Somalia" });
+    authMock.useAuth.mockReturnValue({ user: schoolAdmin(), accessToken: "token-1", logout: vi.fn() });
+    renderTopbar({ resolvedCurrentSchool: { id: "school-a", name: "SYL Schools", logoUrl: null } });
+
+    expect(await screen.findByText("Bino, Somalia")).toBeInTheDocument();
+    expect(apiMock.resolveSchool).toHaveBeenCalledWith("token-1", "school-a");
+    expect(screen.getByTestId("school-identity")).toHaveTextContent("SYL Schools");
+    expect(screen.getByText("swl@gmail.com")).toBeInTheDocument();
+    expect(screen.getByText("School Admin")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Jump to a page" })).toBeInTheDocument();
+    expect(screen.queryByText("Ctrl K")).toBeNull();
+  });
+
+  it("falls back to the known school name, without an address, when the account can't read the school record", () => {
+    authMock.useAuth.mockReturnValue({ user: schoolAdmin(["students.view"]), accessToken: "token-1", logout: vi.fn() });
+    renderTopbar({ resolvedCurrentSchool: { id: "school-a", name: "SYL Schools", logoUrl: null } });
+
+    expect(screen.getByTestId("school-identity")).toHaveTextContent("SYL Schools");
+    expect(apiMock.resolveSchool).not.toHaveBeenCalled();
   });
 });

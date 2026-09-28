@@ -37,11 +37,12 @@ function NavLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void 
     <Link
       href={item.href}
       onClick={onNavigate}
-      className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-        active ? "bg-accent-soft text-accent" : "text-foreground-soft hover:bg-surface-hover hover:text-foreground"
+      aria-current={active ? "page" : undefined}
+      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+        active ? "bg-accent text-white shadow-sm" : "text-foreground-soft hover:bg-accent-soft/60 hover:text-accent"
       }`}
     >
-      <Icon className="size-4.5 shrink-0" />
+      <Icon className={`size-4.5 shrink-0 ${active ? "text-white" : "text-foreground-muted"}`} />
       <span className="truncate">{item.label}</span>
     </Link>
   );
@@ -75,14 +76,14 @@ export function Sidebar({
 
   return (
     <div className="flex h-full flex-col bg-sidebar-bg">
-      <div className="flex h-16 shrink-0 items-center gap-2.5 border-b border-border px-4">
+      <div className="mx-3 flex h-[76px] shrink-0 items-center gap-3 border-b border-border px-2">
         {canSwitchSchools ? (
           <>
             <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-white">
               <GraduationCap className="size-4.5" />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-foreground">Ilays Schools</p>
+              <p className="truncate text-base font-semibold text-accent">Ilays Schools</p>
               <p className="text-[10px] font-semibold uppercase tracking-wide text-accent">{contextRoleLabel(user.roles)}</p>
             </div>
           </>
@@ -95,7 +96,10 @@ export function Sidebar({
               editable={canManageBranding}
               onChanged={onBrandingChanged}
             />
-            <p className="min-w-0 truncate text-sm font-semibold text-foreground">{resolvedCurrentSchool.name}</p>
+            <div className="min-w-0">
+              <p className="truncate text-base font-semibold text-accent">{resolvedCurrentSchool.name}</p>
+              <p className="truncate text-[11px] text-foreground-muted">School Management System</p>
+            </div>
           </>
         ) : (
           <>
@@ -107,10 +111,10 @@ export function Sidebar({
         )}
       </div>
 
-      <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
+      <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-5">
         {resolvedCurrentSchool && schoolItems.length > 0 && (
           <div>
-            <p className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wide text-foreground-muted">Main menu</p>
+            <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">Main menu</p>
             <div className="space-y-0.5">
               {schoolItems.map((item) => (
                 <NavLink key={item.href} item={item} onNavigate={onNavigate} />
@@ -121,7 +125,7 @@ export function Sidebar({
 
         {orgItems.length > 0 && (
           <div>
-            <p className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+            <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">
               {resolvedCurrentSchool && schoolItems.length > 0 ? "Organization" : "Main menu"}
             </p>
             <div className="space-y-0.5">
@@ -134,7 +138,7 @@ export function Sidebar({
 
         {parentItems.length > 0 && (
           <div>
-            <p className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+            <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">
               Parent Portal
             </p>
             <div className="space-y-0.5">
@@ -147,7 +151,7 @@ export function Sidebar({
 
         {studentItems.length > 0 && (
           <div>
-            <p className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+            <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">
               Student Portal
             </p>
             <div className="space-y-0.5">

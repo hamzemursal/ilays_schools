@@ -14,6 +14,7 @@ function renderShell() {
 const apiMock = vi.hoisted(() => ({
   listSchools: vi.fn(),
   listMyAppNotifications: vi.fn().mockResolvedValue([]),
+  resolveSchool: vi.fn().mockResolvedValue({ id: "school-1", name: "Saamalay Primary School", address: "Bino, Somalia" }),
   listMyChildren: vi.fn().mockResolvedValue([]),
 }));
 vi.mock("@/lib/api", () => ({ api: apiMock }));

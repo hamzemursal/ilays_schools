@@ -155,6 +155,18 @@ describe("Form 4 Graduation", () => {
     expect(screen.getByRole("button", { name: "Review" })).toBeDisabled();
   });
 
+  it("never lets a student without complete results graduate — only Retain", async () => {
+    apiMock.previewPromotion.mockImplementation((_t: string, _s: string, sectionId: string) =>
+      Promise.resolve(preview(sectionId === "f4-a" ? [student("9", "Caasha", null)] : [])),
+    );
+    render(<Form4Graduation schoolId="school-1" />);
+    await userEvent.click(await screen.findByRole("button", { name: /Review 3 sections/ }));
+    const caasha = await screen.findByRole("radiogroup", { name: "Outcome for Caasha Test" });
+    expect(within(caasha).getByRole("radio", { name: "Graduate" })).toBeDisabled();
+    expect(within(caasha).getByRole("radio", { name: "Retain" })).toBeEnabled();
+    expect(screen.getByText(/have incomplete results — retain them, or publish their results first/)).toBeInTheDocument();
+  });
+
   it("stops at a failing section and reports what was saved", async () => {
     apiMock.confirmPromotion
       .mockResolvedValueOnce({ id: "b1", items: [] })

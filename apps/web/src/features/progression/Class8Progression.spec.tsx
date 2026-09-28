@@ -162,7 +162,10 @@ describe("Class 8 Year-End Progression", () => {
     // Incomplete results: nothing chosen, Review blocked until decided.
     expect(within(outcome("Caalo Test")).queryByRole("radio", { checked: true })).toBeNull();
     expect(screen.getByRole("button", { name: "Review" })).toBeDisabled();
-    expect(screen.getByText(/1 student\(s\) with incomplete results/)).toBeInTheDocument();
+    expect(screen.getByText(/1 student\(s\) have incomplete results — retain them/)).toBeInTheDocument();
+    // Incomplete results can only be retained.
+    expect(within(outcome("Caalo Test")).getByRole("radio", { name: "Form 1" })).toBeDisabled();
+    expect(within(outcome("Caalo Test")).getByRole("radio", { name: "Complete" })).toBeDisabled();
   });
 
   it("shows destinations as chips — Form 1 at the destination school, Class 8 next year for retention", async () => {

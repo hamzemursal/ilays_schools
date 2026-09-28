@@ -164,7 +164,8 @@ export function Form4Graduation({ schoolId, initialYearId }: { schoolId: string;
   };
 
   const problems: string[] = [];
-  if (counts.undecided > 0) problems.push(`${counts.undecided} student(s) with incomplete results still need an outcome.`);
+  if (counts.undecided > 0)
+    problems.push(`${counts.undecided} student(s) have incomplete results — retain them, or publish their results first to graduate them.`);
   if (counts.RETAIN > 0 && !retainYear) problems.push("Retaining needs the next academic year — create it first (Academic → Years), or graduate these students.");
   if (counts.RETAIN > 0 && retainYear && idsWith("RETAIN").some((id) => !retainSections.get(id)))
     problems.push(`No ${retainClassName} section is available in ${retainYear.name} for some retained students.`);
@@ -315,7 +316,14 @@ export function Form4Graduation({ schoolId, initialYearId }: { schoolId: string;
                               value={o}
                               onChange={(v) => setOutcomes((prev) => new Map(prev).set(r.enrollmentId, v))}
                               options={[
-                                { value: "GRADUATE", label: "Graduate", tone: "success", disabled: r.eligible === false, disabledReason: "Below the 50% pass mark" },
+                                {
+                                  value: "GRADUATE",
+                                  label: "Graduate",
+                                  tone: "success",
+                                  // Only a complete result of at least 50% can graduate.
+                                  disabled: r.eligible !== true,
+                                  disabledReason: r.eligible === null ? "Incomplete results — publish them first" : "Below the 50% pass mark",
+                                },
                                 { value: "RETAIN", label: "Retain", tone: "warning" },
                               ]}
                             />

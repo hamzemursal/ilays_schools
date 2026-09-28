@@ -453,7 +453,7 @@ export function PromotionWizard({
                 aria-label={`Decision for ${s.firstName} ${s.lastName}`}
               >
                 <option value="">Review…</option>
-                <option value={preview.naturalOutcome} disabled={s.eligible === false}>
+                <option value={preview.naturalOutcome} disabled={s.eligible !== true}>
                   {NATURAL_OUTCOME_LABEL[preview.naturalOutcome]}
                 </option>
                 <option value="RETAINED">Retain</option>
@@ -492,7 +492,7 @@ export function PromotionWizard({
                   aria-label={`Manual outcome for ${s.firstName} ${s.lastName}`}
                 >
                   <option value="">Choose…</option>
-                  <option value={preview.naturalOutcome} disabled={s.eligible === false}>
+                  <option value={preview.naturalOutcome} disabled={s.eligible !== true}>
                     {NATURAL_OUTCOME_LABEL[preview.naturalOutcome]}
                   </option>
                   <option value="RETAINED">Retain</option>

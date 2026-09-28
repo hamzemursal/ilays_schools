@@ -17,6 +17,7 @@ const ACTOR: AuthenticatedUser = {
 };
 
 const INCOMPLETE_RESULT = { term1Percentage: null, term2Percentage: null, annualPercentage: null, eligible: null };
+const ELIGIBLE_RESULT = { term1Percentage: 60, term2Percentage: 60, annualPercentage: 60, eligible: true };
 
 type MockPrisma = {
   section: { findFirst: jest.Mock; findMany: jest.Mock; findUniqueOrThrow: jest.Mock };
@@ -45,7 +46,9 @@ function createMockPrisma(): MockPrisma {
 
 function createService(prisma: MockPrisma) {
   const schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
-  const exams = { getAnnualResult: jest.fn().mockResolvedValue(INCOMPLETE_RESULT) };
+  // Default: an eligible (complete, >= 50%) result — tests about Incomplete or
+  // below-50% results set their own.
+  const exams = { getAnnualResult: jest.fn().mockResolvedValue(ELIGIBLE_RESULT) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const service = new PromotionsService(
     prisma as unknown as PrismaService,

@@ -297,7 +297,8 @@ export function Class8Progression({ schoolId, initialYearId }: { schoolId: strin
   };
 
   const problems: string[] = [];
-  if (counts.undecided > 0) problems.push(`${counts.undecided} student(s) with incomplete results still need an outcome.`);
+  if (counts.undecided > 0)
+    problems.push(`${counts.undecided} student(s) have incomplete results — retain them, or publish their results first to move them on.`);
   if (counts.CONTINUE > 0 && !destination) problems.push("Form 1 destination isn't ready — fix it in Setup, or choose another outcome.");
   if (counts.CONTINUE > 0 && destination && idsWith("CONTINUE").some((id) => !continueSections.get(id)))
     problems.push("Form 1 sections are full — some continuing students have no section.");
@@ -569,7 +570,10 @@ export function Class8Progression({ schoolId, initialYearId }: { schoolId: strin
                     {visibleRows.map((r) => {
                       const o = outcomeOf(r.enrollmentId);
                       const name = `${r.firstName} ${r.lastName}`;
-                      const failed = r.eligible === false;
+                      // Only a complete result of at least 50% can move on;
+                      // below 50% or Incomplete can only be retained.
+                      const failed = r.eligible !== true;
+                      const blockedReason = r.eligible === null ? "Incomplete results — publish them first" : "Below the 50% pass mark";
                       return (
                         <tr key={r.enrollmentId} className={o === "" ? "bg-warning-soft/30" : undefined}>
                           <td className="px-4 py-2.5 font-medium text-foreground">{name}</td>
@@ -587,9 +591,9 @@ export function Class8Progression({ schoolId, initialYearId }: { schoolId: strin
                               value={o}
                               onChange={(v) => setOutcomes((prev) => new Map(prev).set(r.enrollmentId, v))}
                               options={[
-                                { value: "CONTINUE", label: "Form 1", tone: "accent", disabled: failed, disabledReason: "Below the 50% pass mark" },
+                                { value: "CONTINUE", label: "Form 1", tone: "accent", disabled: failed, disabledReason: blockedReason },
                                 { value: "RETAIN", label: "Retain", tone: "warning" },
-                                { value: "COMPLETE", label: "Complete", tone: "neutral", disabled: failed, disabledReason: "Below the 50% pass mark" },
+                                { value: "COMPLETE", label: "Complete", tone: "neutral", disabled: failed, disabledReason: blockedReason },
                               ]}
                             />
                           </td>

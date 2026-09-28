@@ -294,12 +294,26 @@ describe("PromotionWizard — Manual Review", () => {
     const user = userEvent.setup();
     renderWizard();
     await preview(user);
-    await user.selectOptions(screen.getByLabelText("Decision for Ahmed Ali"), "PROMOTED");
+    await user.selectOptions(screen.getByLabelText("Decision for Ahmed Ali"), "RETAINED");
 
     await user.selectOptions(screen.getByLabelText("Decision for Ahmed Ali"), "MANUAL_REVIEW");
 
-    expect(screen.getByLabelText("Manual outcome for Ahmed Ali")).toHaveValue("PROMOTED");
-    expect(screen.getByLabelText("Destination section for Ahmed Ali")).toHaveValue("next-a");
+    expect(screen.getByLabelText("Manual outcome for Ahmed Ali")).toHaveValue("RETAINED");
+    expect(screen.getByLabelText("Destination section for Ahmed Ali")).toHaveValue("cur-a");
+  });
+
+  it("an Incomplete student can only be retained: Promote is disabled, in the decision and in Manual Review", async () => {
+    apiMock.previewPromotion.mockResolvedValue(
+      basePreview({ students: [eligibleStudent({ eligible: null, suggestedOutcome: null, annualPercentage: null })] }),
+    );
+    const user = userEvent.setup();
+    renderWizard();
+    await preview(user);
+
+    const decision = screen.getByLabelText("Decision for Ahmed Ali");
+    expect(within(decision).getByRole("option", { name: "Promote" })).toBeDisabled();
+    await user.selectOptions(decision, "MANUAL_REVIEW");
+    expect(within(screen.getByLabelText("Manual outcome for Ahmed Ali")).getByRole("option", { name: "Promote" })).toBeDisabled();
   });
 
   it("choosing Manual Review reveals a per-student outcome + destination picker, seeded from the current decision", async () => {

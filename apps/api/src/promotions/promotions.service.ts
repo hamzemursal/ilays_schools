@@ -181,7 +181,7 @@ export class PromotionsService {
   // students are suggested this section's natural outcome (promote/complete/
   // graduate); ineligible students are suggested RETAINED; a student with an
   // Incomplete annual result gets no suggestion at all — the Admin must
-  // decide explicitly rather than the system guessing at missing data.
+  // decide explicitly, and confirm() only accepts RETAINED for them.
   // toAcademicYearId is optional: without it the next LATER academic year of
   // the school is used, and if there is none the preview still shows each
   // student's results but offers no destination sections.
@@ -402,9 +402,11 @@ export class PromotionsService {
       // COMPLETED / GRADUATED: no target section, no new enrollment.
     }
 
-    // A student whose Annual Result is below the pass mark can only be
-    // retained — never promoted, completed or graduated, whatever the client
-    // sent. (Incomplete results are left to the Admin's explicit decision.)
+    // Only a student with a complete Annual Result of at least the pass mark
+    // can be promoted, completed or graduated — whatever the client sent.
+    // Below the pass mark, or no complete result at all (Incomplete: a term
+    // with no published results), the only allowed outcome is RETAINED; enter
+    // and publish the missing results first to move the student on.
     const advancing = dto.assignments.filter((a) => a.outcome !== "RETAINED");
     const annualResults = await Promise.all(
       advancing.map((a) => this.exams.getAnnualResult(a.enrollmentId, dto.fromAcademicYearId)),
@@ -413,6 +415,12 @@ export class PromotionsService {
     if (belowPassMark.length > 0) {
       throw new BadRequestException(
         `${belowPassMark.length} student(s) have an Annual Result below 50% and can only be retained, not promoted or graduated`,
+      );
+    }
+    const incomplete = advancing.filter((_, i) => annualResults[i].eligible === null);
+    if (incomplete.length > 0) {
+      throw new BadRequestException(
+        `${incomplete.length} student(s) have no complete Annual Result and can only be retained — publish their results first to promote, complete or graduate them`,
       );
     }
 

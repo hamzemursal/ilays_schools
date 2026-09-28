@@ -64,7 +64,8 @@ function createMockPrisma(): MockPrisma {
 function createService(prisma: MockPrisma) {
   const schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
   const exams = {
-    getAnnualResult: jest.fn().mockResolvedValue({ term1Percentage: null, term2Percentage: null, annualPercentage: null, eligible: null }),
+    // Default: an eligible (complete, >= 50%) result; rule tests set their own.
+    getAnnualResult: jest.fn().mockResolvedValue({ term1Percentage: 60, term2Percentage: 60, annualPercentage: 60, eligible: true }),
   };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const service = new PromotionsService(
@@ -349,6 +350,51 @@ describe("PromotionsService.confirm — Phase 1 promotion rules", () => {
     exams.getAnnualResult.mockResolvedValue({ term1Percentage: 50, term2Percentage: 50, annualPercentage: 50, eligible: true });
 
     await expect(service.confirm(ACTOR, "school-1", "section-1", dto())).resolves.toBeDefined();
+  });
+
+  it("a student with NO complete annual result (Incomplete) can never be promoted — only retained", async () => {
+    arrangeConfirm(FORM_2(), FORM_3());
+    exams.getAnnualResult.mockResolvedValue({ term1Percentage: 70, term2Percentage: null, annualPercentage: null, eligible: null });
+
+    await expect(service.confirm(ACTOR, "school-1", "section-1", dto())).rejects.toThrow(
+      "1 student(s) have no complete Annual Result and can only be retained",
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("Form 4 with no results at all can never be GRADUATED (the case of a student graduated without sitting Form 4 exams)", async () => {
+    arrangeConfirm(classRow("Form 4", 4, "SECONDARY"), null);
+    exams.getAnnualResult.mockResolvedValue({ term1Percentage: null, term2Percentage: null, annualPercentage: null, eligible: null });
+
+    await expect(
+      service.confirm(ACTOR, "school-1", "section-1", dto({ assignments: [{ enrollmentId: "enr-1", outcome: "GRADUATED" }] })),
+    ).rejects.toThrow(/no complete Annual Result/);
+    expect(prisma.student.update).not.toHaveBeenCalled();
+  });
+
+  it("Class 8 with Incomplete results can never be COMPLETED", async () => {
+    arrangeConfirm(classRow("Class 8", 8, "PRIMARY"), null);
+    exams.getAnnualResult.mockResolvedValue({ term1Percentage: null, term2Percentage: null, annualPercentage: null, eligible: null });
+
+    await expect(
+      service.confirm(ACTOR, "school-1", "section-1", dto({ assignments: [{ enrollmentId: "enr-1", outcome: "COMPLETED" }] })),
+    ).rejects.toThrow(/no complete Annual Result/);
+  });
+
+  it("an Incomplete student CAN still be retained", async () => {
+    arrangeConfirm(FORM_2(), FORM_3());
+    exams.getAnnualResult.mockResolvedValue({ term1Percentage: null, term2Percentage: null, annualPercentage: null, eligible: null });
+
+    await service.confirm(
+      ACTOR,
+      "school-1",
+      "section-1",
+      dto({ assignments: [{ enrollmentId: "enr-1", outcome: "RETAINED", targetSectionId: "cur-a" }] }),
+    );
+    expect(prisma.studentEnrollment.update).toHaveBeenCalledWith({
+      where: { id: "enr-1" },
+      data: { status: "RETAINED", endDate: expect.any(Date) },
+    });
   });
 
   it("a Form 2 student can never be sent as GRADUATED or COMPLETED — the class's only outcomes are Promoted or Retained", async () => {

@@ -12,7 +12,7 @@ import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { Select } from "@/components/ui/FormControls";
-import { AttendanceDonut } from "@/features/student-portal/AttendanceDonut";
+import { StudentMonthView } from "@/features/attendance/AttendanceUI";
 import { StatTile, rateLabel } from "@/features/student-portal/StatTile";
 import {
   CalendarCheck,
@@ -64,9 +64,14 @@ export default function StudentAttendancePage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Student Portal" title="Attendance" description="Your daily attendance record, by academic year." />
+      <PageHeader
+        variant="plain"
+        eyebrow="Student Portal"
+        title="Attendance"
+        description="Your own attendance — Morning and Afternoon sessions, by academic year. Read-only."
+      />
 
-      <div className="space-y-5 p-4 sm:p-6">
+      <div className="space-y-5 px-3 pb-8 pt-4 sm:px-5">
         {!accessToken ? <SkeletonCards count={3} /> : <YearPicker accessToken={accessToken} />}
       </div>
     </div>
@@ -105,7 +110,8 @@ function YearPicker({ accessToken }: { accessToken: string }) {
           <Select
             value={selectedYearId ?? ""}
             onChange={(e) => setSelectedYearId(e.target.value)}
-            className="w-auto min-w-[180px]"
+            aria-label="Academic year"
+            className="w-full sm:w-auto sm:min-w-[180px]"
           >
             {years.map((y) => (
               <option key={y.id} value={y.id}>
@@ -178,53 +184,13 @@ function YearAttendance({ accessToken, academicYearId }: { accessToken: string; 
         <StatTile icon={ShieldCheck} label="Excused" value={summary.excused} unit="sessions" tone="accent" />
       </div>
 
-      <Card>
-        <CardHeader title="Attendance Overview" description="Breakdown of every recorded attendance session this year." />
-        <div className="mt-5 flex flex-wrap items-center justify-center gap-8 sm:justify-between">
-          <AttendanceDonut
-            present={summary.present}
-            absent={summary.absent}
-            late={summary.late}
-            excused={summary.excused}
-            total={summary.total}
-          />
-          <div className="grid flex-1 grid-cols-2 gap-4 sm:min-w-[220px]">
-            {(
-              [
-                { label: "Present", value: summary.present, tone: "success" as const },
-                { label: "Absent", value: summary.absent, tone: "danger" as const },
-                { label: "Late", value: summary.late, tone: "warning" as const },
-                { label: "Excused", value: summary.excused, tone: "accent" as const },
-              ]
-            ).map((item) => {
-              const dotClass = {
-                success: "bg-success",
-                danger: "bg-danger",
-                warning: "bg-warning",
-                accent: "bg-accent",
-              }[item.tone];
-              const pct = summary.total > 0 ? Math.round((item.value / summary.total) * 1000) / 10 : 0;
-              return (
-                <div key={item.label} className="flex items-center gap-2">
-                  <span className={`size-2.5 shrink-0 rounded-full ${dotClass}`} />
-                  <div className="min-w-0">
-                    <p className="text-xs text-foreground-muted">{item.label}</p>
-                    <p className="text-sm font-semibold text-foreground">
-                      {item.value} <span className="font-normal text-foreground-muted">({pct}%)</span>
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </Card>
+      <StudentMonthView days={days} showHistory={false} />
 
-      <Card padding="none">
+      <Card padding="none" className="rounded-2xl">
         <CardHeader title="Daily attendance" description={`${days.length} day(s) recorded this year.`} />
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[680px] text-left text-sm">
-            <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+          <table className="w-full text-left text-sm sm:min-w-[680px]">
+            <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted max-sm:hidden">
               <tr>
                 <th className="px-5 py-2.5">Date</th>
                 <th className="px-5 py-2.5">Day</th>
@@ -233,27 +199,29 @@ function YearAttendance({ accessToken, academicYearId }: { accessToken: string; 
                 <th className="px-5 py-2.5">Afternoon Session</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody className="divide-y divide-border max-sm:block max-sm:space-y-2 max-sm:divide-y-0 max-sm:p-3">
               {days.map((day) => {
                 const d = new Date(day.date);
                 return (
-                  <tr key={day.date} className="transition-colors hover:bg-surface-hover">
-                    <td className="px-5 py-3 whitespace-nowrap text-foreground">
+                  <tr key={day.date} className="transition-colors hover:bg-surface-hover max-sm:block max-sm:rounded-xl max-sm:border max-sm:border-border max-sm:p-3">
+                    <td className="px-5 py-3 whitespace-nowrap font-medium text-foreground max-sm:block max-sm:p-0">
                       <span className="flex items-center gap-2">
                         <CalendarDays className="size-3.5 shrink-0 text-foreground-muted" />
                         {d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
                       </span>
                     </td>
-                    <td className="px-5 py-3 whitespace-nowrap text-foreground-soft">
+                    <td className="px-5 py-3 whitespace-nowrap text-foreground-soft max-sm:hidden">
                       {d.toLocaleDateString(undefined, { weekday: "long" })}
                     </td>
-                    <td className="px-5 py-3 whitespace-nowrap text-foreground-soft">
+                    <td className="px-5 py-3 whitespace-nowrap text-foreground-soft max-sm:block max-sm:p-0 max-sm:pb-2 max-sm:text-xs">
                       {day.className} · {day.sectionName}
                     </td>
-                    <td className="px-5 py-3">
+                    <td className="px-5 py-3 max-sm:flex max-sm:items-center max-sm:justify-between max-sm:px-0 max-sm:py-1">
+                      <span className="text-xs text-foreground-muted sm:hidden">Morning</span>
                       <SessionCell session={day.sessions.MORNING} />
                     </td>
-                    <td className="px-5 py-3">
+                    <td className="px-5 py-3 max-sm:flex max-sm:items-center max-sm:justify-between max-sm:px-0 max-sm:py-1">
+                      <span className="text-xs text-foreground-muted sm:hidden">Afternoon</span>
                       <SessionCell session={day.sessions.AFTERNOON} />
                     </td>
                   </tr>

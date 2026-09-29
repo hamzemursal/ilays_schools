@@ -32,12 +32,18 @@ export default function StudentAttendanceHistoryPage({
   }, [accessToken, studentId]);
 
   const studentName = student ? `${student.firstName} ${student.lastName}` : "Student";
+  const enrollment = student?.enrollments.find((e) => e.status === "ACTIVE") ?? student?.enrollments[0];
+  const description = enrollment
+    ? `Student ID: ${enrollment.studentNumber} · ${enrollment.class.name} — Section ${enrollment.section.name}`
+    : undefined;
 
   return (
     <div>
       <PageHeader
-        eyebrow="Students"
-        title={`${studentName} — Attendance`}
+        variant="plain"
+        eyebrow="Attendance"
+        title={studentName}
+        description={description}
         breadcrumbs={[
           { label: "Dashboard", href: "/dashboard" },
           { label: "Students", href: `/schools/${schoolId}/students` },
@@ -45,7 +51,7 @@ export default function StudentAttendanceHistoryPage({
           { label: "Attendance" },
         ]}
       />
-      <div className="space-y-5 p-4 sm:p-6">
+      <div className="space-y-5 px-3 pb-8 pt-4 sm:px-5">
         {error ? (
           <Alert tone="danger">{error}</Alert>
         ) : !records ? (

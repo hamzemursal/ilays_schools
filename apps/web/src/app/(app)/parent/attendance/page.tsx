@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useAuth, ApiError } from "@/lib/auth-context";
-import { api, type MyChildAcademicYear, type MyChildAttendance, type MyChildSubject } from "@/lib/api";
+import { api, type MyChild, type MyChildAcademicYear, type MyChildAttendance, type MyChildSubject } from "@/lib/api";
 import { groupAttendanceByDate } from "@/lib/attendance";
+import { StudentMonthView } from "@/features/attendance/AttendanceUI";
 import { useSelectedChild } from "@/features/parent-portal/SelectedChildContext";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -11,7 +12,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
-import { StatTile } from "@/features/parent-portal/ParentUI";
+import { StatTile, initials } from "@/features/parent-portal/ParentUI";
 import { SO_ATTENDANCE, soDate, soStatus } from "@/features/parent-portal/so";
 import { Select } from "@/components/ui/FormControls";
 import {
@@ -67,7 +68,10 @@ export default function ParentAttendancePage() {
         ) : !selectedChild || !accessToken ? (
           <EmptyState icon={Users} title="Kor ka dooro ilmo" />
         ) : (
-          <YearPicker key={selectedChild.studentId} accessToken={accessToken} studentId={selectedChild.studentId} />
+          <>
+            <ChildStrip child={selectedChild} />
+            <YearPicker key={selectedChild.studentId} accessToken={accessToken} studentId={selectedChild.studentId} />
+          </>
         )}
       </div>
     </div>
@@ -117,7 +121,7 @@ function YearPicker({ accessToken, studentId }: { accessToken: string; studentId
             value={selectedYearId ?? ""}
             onChange={(e) => setSelectedYearId(e.target.value)}
             aria-label="Sannad-dugsiyeedka"
-            className="w-auto min-w-[180px]"
+            className="w-full sm:w-auto sm:min-w-[180px]"
           >
             {years.map((y) => (
               <option key={y.id} value={y.id}>
@@ -228,11 +232,13 @@ function YearAttendance({
         </div>
       </Card>
 
+      <StudentMonthView days={days} showHistory={false} />
+
       <Card padding="none" className="rounded-2xl">
         <CardHeader title="Xaadiriska maalinlaha" description={`${days.length} maalmood ayaa la diiwaangeliyay sannadkan.`} />
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+          <table className="w-full text-left text-sm sm:min-w-[640px]">
+            <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted max-sm:hidden">
               <tr>
                 <th className="px-5 py-2.5">Taariikhda</th>
                 <th className="px-5 py-2.5">Maalinta</th>
@@ -241,24 +247,26 @@ function YearAttendance({
                 <th className="px-5 py-2.5">Galab</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody className="divide-y divide-border max-sm:block max-sm:space-y-2 max-sm:divide-y-0 max-sm:p-3">
               {days.map((day) => {
                 const d = new Date(day.date);
                 return (
-                  <tr key={day.date}>
-                    <td className="px-5 py-3 whitespace-nowrap text-foreground">
+                  <tr key={day.date} className="max-sm:block max-sm:rounded-xl max-sm:border max-sm:border-border max-sm:p-3">
+                    <td className="px-5 py-3 whitespace-nowrap font-medium text-foreground max-sm:block max-sm:p-0">
                       {soDate(d, { day: "2-digit", month: "short", year: "numeric" })}
                     </td>
-                    <td className="px-5 py-3 whitespace-nowrap text-foreground-soft">
+                    <td className="px-5 py-3 whitespace-nowrap text-foreground-soft max-sm:hidden">
                       {soDate(d, { weekday: "long" })}
                     </td>
-                    <td className="px-5 py-3 whitespace-nowrap text-foreground-soft">
+                    <td className="px-5 py-3 whitespace-nowrap text-foreground-soft max-sm:block max-sm:p-0 max-sm:pb-2 max-sm:text-xs">
                       {day.className} · {day.sectionName}
                     </td>
-                    <td className="px-5 py-3">
+                    <td className="px-5 py-3 max-sm:flex max-sm:items-center max-sm:justify-between max-sm:px-0 max-sm:py-1">
+                      <span className="text-xs text-foreground-muted sm:hidden">Subax</span>
                       <SessionCell session={day.sessions.MORNING} />
                     </td>
-                    <td className="px-5 py-3">
+                    <td className="px-5 py-3 max-sm:flex max-sm:items-center max-sm:justify-between max-sm:px-0 max-sm:py-1">
+                      <span className="text-xs text-foreground-muted sm:hidden">Galab</span>
                       <SessionCell session={day.sessions.AFTERNOON} />
                     </td>
                   </tr>
@@ -269,5 +277,34 @@ function YearAttendance({
         </div>
       </Card>
     </>
+  );
+}
+
+// Who this page is about — read-only, straight from the linked child record.
+function ChildStrip({ child }: { child: MyChild }) {
+  const name = `${child.firstName} ${child.lastName}`;
+  const fields = [
+    { label: "Fasalka", value: child.enrollment?.className },
+    { label: "Qaybta", value: child.enrollment?.sectionName },
+    { label: "Sannad-dugsiyeedka", value: child.enrollment?.academicYearName },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-border bg-background p-4 shadow-sm">
+      <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-accent-soft text-base font-bold text-accent" aria-hidden>
+        {initials(name)}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-base font-semibold text-foreground">{name}</p>
+        <p className="text-xs text-foreground-muted">Xaadiriska waa akhris oo keliya — wax lagama beddeli karo halkan.</p>
+      </div>
+      <dl className="grid w-full grid-cols-3 gap-2 sm:w-auto">
+        {fields.map((f) => (
+          <div key={f.label} className="rounded-xl bg-surface-soft px-3 py-2">
+            <dt className="text-[11px] font-medium uppercase tracking-wide text-foreground-muted">{f.label}</dt>
+            <dd className="truncate text-sm font-semibold text-foreground">{f.value ?? "—"}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }

@@ -360,7 +360,7 @@ describe("AttendancePage — session selection", () => {
   it("defaults to Morning Session and loads attendance for it", async () => {
     renderPage();
     await waitFor(() => expect(apiMock.getAttendance).toHaveBeenCalledWith("token-1", "school-1", "section-1", expect.any(String), "MORNING"));
-    expect(screen.getByRole("combobox", { name: "Attendance Session" })).toHaveValue("MORNING");
+    expect(screen.getByRole("radio", { name: "Morning Session" })).toHaveAttribute("aria-checked", "true");
   });
 
   it("starts on Afternoon Session when the URL carries ?session=AFTERNOON", async () => {
@@ -375,7 +375,7 @@ describe("AttendancePage — session selection", () => {
     renderPage();
     await screen.findByText("Yusuf", { exact: false });
 
-    await user.selectOptions(screen.getByRole("combobox", { name: "Attendance Session" }), "AFTERNOON");
+    await user.click(screen.getByRole("radio", { name: "Afternoon Session" }));
 
     await waitFor(() =>
       expect(apiMock.getAttendance).toHaveBeenCalledWith("token-1", "school-1", "section-1", expect.any(String), "AFTERNOON"),
@@ -389,7 +389,7 @@ describe("AttendancePage — session selection", () => {
     renderPage();
     await screen.findByText("Yusuf", { exact: false });
 
-    await user.selectOptions(screen.getByRole("combobox", { name: "Attendance Session" }), "AFTERNOON");
+    await user.click(screen.getByRole("radio", { name: "Afternoon Session" }));
     await user.click(screen.getByRole("button", { name: "Save attendance" }));
 
     await waitFor(() =>
@@ -411,7 +411,7 @@ describe("AttendancePage — session selection", () => {
     await screen.findByText("Yusuf", { exact: false });
 
     await user.click(screen.getByRole("button", { name: "Absent" })); // makes it dirty
-    await user.selectOptions(screen.getByRole("combobox", { name: "Attendance Session" }), "AFTERNOON");
+    await user.click(screen.getByRole("radio", { name: "Afternoon Session" }));
 
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
   });

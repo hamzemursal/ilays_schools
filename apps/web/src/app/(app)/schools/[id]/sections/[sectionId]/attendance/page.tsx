@@ -6,16 +6,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type AttendanceRow, type AttendanceSession, type AttendanceSessionStatus, type AttendanceStatus } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { Card } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Avatar } from "@/components/ui/Avatar";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonTable } from "@/components/ui/Skeleton";
-import { FormField, Input, Select } from "@/components/ui/FormControls";
+import { FormField, Input } from "@/components/ui/FormControls";
 import { useToast } from "@/components/ui/Toast";
-import { CheckCircle2, CheckCheck, Circle, ClipboardCheck, FileClock, Save } from "lucide-react";
+import { CheckCircle2, CheckCheck, Circle, ClipboardCheck, FileClock, Moon, Save, Sun } from "lucide-react";
 import { UnsavedAttendanceDialog } from "@/features/attendance/UnsavedAttendanceDialog";
 
 // Attendance can't be taken for a day that hasn't happened yet — this caps
@@ -23,11 +21,11 @@ import { UnsavedAttendanceDialog } from "@/features/attendance/UnsavedAttendance
 // (AttendanceService.assertNotFutureDate) since a picker's max is UX only.
 const TODAY = new Date().toISOString().slice(0, 10);
 
-const STATUSES: { value: AttendanceStatus; label: string; on: string }[] = [
-  { value: "PRESENT", label: "Present", on: "bg-success text-white" },
-  { value: "ABSENT", label: "Absent", on: "bg-danger text-white" },
-  { value: "LATE", label: "Late", on: "bg-warning text-white" },
-  { value: "EXCUSED", label: "Excused", on: "bg-accent text-white" },
+const STATUSES: { value: AttendanceStatus; label: string; on: string; dot: string }[] = [
+  { value: "PRESENT", label: "Present", on: "bg-success text-white", dot: "bg-success" },
+  { value: "ABSENT", label: "Absent", on: "bg-danger text-white", dot: "bg-danger" },
+  { value: "LATE", label: "Late", on: "bg-warning text-white", dot: "bg-warning" },
+  { value: "EXCUSED", label: "Excused", on: "bg-violet-600 text-white", dot: "bg-violet-600" },
 ];
 
 // Labels only, never a clock time — this school-erp instance has no
@@ -220,90 +218,81 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
     }
   }
 
-  const title =
-    className && sectionName ? `${className} · ${sectionName}${subjectName ? ` — ${subjectName}` : ""}` : "Mark attendance";
+  const title = className && sectionName ? `${className} — Section ${sectionName}` : "Mark attendance";
+
+  const counts = STATUSES.map((st) => ({ ...st, count: rows?.filter((r) => pending[r.enrollmentId] === st.value).length ?? 0 }));
+  const savedCount = rows?.filter((r) => r.status !== null && !r.isDraft).length ?? 0;
+  const canViewProfile = user?.permissions.includes("students.view") ?? false;
 
   return (
     <div>
       <PageHeader
+        variant="plain"
         eyebrow="Attendance"
         title={title}
-        description={yearName ?? undefined}
+        description={[yearName, subjectName].filter(Boolean).join(" · ") || undefined}
         breadcrumbs={[{ label: backLabel, href: backHref }, { label: "Attendance" }]}
       />
 
-      <div className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
-        <Card>
-          <h2 className="text-sm font-semibold text-foreground">
-            Attendance Status — {new Date(date).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
-          </h2>
-          <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-            {SESSIONS.map((s) => {
-              const recorded = sessionStatus?.[s.value] ?? false;
-              return (
-                <div
-                  key={s.value}
-                  className={`flex items-center justify-between gap-3 rounded-lg border px-3.5 py-2.5 ${
-                    recorded ? "border-success/30 bg-success-soft" : "border-border bg-surface-soft"
-                  }`}
-                >
-                  <span className="text-sm font-medium text-foreground">{s.label}</span>
-                  {recorded ? (
-                    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-success">
-                      <CheckCircle2 className="size-4" /> Recorded
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 text-sm text-foreground-muted">
-                      <Circle className="size-4" /> Not Recorded
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-
-        <Card>
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div className="flex flex-wrap items-end gap-4">
-              <FormField label="Date" htmlFor="date" className="max-w-xs">
-                <Input
-                  id="date"
-                  type="date"
-                  value={date}
-                  max={TODAY}
-                  onChange={(e) => {
-                    const newDate = e.target.value;
-                    attemptAction(() => setDate(newDate));
-                  }}
-                />
-              </FormField>
-              <FormField label="Attendance Session" htmlFor="session" className="max-w-xs">
-                <Select
-                  id="session"
-                  value={session}
-                  onChange={(e) => {
-                    const newSession = e.target.value as AttendanceSession;
-                    attemptAction(() => setSession(newSession));
-                  }}
-                >
-                  {SESSIONS.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </Select>
-              </FormField>
-            </div>
-            {(className || subjectName) && (
-              <div className="flex flex-wrap gap-1.5">
-                {className && <Badge tone="accent">{className}{sectionName ? ` · ${sectionName}` : ""}</Badge>}
-                {subjectName && <Badge tone="accent">{subjectName}</Badge>}
-                {yearName && <Badge tone="neutral">{yearName}</Badge>}
+      <div className="mx-auto max-w-5xl space-y-4 px-3 pb-4 pt-4 sm:px-5">
+        <section className="rounded-2xl border border-border bg-background p-4 shadow-sm sm:p-5">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,14rem)_minmax(0,1fr)] md:items-end">
+            <FormField label="Date" htmlFor="date">
+              <Input
+                id="date"
+                type="date"
+                value={date}
+                max={TODAY}
+                className="h-11"
+                onChange={(e) => {
+                  const newDate = e.target.value;
+                  attemptAction(() => setDate(newDate));
+                }}
+              />
+            </FormField>
+            <div>
+              <h2 className="mb-1.5 text-sm font-medium text-foreground">
+                Attendance Status — {new Date(date).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
+              </h2>
+              <div role="radiogroup" aria-label="Attendance Session" className="grid grid-cols-2 gap-2 rounded-xl bg-surface p-1">
+                {SESSIONS.map((s) => {
+                  const active = session === s.value;
+                  const recorded = sessionStatus?.[s.value] ?? false;
+                  const Icon = s.value === "MORNING" ? Sun : Moon;
+                  return (
+                    <button
+                      key={s.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      aria-label={s.label}
+                      onClick={() => {
+                        if (!active) attemptAction(() => setSession(s.value));
+                      }}
+                      className={`flex min-h-12 items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                        active ? "bg-accent text-white shadow-sm" : "text-foreground-soft hover:bg-background"
+                      }`}
+                    >
+                      <Icon className="size-4 shrink-0" />
+                      <div className="min-w-0">
+                        <span className="block text-sm font-semibold">{s.label}</span>
+                        {recorded ? (
+                          <span className={`inline-flex items-center gap-1 text-xs ${active ? "text-white/90" : "text-success"}`}>
+                            <CheckCircle2 className="size-3" /> Recorded
+                          </span>
+                        ) : (
+                          <span className={`inline-flex items-center gap-1 text-xs ${active ? "text-white/80" : "text-foreground-muted"}`}>
+                            <Circle className="size-3" /> Not Recorded
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-            )}
+            </div>
           </div>
-        </Card>
+        </section>
 
         {error && <Alert tone="danger">{error}</Alert>}
 
@@ -318,87 +307,133 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
         ) : rows.length === 0 ? (
           <EmptyState icon={ClipboardCheck} title="No active students" description="This section has no active students to mark." />
         ) : (
-          <div className="space-y-2">
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                icon={<CheckCheck className="size-4" />}
-                onClick={() => setPending(Object.fromEntries(rows.map((r) => [r.enrollmentId, "PRESENT" as AttendanceStatus])))}
-              >
-                Mark all Present
-              </Button>
-            </div>
-            {rows.map((r) => {
-              const canViewProfile = user?.permissions.includes("students.view") ?? false;
-              const studentIdentity = (
-                <>
-                  <Avatar name={`${r.firstName} ${r.lastName}`} photoUrl={r.photoUrl} size="md" />
-                  <p className="font-medium text-foreground">
-                    <span className="text-foreground-muted">#{r.rollNumber}</span> {r.firstName} {r.lastName}
+          <>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              <div className="col-span-2 flex items-center justify-between gap-2 rounded-xl border border-border bg-background px-3.5 py-2.5 shadow-sm sm:col-span-1 sm:block">
+                <p className="text-xs font-medium text-foreground-muted">Recorded</p>
+                <p className="text-lg font-semibold tabular-nums text-foreground">
+                  {savedCount} <span className="text-sm font-normal text-foreground-muted">/ {rows.length}</span>
+                </p>
+              </div>
+              {counts.map((c) => (
+                <div key={c.value} className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background px-3.5 py-2.5 shadow-sm sm:block">
+                  <p className="flex items-center gap-1.5 text-xs font-medium text-foreground-muted">
+                    <span className={`size-2 rounded-full ${c.dot}`} aria-hidden /> {c.label}
                   </p>
-                </>
-              );
-              return (
-              <Card key={r.enrollmentId} padding="sm">
-                <div className="flex flex-col gap-2 p-2 sm:flex-row sm:items-center sm:justify-between">
-                  {canViewProfile ? (
-                    <Link href={`/schools/${schoolId}/students/${r.studentId}`} className="flex items-center gap-3 hover:opacity-80">
-                      {studentIdentity}
-                    </Link>
-                  ) : (
-                    <div className="flex items-center gap-3">{studentIdentity}</div>
-                  )}
-                  <div className="grid grid-cols-4 gap-1 sm:flex sm:gap-2">
-                    {STATUSES.map((s) => {
-                      const isOn = pending[r.enrollmentId] === s.value;
-                      return (
-                        <button
-                          key={s.value}
-                          type="button"
-                          onClick={() => setPending((prev) => ({ ...prev, [r.enrollmentId]: s.value }))}
-                          className={`rounded-lg border px-2 py-2.5 text-xs font-semibold transition-colors sm:px-3 sm:text-sm ${
-                            isOn ? s.on + " border-transparent" : "border-border text-foreground-soft hover:border-accent"
-                          }`}
-                        >
-                          {s.label}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <p className="text-lg font-semibold tabular-nums text-foreground">{c.count}</p>
                 </div>
-              </Card>
-              );
-            })}
-          </div>
-        )}
+              ))}
+            </div>
 
-        {rows && rows.length > 0 && (
-          <div className="flex flex-wrap items-center gap-3">
-            <Button icon={<CheckCircle2 className="size-4" />} loading={saving} onClick={save}>
-              Save attendance
-            </Button>
-            <Button
-              variant="outline"
-              icon={<Save className="size-4" />}
-              loading={savingDraft}
-              disabled={saving}
-              onClick={() => saveDraft(false)}
-            >
-              Save as draft
-            </Button>
-            {!isDirty && lastAction === "finalized" && (
-              <span className="text-sm text-success">
-                Saved — {rows.length} student(s) recorded for {new Date(date).toLocaleDateString()} ({SESSION_LABEL[session]}).
-              </span>
-            )}
-            {!isDirty && lastAction === "draft" && (
-              <span className="inline-flex items-center gap-1.5 text-sm text-warning">
-                <FileClock className="size-4" /> Saved as draft — not final yet.
-              </span>
-            )}
-          </div>
+            <section className="rounded-2xl border border-border bg-background shadow-sm" aria-label="Students">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
+                <p className="text-sm font-semibold text-foreground">
+                  {rows.length} student(s) · {SESSION_LABEL[session]}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  icon={<CheckCheck className="size-4" />}
+                  onClick={() => setPending(Object.fromEntries(rows.map((r) => [r.enrollmentId, "PRESENT" as AttendanceStatus])))}
+                >
+                  Mark all Present
+                </Button>
+              </div>
+              <div className="hidden grid-cols-[3rem_minmax(0,1fr)_auto] gap-4 bg-surface-soft px-5 py-2 text-xs font-semibold uppercase tracking-wide text-foreground-muted md:grid">
+                <span>#</span>
+                <span>Student</span>
+                <span>Attendance status</span>
+              </div>
+              <ul className="space-y-2 p-2 md:space-y-0 md:divide-y md:divide-border md:p-0">
+                {rows.map((r) => {
+                  const current = pending[r.enrollmentId];
+                  const studentIdentity = (
+                    <>
+                      <Avatar name={`${r.firstName} ${r.lastName}`} photoUrl={r.photoUrl} size="md" />
+                      <p className="min-w-0 truncate font-medium text-foreground">
+                        {r.firstName} {r.lastName}
+                      </p>
+                    </>
+                  );
+                  return (
+                    <li
+                      key={r.enrollmentId}
+                      className="grid gap-3 rounded-xl border border-border p-3 md:grid-cols-[3rem_minmax(0,1fr)_auto] md:items-center md:gap-4 md:rounded-none md:border-0 md:px-5 md:py-3"
+                    >
+                      <span className="hidden text-sm font-semibold tabular-nums text-foreground-muted md:block">#{r.rollNumber}</span>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="text-sm font-semibold tabular-nums text-foreground-muted md:hidden">#{r.rollNumber}</span>
+                        {canViewProfile ? (
+                          <Link
+                            href={`/schools/${schoolId}/students/${r.studentId}`}
+                            className="flex min-w-0 items-center gap-3 rounded-lg hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                          >
+                            {studentIdentity}
+                          </Link>
+                        ) : (
+                          <div className="flex min-w-0 items-center gap-3">{studentIdentity}</div>
+                        )}
+                      </div>
+                      <div
+                        className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:flex md:gap-1.5"
+                        role="group"
+                        aria-label={`Status for ${r.firstName} ${r.lastName}`}
+                      >
+                        {STATUSES.map((st) => {
+                          const isOn = current === st.value;
+                          return (
+                            <button
+                              key={st.value}
+                              type="button"
+                              aria-pressed={isOn}
+                              onClick={() => setPending((prev) => ({ ...prev, [r.enrollmentId]: st.value }))}
+                              className={`min-h-11 rounded-lg border px-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 md:min-h-9 md:min-w-[4.75rem] ${
+                                isOn
+                                  ? st.on + " border-transparent shadow-sm"
+                                  : "border-border bg-background text-foreground-soft hover:border-accent hover:text-foreground"
+                              }`}
+                            >
+                              {st.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+
+            <div className="sticky bottom-0 z-10 -mx-3 border-t border-border bg-background/95 px-3 py-3 backdrop-blur sm:bottom-3 sm:mx-0 sm:rounded-2xl sm:border sm:px-4 sm:shadow-lg">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                <Button icon={<CheckCircle2 className="size-4" />} loading={saving} onClick={save} className="flex-1 sm:flex-none">
+                  Save attendance
+                </Button>
+                <Button
+                  variant="outline"
+                  icon={<Save className="size-4" />}
+                  loading={savingDraft}
+                  disabled={saving}
+                  onClick={() => saveDraft(false)}
+                  className="flex-1 sm:flex-none"
+                >
+                  Save as draft
+                </Button>
+                {!isDirty && lastAction === "finalized" && (
+                  <span className="w-full text-sm text-success sm:w-auto">
+                    Saved — {rows.length} student(s) recorded for {new Date(date).toLocaleDateString()} ({SESSION_LABEL[session]}).
+                  </span>
+                )}
+                {!isDirty && lastAction === "draft" && (
+                  <span className="inline-flex w-full items-center gap-1.5 text-sm text-warning sm:w-auto">
+                    <FileClock className="size-4" /> Saved as draft — not final yet.
+                  </span>
+                )}
+                {isDirty && <span className="w-full text-xs text-foreground-muted sm:ml-auto sm:w-auto">Unsaved changes</span>}
+              </div>
+            </div>
+          </>
         )}
       </div>
 

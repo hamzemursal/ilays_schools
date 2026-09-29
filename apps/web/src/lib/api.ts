@@ -356,6 +356,8 @@ export interface StudentAttendanceRate {
 export interface StudentAttendanceHistoryRecord {
   id: string;
   date: string;
+  // Part of the full Attendance row the endpoint already returns.
+  session?: "MORNING" | "AFTERNOON";
   status: "PRESENT" | "ABSENT" | "LATE" | "EXCUSED";
   note: string | null;
   enrollment: {
@@ -1735,6 +1737,9 @@ export interface AttendanceHistoryRow {
   id: string;
   date: string;
   status: AttendanceStatus;
+  // Returned by the endpoint all along (the full Attendance row); typed here
+  // so the overview calendar can tell Morning from Afternoon.
+  session: AttendanceSession;
   note: string | null;
   enrollment: { rollNumber: number; student: { firstName: string; lastName: string } };
 }

@@ -188,14 +188,23 @@ export class GuardiansService {
     const guardians = await this.prisma.guardian.findMany({
       where: {
         status: "ACTIVE",
-        students: {
-          some: { student: { organizationId, enrollments: { some: { schoolId } } } },
-        },
-        OR: [
-          { firstName: { contains: query, mode: "insensitive" } },
-          { lastName: { contains: query, mode: "insensitive" } },
-          { phone: { contains: query } },
-          { email: { contains: query, mode: "insensitive" } },
+        AND: [
+          {
+            OR: [
+              { students: { some: { student: { organizationId, enrollments: { some: { schoolId } } } } } },
+              // A parent added on this school's Parents page before any child
+              // was linked — findable here so they can be assigned.
+              { students: { none: {} }, createdInSchoolId: schoolId },
+            ],
+          },
+          {
+            OR: [
+              { firstName: { contains: query, mode: "insensitive" } },
+              { lastName: { contains: query, mode: "insensitive" } },
+              { phone: { contains: query } },
+              { email: { contains: query, mode: "insensitive" } },
+            ],
+          },
         ],
       },
       include: {
@@ -228,7 +237,9 @@ export class GuardiansService {
       where: {
         id: guardianId,
         OR: [
-          { students: { none: {} } },
+          // A parent with no child yet belongs to the school that created
+          // them — never to every school.
+          { students: { none: {} }, createdInSchoolId: schoolId },
           { students: { some: { student: { enrollments: { some: { schoolId } } } } } },
         ],
       },
@@ -241,7 +252,13 @@ export class GuardiansService {
     await this.schools.findOneAccessibleOrThrow(actor, schoolId);
 
     const guardians = await this.prisma.guardian.findMany({
-      where: { students: { some: { student: { enrollments: { some: { schoolId } } } } } },
+      where: {
+        OR: [
+          { students: { some: { student: { enrollments: { some: { schoolId } } } } } },
+          // Added from this school's Parents page, no child linked yet.
+          { students: { none: {} }, createdInSchoolId: schoolId },
+        ],
+      },
       include: {
         user: { select: { id: true, email: true, status: true } },
         students: {
@@ -325,6 +342,7 @@ export class GuardiansService {
         phone: dto.phone,
         email: dto.email,
         address: dto.address,
+        createdInSchoolId: schoolId,
       },
     });
   }

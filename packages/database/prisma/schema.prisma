@@ -69,6 +69,7 @@ model School {
   feeStructures      FeeStructure[]
   importBatches      ImportBatch[]
   announcements      Announcement[]
+  createdGuardians   Guardian[]
 
   // Workforce / HR / Payroll / Finance foundation (Phase 1)
   departments        Department[]
@@ -440,6 +441,14 @@ model Guardian {
   address   String?
   status    GuardianStatus @default(ACTIVE)
 
+  // The school whose Parents page created this guardian (Add Parent). Once
+  // linked, a guardian's school comes from their children's enrollments —
+  // but a brand-new parent with no child yet needs this to appear in (and
+  // only in) that school's list. Null for guardians created before this
+  // existed, or created together with a student.
+  createdInSchoolId String?
+  createdInSchool   School? @relation(fields: [createdInSchoolId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -447,6 +456,7 @@ model Guardian {
   notifications Notification[]
 
   @@index([phone])
+  @@index([createdInSchoolId])
   @@map("guardians")
 }
 

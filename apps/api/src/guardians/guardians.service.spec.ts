@@ -111,8 +111,8 @@ describe("GuardiansService.searchForSchool", () => {
     await service.searchForSchool("org-1", "school-1", "Ahmed");
 
     const where = prisma.guardian.findMany.mock.calls[0][0].where;
-    expect(where.OR).toContainEqual({ firstName: { contains: "Ahmed", mode: "insensitive" } });
-    expect(where.OR).toContainEqual({ lastName: { contains: "Ahmed", mode: "insensitive" } });
+    expect(where.AND[1].OR).toContainEqual({ firstName: { contains: "Ahmed", mode: "insensitive" } });
+    expect(where.AND[1].OR).toContainEqual({ lastName: { contains: "Ahmed", mode: "insensitive" } });
   });
 
   it("searches by phone", async () => {
@@ -122,7 +122,7 @@ describe("GuardiansService.searchForSchool", () => {
     await service.searchForSchool("org-1", "school-1", "0611111111");
 
     const where = prisma.guardian.findMany.mock.calls[0][0].where;
-    expect(where.OR).toContainEqual({ phone: { contains: "0611111111" } });
+    expect(where.AND[1].OR).toContainEqual({ phone: { contains: "0611111111" } });
   });
 
   it("searches by email", async () => {
@@ -132,7 +132,7 @@ describe("GuardiansService.searchForSchool", () => {
     await service.searchForSchool("org-1", "school-1", "ahmed@example.com");
 
     const where = prisma.guardian.findMany.mock.calls[0][0].where;
-    expect(where.OR).toContainEqual({ email: { contains: "ahmed@example.com", mode: "insensitive" } });
+    expect(where.AND[1].OR).toContainEqual({ email: { contains: "ahmed@example.com", mode: "insensitive" } });
   });
 
   it("scopes results to guardians linked to a student enrolled at this school within this organization", async () => {
@@ -142,9 +142,11 @@ describe("GuardiansService.searchForSchool", () => {
     await service.searchForSchool("org-1", "school-1", "Ahmed");
 
     const where = prisma.guardian.findMany.mock.calls[0][0].where;
-    expect(where.students).toEqual({
-      some: { student: { organizationId: "org-1", enrollments: { some: { schoolId: "school-1" } } } },
-    });
+    expect(where.AND[0].OR).toEqual([
+      { students: { some: { student: { organizationId: "org-1", enrollments: { some: { schoolId: "school-1" } } } } } },
+      // ...or a parent added on this school's Parents page with no child yet.
+      { students: { none: {} }, createdInSchoolId: "school-1" },
+    ]);
   });
 
   it("includes how many students (in this school) each result is already linked to", async () => {

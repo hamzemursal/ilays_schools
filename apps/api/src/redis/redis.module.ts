@@ -10,8 +10,17 @@ const logger = new Logger("Redis");
   providers: [
     {
       provide: REDIS_CLIENT,
-      useFactory: () => {
-        const client = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
+      // Redis is optional: nothing in the API depends on it today except the
+      // health check. With no REDIS_URL set (e.g. the hosted API), there is
+      // no client at all — rather than a client retrying a localhost Redis
+      // that doesn't exist and filling the logs with connection errors.
+      useFactory: (): Redis | null => {
+        const url = process.env.REDIS_URL;
+        if (!url) {
+          logger.log("REDIS_URL not set — Redis disabled");
+          return null;
+        }
+        const client = new Redis(url, {
           // Cap reconnect backoff instead of retrying a down Redis every
           // couple of seconds forever, and never let a command queue
           // indefinitely while disconnected — HealthController (the one

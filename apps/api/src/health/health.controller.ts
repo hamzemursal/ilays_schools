@@ -8,7 +8,7 @@ import { Public } from "../auth/decorators/public.decorator";
 export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
   ) {}
 
   @Public()
@@ -32,7 +32,9 @@ export class HealthController {
     }
   }
 
+  // Not configured is not a failure: Redis is optional (see RedisModule).
   private async checkRedis() {
+    if (!this.redis) return { ok: true, configured: false };
     try {
       const pong = await this.redis.ping();
       return { ok: pong === "PONG" };

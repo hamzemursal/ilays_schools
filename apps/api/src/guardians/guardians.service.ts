@@ -607,6 +607,16 @@ export class GuardiansService {
       hasPortalAccount: !!guardian.user,
       portalAccountStatus: guardian.user?.status ?? null,
       ...studentAccessFor(guardian.students, schoolId),
+      // How this parent is related to every child they are actively linked
+      // to here — current AND former — so a parent with only former
+      // children still shows e.g. FATHER instead of a blank.
+      relationships: [
+        ...new Set(
+          guardian.students
+            .filter((sg) => sg.status === "ACTIVE" && sg.student.enrollments.some((e) => e.schoolId === schoolId))
+            .map((sg) => sg.relationship),
+        ),
+      ],
       children: childrenInThisSchool.map((sg) => {
         const active = sg.student.enrollments.find((e) => e.schoolId === schoolId && e.status === "ACTIVE")!;
         return {

@@ -434,6 +434,8 @@ export interface ParentListItem {
   studentAccess: StudentAccess;
   activeChildren: number;
   formerChildren: number;
+  // Relationship to every linked child here, current and former.
+  relationships: GuardianRelationship[];
   // Current (actively enrolled) children only.
   children: ParentChildSummary[];
 }

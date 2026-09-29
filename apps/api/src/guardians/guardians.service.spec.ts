@@ -457,6 +457,53 @@ describe("studentAccessFor — derived Student Access, separate from the portal 
   });
 });
 
+describe("GuardiansService.list — relationships include former children", () => {
+  it("a parent with only a former child still shows their relationship, while children stays current-only", async () => {
+    const enrollment = (status: string) => ({
+      schoolId: "s1",
+      status,
+      class: { name: "Form 4" },
+      section: { name: "A" },
+      academicYear: { name: "2026" },
+      school: { name: "SYL" },
+    });
+    const prisma = {
+      guardian: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: "g1",
+            guardianCode: "PAR-1",
+            firstName: "Xafaa",
+            lastName: "Cali",
+            phone: null,
+            email: null,
+            address: null,
+            status: "ACTIVE",
+            user: null,
+            students: [
+              {
+                studentId: "st1",
+                relationship: "FATHER",
+                isPrimaryContact: false,
+                status: "ACTIVE",
+                student: { firstName: "A", lastName: "B", enrollments: [enrollment("GRADUATED")] },
+              },
+            ],
+          },
+        ]),
+      },
+    };
+    const schools = { findOneAccessibleOrThrow: jest.fn().mockResolvedValue(undefined) };
+    const service = new GuardiansService(prisma as unknown as PrismaService, schools as unknown as SchoolsService, {} as unknown as AuditService);
+
+    const [row] = await service.list({ id: "u", roles: [], permissions: [], schoolIds: [] } as unknown as AuthenticatedUser, "s1");
+
+    expect(row.relationships).toEqual(["FATHER"]);
+    expect(row.children).toEqual([]);
+    expect(row.studentAccess).toBe("FORMER_STUDENTS_ONLY");
+  });
+});
+
 describe("GuardiansService.assertGuardianCanAccessStudent — former children stay readable, others never", () => {
   function build(link: unknown) {
     const prisma = {

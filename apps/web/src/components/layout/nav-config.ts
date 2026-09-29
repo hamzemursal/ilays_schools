@@ -166,14 +166,15 @@ export function orgNavItems(user: Profile): NavItem[] {
 export function parentNavItems(user: Profile): NavItem[] {
   if (!user.roles.includes("PARENT")) return [];
   return [
-    { label: "Dashboard", href: "/parent", icon: LayoutDashboard },
-    { label: "My Children", href: "/parent/children", icon: Users },
-    { label: "Academics", href: "/parent/academics", icon: GraduationCap },
-    { label: "Attendance", href: "/parent/attendance", icon: ClipboardCheck },
-    { label: "Fees", href: "/parent/fees", icon: Wallet },
-    { label: "Announcements", href: "/parent/announcements", icon: Megaphone },
-    { label: "Notifications", href: "/parent/notifications", icon: Bell },
-    { label: "Profile", href: "/parent/profile", icon: UserCircle },
+    // Shown in Somali: the Parent Portal is a Somali-language portal.
+    { label: "Bogga Hore", href: "/parent", icon: LayoutDashboard },
+    { label: "Carruurtayda", href: "/parent/children", icon: Users },
+    { label: "Waxbarashada", href: "/parent/academics", icon: GraduationCap },
+    { label: "Xaadiriska", href: "/parent/attendance", icon: ClipboardCheck },
+    { label: "Lacagaha", href: "/parent/fees", icon: Wallet },
+    { label: "Ogeysiisyada", href: "/parent/announcements", icon: Megaphone },
+    { label: "Fariimaha", href: "/parent/notifications", icon: Bell },
+    { label: "Xogtayda", href: "/parent/profile", icon: UserCircle },
   ];
 }
 

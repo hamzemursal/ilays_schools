@@ -4,52 +4,48 @@ import { useCallback, useEffect, useState } from "react";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { api, type MyChildSubject, type MyResultsReport, type PortalTermResults } from "@/lib/api";
 import { useSelectedChild } from "@/features/parent-portal/SelectedChildContext";
+import { CHILD_TONES, PillTabs } from "@/features/parent-portal/ParentUI";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { PortalResults, ResultsSummary } from "@/features/portal-results/PortalResults";
-import { BookOpen, TrendingUp, Users } from "lucide-react";
+import { PortalLocaleProvider } from "@/lib/portal-locale";
+import { BookOpen, TrendingUp, UserSquare2, Users } from "lucide-react";
 
-const TABS = ["Subjects", "Exams & Results", "Performance"] as const;
+const TABS = ["Maaddooyinka", "Imtixaannada & Natiijooyinka", "Horumarka"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function AcademicsPage() {
   const { accessToken } = useAuth();
   const { selectedChild, loading: childrenLoading, children } = useSelectedChild();
-  const [tab, setTab] = useState<Tab>("Subjects");
+  const [tab, setTab] = useState<Tab>("Maaddooyinka");
 
   return (
     <div>
-      <PageHeader eyebrow="Parent Portal" title="Academics" description="Subjects, exam results, and performance." />
+      <PageHeader
+        variant="plain"
+        eyebrow="Portal-ka Waalidka"
+        title="Waxbarashada"
+        description={
+          selectedChild
+            ? `Maaddooyinka, natiijooyinka imtixaannada iyo horumarka ${selectedChild.firstName}.`
+            : "Maaddooyinka, natiijooyinka imtixaannada iyo horumarka."
+        }
+      />
 
-      <div className="border-b border-border px-4 sm:px-6">
-        <div className="flex gap-1 overflow-x-auto">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`shrink-0 border-b-2 px-3 py-3 text-sm font-medium transition-colors ${
-                tab === t ? "border-accent text-accent" : "border-transparent text-foreground-soft hover:text-foreground"
-              }`}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="p-4 sm:p-6">
+      <div className="space-y-5 px-3 pb-8 pt-4 sm:px-5">
+        <PillTabs tabs={TABS} active={tab} onChange={setTab} />
         {childrenLoading ? (
           <SkeletonCards count={2} />
         ) : children.length === 0 ? (
-          <EmptyState icon={Users} title="No children linked yet" />
+          <EmptyState icon={Users} title="Weli ilmo laguma xirin akoonkaaga" />
         ) : !selectedChild || !accessToken ? (
-          <EmptyState icon={Users} title="Select a child above" />
-        ) : tab === "Subjects" ? (
+          <EmptyState icon={Users} title="Kor ka dooro ilmo" />
+        ) : tab === "Maaddooyinka" ? (
           <SubjectsTab key={selectedChild.studentId} accessToken={accessToken} studentId={selectedChild.studentId} />
-        ) : tab === "Exams & Results" ? (
+        ) : tab === "Imtixaannada & Natiijooyinka" ? (
           <ResultsTab key={selectedChild.studentId} accessToken={accessToken} studentId={selectedChild.studentId} />
         ) : (
           <PerformanceTab key={selectedChild.studentId} accessToken={accessToken} studentId={selectedChild.studentId} />
@@ -67,26 +63,35 @@ function SubjectsTab({ accessToken, studentId }: { accessToken: string; studentI
     api
       .getMyChildSubjects(accessToken, studentId)
       .then(setSubjects)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load subjects"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Lama soo rarin maaddooyinka"));
   }, [accessToken, studentId]);
 
   if (error) return <Alert tone="danger">{error}</Alert>;
   if (!subjects) return <SkeletonCards count={2} />;
-  if (subjects.length === 0) return <EmptyState icon={BookOpen} title="No subjects assigned yet" />;
+  if (subjects.length === 0) return <EmptyState icon={BookOpen} title="Weli maaddo looma qoondeyn" />;
 
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {subjects.map((s) => (
-        <Card key={s.subjectId}>
-          <p className="font-medium text-foreground">
-            {s.name}
-            {s.code && <span className="ml-1 font-mono text-xs text-foreground-muted">· {s.code}</span>}
-          </p>
-          <p className="mt-1 text-sm text-foreground-soft">
-            {s.teacher ? `Teacher: ${s.teacher.firstName} ${s.teacher.lastName}` : "No teacher assigned yet"}
-          </p>
-        </Card>
-      ))}
+      {subjects.map((s, i) => {
+        const tone = CHILD_TONES[i % CHILD_TONES.length];
+        return (
+          <div key={s.subjectId} className="flex items-start gap-3 rounded-2xl border border-border bg-background p-4 shadow-sm">
+            <span className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${tone.soft} ${tone.text}`}>
+              <BookOpen className="size-5" />
+            </span>
+            <div className="min-w-0">
+              <p className="font-semibold text-foreground">
+                {s.name}
+                {s.code && <span className="ml-1 font-mono text-xs text-foreground-muted">· {s.code}</span>}
+              </p>
+              <p className="mt-1 flex items-center gap-1.5 text-sm text-foreground-soft">
+                <UserSquare2 className="size-3.5 shrink-0 text-foreground-muted" />
+                {s.teacher ? `Macallinka: ${s.teacher.firstName} ${s.teacher.lastName}` : "Weli macallin looma qoondeyn"}
+              </p>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -98,9 +103,11 @@ function ResultsTab({ accessToken, studentId }: { accessToken: string; studentId
     [accessToken, studentId],
   );
   return (
-    <div className="space-y-5">
-      <PortalResults loadYears={loadYears} loadReport={loadReport} />
-    </div>
+    <PortalLocaleProvider locale="so">
+      <div className="space-y-5">
+        <PortalResults loadYears={loadYears} loadReport={loadReport} />
+      </div>
+    </PortalLocaleProvider>
   );
 }
 
@@ -133,36 +140,38 @@ function PerformanceTab({ accessToken, studentId }: { accessToken: string; stude
     api
       .getMyChildResultsReport(accessToken, studentId)
       .then(setReport)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load performance"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Lama soo rarin horumarka"));
   }, [accessToken, studentId]);
 
   if (error) return <Alert tone="danger">{error}</Alert>;
   if (!report) return <SkeletonCards count={1} />;
 
   const averages = subjectAverages(report.terms);
-  if (averages.length === 0) return <EmptyState icon={TrendingUp} title="No published results yet" />;
+  if (averages.length === 0) return <EmptyState icon={TrendingUp} title="Weli natiijo lama daabicin" />;
 
   return (
     <div className="space-y-5">
       <p className="text-sm text-foreground-soft">
-        {report.academicYear.name} · {report.enrollment.className} · Section {report.enrollment.sectionName}
+        {report.academicYear.name} · {report.enrollment.className} · Fasalka {report.enrollment.sectionName}
       </p>
-      <ResultsSummary report={report} />
+      <PortalLocaleProvider locale="so">
+        <ResultsSummary report={report} />
+      </PortalLocaleProvider>
 
-      <Card padding="none">
-        <CardHeader title="Average by subject" description={`Across the published results of ${report.academicYear.name}.`} />
+      <Card padding="none" className="rounded-2xl">
+        <CardHeader title="Celceliska maaddo kasta" description={`Natiijooyinka la daabacay ee ${report.academicYear.name}.`} />
         <div className="divide-y divide-border">
           {averages.map((s) => (
-            <div key={s.name} className="flex items-center justify-between px-5 py-3">
+            <div key={s.name} className="flex items-center justify-between gap-3 px-5 py-3">
               <span className="text-sm font-medium text-foreground">{s.name}</span>
               <div className="flex items-center gap-3">
-                <div className="h-1.5 w-32 overflow-hidden rounded-full bg-surface">
+                <div className="h-2 w-32 overflow-hidden rounded-full bg-surface sm:w-48">
                   <div
                     className="h-full rounded-full bg-accent"
                     style={{ width: `${Math.min(100, s.average)}%` }}
                   />
                 </div>
-                <span className="w-12 text-right text-sm text-foreground-soft">{s.average}%</span>
+                <span className="w-12 text-right text-sm font-semibold tabular-nums text-foreground">{s.average}%</span>
               </div>
             </div>
           ))}

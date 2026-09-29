@@ -4,7 +4,8 @@ import type { Profile } from "@/lib/api";
 import { ToastProvider } from "@/components/ui/Toast";
 import { Sidebar } from "./Sidebar";
 
-vi.mock("next/navigation", () => ({ usePathname: () => "/dashboard" }));
+const pathnameMock = vi.hoisted(() => ({ value: "/dashboard" }));
+vi.mock("next/navigation", () => ({ usePathname: () => pathnameMock.value }));
 
 function profile(overrides: Partial<Profile> = {}): Profile {
   return {
@@ -86,5 +87,24 @@ describe("Sidebar branding — no school in context (e.g. Parent/Student outside
 
     expect(screen.getByText("Ilays Schools")).toBeInTheDocument();
     expect(screen.queryByText("Super Admin")).not.toBeInTheDocument();
+  });
+});
+
+describe("Sidebar — Parent Portal", () => {
+  it("shows the Parent Portal menu in Somali, with only the current page active (not also Bogga Hore)", () => {
+    pathnameMock.value = "/parent/profile";
+    renderSidebar({ user: profile({ roles: ["PARENT"] }) });
+
+    expect(screen.getByText("Portal-ka Waalidka")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Xogtayda" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Bogga Hore" })).not.toHaveAttribute("aria-current");
+    pathnameMock.value = "/dashboard";
+  });
+
+  it("marks Bogga Hore active on the portal home itself", () => {
+    pathnameMock.value = "/parent";
+    renderSidebar({ user: profile({ roles: ["PARENT"] }) });
+    expect(screen.getByRole("link", { name: "Bogga Hore" })).toHaveAttribute("aria-current", "page");
+    pathnameMock.value = "/dashboard";
   });
 });

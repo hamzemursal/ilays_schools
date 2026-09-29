@@ -13,10 +13,16 @@ export function ChildSwitcher() {
   if (loading || children.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-2 border-b border-border bg-surface-soft px-4 py-2.5 sm:px-6">
-      <Users className="size-4 shrink-0 text-foreground-muted" />
-      <span className="shrink-0 text-sm text-foreground-soft">Selected child:</span>
+    <div className="px-3 pt-3 sm:px-5">
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-background px-4 py-2.5 shadow-sm">
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
+        <Users className="size-4" />
+      </span>
+      <label htmlFor="selected-child" className="shrink-0 text-sm font-medium text-foreground-soft">
+        Ilmaha la doortay:
+      </label>
       <Select
+        id="selected-child"
         value={selectedChildId ?? ""}
         onChange={(e) => setSelectedChildId(e.target.value)}
         className="w-auto max-w-xs"
@@ -28,6 +34,7 @@ export function ChildSwitcher() {
           </option>
         ))}
       </Select>
+      </div>
     </div>
   );
 }

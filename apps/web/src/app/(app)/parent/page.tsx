@@ -1,78 +1,72 @@
 "use client";
 
-import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { api, type MyGuardianProfile } from "@/lib/api";
 import { useSelectedChild } from "@/features/parent-portal/SelectedChildContext";
+import { ChildCard, StatTile } from "@/features/parent-portal/ParentUI";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { Card } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
+import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
-import { GraduationCap, Users } from "lucide-react";
+import { GraduationCap, School as SchoolIcon, Star, Users } from "lucide-react";
 
 export default function ParentDashboardPage() {
-  const { user } = useAuth();
+  const { accessToken, user } = useAuth();
   const { children, loading, error, setSelectedChildId } = useSelectedChild();
+  const [profile, setProfile] = useState<MyGuardianProfile | null>(null);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    api.getMyParentProfile(accessToken).then(setProfile).catch(() => undefined);
+  }, [accessToken]);
+
+  const name = profile ? `${profile.firstName} ${profile.lastName}` : (user?.email ?? "");
+  const schools = new Set(children.map((c) => c.enrollment?.schoolName).filter(Boolean));
+  const enrolled = children.filter((c) => c.enrollment).length;
 
   return (
     <div>
       <PageHeader
-        eyebrow="Parent Portal"
-        title={`Welcome, ${user?.email ?? "Parent"}`}
-        description="An overview of your children enrolled in Ilays Schools."
+        variant="plain"
+        eyebrow="Portal-ka Waalidka"
+        title={`Ku soo dhawoow, ${name}`}
+        description="Halkan waxaad ka aragtaa carruurtaada, natiijooyinkooda, xaadiriskooda iyo lacagahooda."
       />
 
-      <div className="space-y-5 p-4 sm:p-6">
+      <div className="space-y-5 px-3 pb-8 pt-4 sm:px-5">
         {error ? (
           <Alert tone="danger">{error}</Alert>
         ) : loading ? (
           <SkeletonCards count={3} />
         ) : children.length === 0 ? (
-          <EmptyState
-            icon={Users}
-            title="No children linked yet"
-            description="Ask your school's admin to link your account to your child's student profile."
-          />
+          <Card className="rounded-2xl">
+            <EmptyState
+              icon={Users}
+              title="Weli ilmo laguma xirin akoonkaaga"
+              description="Maamulka dugsiga ka codso inay akoonkaaga ku xiraan xogta ilmahaaga."
+            />
+          </Card>
         ) : (
-          <div>
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-foreground-muted">My Children</h2>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {children.map((c) => (
-                <Card key={c.studentId}>
-                  <div className="flex items-start gap-3">
-                    <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent">
-                      <GraduationCap className="size-5" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-semibold text-foreground">
-                        {c.firstName} {c.lastName}
-                      </p>
-                      {c.enrollment ? (
-                        <p className="mt-0.5 text-sm text-foreground-soft">
-                          {c.enrollment.className} · {c.enrollment.sectionName}
-                        </p>
-                      ) : (
-                        <p className="mt-0.5 text-sm text-foreground-muted">Not currently enrolled</p>
-                      )}
-                      {c.enrollment && (
-                        <p className="mt-0.5 text-xs text-foreground-muted">{c.enrollment.academicYearName}</p>
-                      )}
-                      <div className="mt-2">
-                        <Badge tone={c.currentStatus === "ACTIVE" ? "success" : "neutral"}>{c.currentStatus}</Badge>
-                      </div>
-                    </div>
-                  </div>
-                  <Link href="/parent/children" className="mt-4 block" onClick={() => setSelectedChildId(c.studentId)}>
-                    <Button size="sm" variant="outline" className="w-full">
-                      View
-                    </Button>
-                  </Link>
-                </Card>
-              ))}
+          <>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <StatTile icon={Users} tone="bg-accent-soft text-accent" label="Carruurta" value={children.length} />
+              <StatTile icon={GraduationCap} tone="bg-violet-50 text-violet-600" label="Kuwa hadda dhigta" value={enrolled} />
+              <StatTile icon={SchoolIcon} tone="bg-teal-50 text-teal-600" label="Dugsiyada" value={schools.size} />
             </div>
-          </div>
+
+            <section aria-label="Carruurtayda">
+              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-foreground-soft">
+                <Star className="size-4 text-accent" /> Carruurtayda
+              </h2>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {children.map((c, i) => (
+                  <ChildCard key={c.studentId} child={c} index={i} quickLinks onSelect={() => setSelectedChildId(c.studentId)} />
+                ))}
+              </div>
+            </section>
+          </>
         )}
       </div>
     </div>

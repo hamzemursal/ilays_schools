@@ -78,8 +78,8 @@ describe("ParentAttendancePage — two-session rendering", () => {
     // "Present" is ambiguous with the summary StatCard's own label above the
     // table — scope to the row via its Class/Section cell instead.
     const row = (await screen.findByText("Class 1 · A")).closest("tr")!;
-    expect(within(row).getByText("PRESENT")).toBeInTheDocument();
-    expect(within(row).getByText("ABSENT")).toBeInTheDocument();
+    expect(within(row).getByText("Joogay")).toBeInTheDocument();
+    expect(within(row).getByText("Maqnaa")).toBeInTheDocument();
   });
 
   it("shows 'Not Recorded' for the afternoon when only the morning session has been marked — never as Absent", async () => {
@@ -87,8 +87,8 @@ describe("ParentAttendancePage — two-session rendering", () => {
     render(<ParentAttendancePage />);
 
     const row = (await screen.findByText("Class 1 · A")).closest("tr")!;
-    expect(within(row).getByText("Not Recorded")).toBeInTheDocument();
-    expect(within(row).queryByText("ABSENT")).not.toBeInTheDocument();
+    expect(within(row).getByText("Lama qorin")).toBeInTheDocument();
+    expect(within(row).queryByText("Maqnaa")).not.toBeInTheDocument();
   });
 
   it("shows both sessions Present on a fully-attended day", async () => {
@@ -101,7 +101,7 @@ describe("ParentAttendancePage — two-session rendering", () => {
     render(<ParentAttendancePage />);
 
     const row = (await screen.findByText("Class 1 · A")).closest("tr")!;
-    expect(within(row).getAllByText("PRESENT")).toHaveLength(2);
+    expect(within(row).getAllByText("Joogay")).toHaveLength(2);
   });
 
   it("groups two same-day session records into a single row, not two", async () => {
@@ -113,13 +113,13 @@ describe("ParentAttendancePage — two-session rendering", () => {
     );
     render(<ParentAttendancePage />);
 
-    await screen.findByText("1 day(s) recorded this year.");
+    await screen.findByText("1 maalmood ayaa la diiwaangeliyay sannadkan.");
   });
 
   it("shows an empty state when nothing has been recorded", async () => {
     apiMock.getMyChildAttendance.mockResolvedValue(attendance([]));
     render(<ParentAttendancePage />);
-    expect(await screen.findByText("No attendance records found for this year")).toBeInTheDocument();
+    expect(await screen.findByText("Sannadkan xaadiris lama diiwaangelin")).toBeInTheDocument();
   });
 });
 
@@ -147,23 +147,23 @@ describe("ParentAttendancePage — every Morning / Afternoon combination stays d
     );
     render(<ParentAttendancePage />);
 
-    await screen.findByText("4 day(s) recorded this year.");
+    await screen.findByText("4 maalmood ayaa la diiwaangeliyay sannadkan.");
     const rows = screen.getAllByText("Class 1 · A").map((c) => c.closest("tr")!);
     // Newest date first.
     const [notRecorded, absentPresent, presentAbsent, presentPresent] = rows.map(sessionCells);
 
-    expect(presentPresent.morning).toHaveTextContent("PRESENT");
-    expect(presentPresent.afternoon).toHaveTextContent("PRESENT");
+    expect(presentPresent.morning).toHaveTextContent("Joogay");
+    expect(presentPresent.afternoon).toHaveTextContent("Joogay");
 
-    expect(presentAbsent.morning).toHaveTextContent("PRESENT");
-    expect(presentAbsent.afternoon).toHaveTextContent("ABSENT");
+    expect(presentAbsent.morning).toHaveTextContent("Joogay");
+    expect(presentAbsent.afternoon).toHaveTextContent("Maqnaa");
 
-    expect(absentPresent.morning).toHaveTextContent("ABSENT");
-    expect(absentPresent.afternoon).toHaveTextContent("PRESENT");
+    expect(absentPresent.morning).toHaveTextContent("Maqnaa");
+    expect(absentPresent.afternoon).toHaveTextContent("Joogay");
 
-    expect(notRecorded.morning).toHaveTextContent("PRESENT");
-    expect(notRecorded.afternoon).toHaveTextContent("Not Recorded");
-    expect(notRecorded.afternoon).not.toHaveTextContent("ABSENT");
+    expect(notRecorded.morning).toHaveTextContent("Joogay");
+    expect(notRecorded.afternoon).toHaveTextContent("Lama qorin");
+    expect(notRecorded.afternoon).not.toHaveTextContent("Maqnaa");
   });
 
   it("a morning that was never recorded is Not Recorded (not Absent) even when the afternoon was marked", async () => {
@@ -172,16 +172,16 @@ describe("ParentAttendancePage — every Morning / Afternoon combination stays d
 
     const { morning, afternoon } = sessionCells((await screen.findByText("Class 1 · A")).closest("tr")!);
 
-    expect(morning).toHaveTextContent("Not Recorded");
-    expect(morning).not.toHaveTextContent("ABSENT");
-    expect(afternoon).toHaveTextContent("PRESENT");
+    expect(morning).toHaveTextContent("Lama qorin");
+    expect(morning).not.toHaveTextContent("Maqnaa");
+    expect(afternoon).toHaveTextContent("Joogay");
   });
 
   it("explains that Not Recorded is not Absent, and labels the summary count as sessions rather than days", async () => {
     apiMock.getMyChildAttendance.mockResolvedValue(attendance([day("f1", "2026-09-19", "MORNING", "PRESENT")]));
     render(<ParentAttendancePage />);
 
-    expect(await screen.findByText(/never\s+counted as Absent/)).toBeInTheDocument();
+    expect(await screen.findByText(/marna looma xisaabo\s+Maqnaa/)).toBeInTheDocument();
     expect(screen.queryByText("Total days")).not.toBeInTheDocument();
   });
 

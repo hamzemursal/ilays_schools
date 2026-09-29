@@ -27,6 +27,26 @@ import { orgNavItems, schoolNavItems, type NavItem } from "./nav-config";
 import { SchoolTypeBadge } from "@/features/my-classes/components/SchoolTypeBadge";
 import { DECORATIVE_TONE_PARTS } from "@/components/ui/decorativeTones";
 import { useSchoolIdentity } from "@/lib/useSchoolIdentity";
+import { isParentOnly } from "@/lib/portal-locale";
+
+const TOPBAR_TEXT = {
+  en: {
+    jump: "Jump to a page…",
+    notifications: "Notifications",
+    loading: "Loading…",
+    caughtUp: "You're all caught up — nothing new yet.",
+    myAccount: "My Account",
+    signOut: "Sign out",
+  },
+  so: {
+    jump: "U gudub bog…",
+    notifications: "Fariimaha",
+    loading: "Waa la soo rarayaa…",
+    caughtUp: "Wax cusub ma jiraan hadda.",
+    myAccount: "Akoonkayga",
+    signOut: "Ka bax",
+  },
+} as const;
 
 // "SCHOOL_ADMIN" -> "School Admin" — the account's first role, as shown
 // under the email in the header.
@@ -132,6 +152,8 @@ export function Topbar({
   }, []);
 
   if (!user) return null;
+  const somali = isParentOnly(user);
+  const text = TOPBAR_TEXT[somali ? "so" : "en"];
 
   function goTo(href: string) {
     setSearchOpen(false);
@@ -211,11 +233,11 @@ export function Topbar({
         ) : (
           <button
             onClick={() => setSearchOpen(true)}
-            aria-label="Jump to a page"
+            aria-label={somali ? text.jump : "Jump to a page"}
             className="flex w-full items-center gap-2.5 rounded-xl border border-border bg-surface-soft px-3.5 py-2.5 text-sm text-foreground-muted transition-colors hover:border-border-strong hover:bg-background"
           >
             <Search className="size-4 shrink-0 text-foreground-soft" />
-            <span className="hidden truncate sm:inline">Jump to a page…</span>
+            <span className="hidden truncate sm:inline">{text.jump}</span>
           </button>
         )}
       </div>
@@ -228,7 +250,7 @@ export function Topbar({
               setUserMenuOpen(false);
             }}
             className="relative rounded-xl p-2.5 text-foreground-soft hover:bg-surface-hover"
-            aria-label="Notifications"
+            aria-label={text.notifications}
           >
             <Bell className="size-5" />
             {unreadCount > 0 && (
@@ -241,11 +263,11 @@ export function Topbar({
             <>
               <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
               <div className="absolute right-0 z-50 mt-2 w-80 rounded-xl border border-border bg-background p-4 shadow-lg">
-                <p className="text-sm font-semibold text-foreground">Notifications</p>
+                <p className="text-sm font-semibold text-foreground">{text.notifications}</p>
                 {!notifications ? (
-                  <p className="mt-2 text-sm text-foreground-soft">Loading…</p>
+                  <p className="mt-2 text-sm text-foreground-soft">{text.loading}</p>
                 ) : notifications.length === 0 ? (
-                  <p className="mt-2 text-sm text-foreground-soft">You&apos;re all caught up — nothing new yet.</p>
+                  <p className="mt-2 text-sm text-foreground-soft">{text.caughtUp}</p>
                 ) : (
                   <div className="mt-2 -mx-4 max-h-96 divide-y divide-border overflow-y-auto">
                     {notifications.map((n) => (
@@ -284,7 +306,7 @@ export function Topbar({
             <span className="hidden min-w-0 flex-col items-start leading-tight md:flex">
               <span className="max-w-[180px] truncate text-sm font-semibold text-foreground">{user.email}</span>
               <span className="mt-0.5 rounded-md bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
-                {roleDisplay(user.roles)}
+                {somali ? "Waalid" : roleDisplay(user.roles)}
               </span>
             </span>
             <ChevronDown className="hidden size-4 text-foreground-muted md:block" />
@@ -304,7 +326,7 @@ export function Topbar({
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-foreground-soft hover:bg-surface-hover hover:text-foreground"
                 >
                   <Settings className="size-4" />
-                  My Account
+                  {text.myAccount}
                 </Link>
                 <div className="my-1 h-px bg-border" />
                 {user.roles.includes("STUDENT") && (
@@ -336,7 +358,7 @@ export function Topbar({
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-foreground-soft hover:bg-surface-hover hover:text-foreground"
                 >
                   <LogOut className="size-4" />
-                  Sign out
+                  {text.signOut}
                 </button>
               </div>
             </>

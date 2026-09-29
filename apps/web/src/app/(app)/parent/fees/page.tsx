@@ -13,7 +13,9 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FormField, Input, Textarea } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
-import { Wallet, Users, Send } from "lucide-react";
+import { CheckCircle2, CircleDollarSign, Send, TriangleAlert, Users, Wallet } from "lucide-react";
+import { PillTabs, StatTile } from "@/features/parent-portal/ParentUI";
+import { SO_INVOICE_STATUS, SO_PAYMENT_METHOD, SO_SUBMISSION_STATUS, soDate, soStatus } from "@/features/parent-portal/so";
 
 const STATUS_TONE: Record<string, "success" | "warning" | "danger"> = {
   PAID: "success",
@@ -27,41 +29,35 @@ const SUBMISSION_STATUS_TONE: Record<PaymentSubmissionStatus, "success" | "warni
   REJECTED: "danger",
 };
 
-const TABS = ["Current Fees", "Outstanding Balance", "Payment History", "Submit Payment"] as const;
+const TABS = ["Lacagaha hadda", "Haraaga lagu leeyahay", "Taariikhda lacag-bixinta", "Soo sheeg lacag-bixin"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function ParentFeesPage() {
   const { accessToken } = useAuth();
   const { selectedChild, loading: childrenLoading, children } = useSelectedChild();
-  const [tab, setTab] = useState<Tab>("Current Fees");
+  const [tab, setTab] = useState<Tab>("Lacagaha hadda");
 
   return (
     <div>
-      <PageHeader eyebrow="Parent Portal" title="Fees" description="Fee summary, outstanding balance, and payment history." />
+      <PageHeader
+        variant="plain"
+        eyebrow="Portal-ka Waalidka"
+        title="Lacagaha"
+        description={
+          selectedChild
+            ? `Lacagaha ${selectedChild.firstName}: wadarta, haraaga iyo taariikhda lacag-bixinta.`
+            : "Wadarta lacagaha, haraaga iyo taariikhda lacag-bixinta."
+        }
+      />
 
-      <div className="border-b border-border px-4 sm:px-6">
-        <div className="flex gap-1 overflow-x-auto">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`shrink-0 border-b-2 px-3 py-3 text-sm font-medium transition-colors ${
-                tab === t ? "border-accent text-accent" : "border-transparent text-foreground-soft hover:text-foreground"
-              }`}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="space-y-5 p-4 sm:p-6">
+      <div className="space-y-5 px-3 pb-8 pt-4 sm:px-5">
+        <PillTabs tabs={TABS} active={tab} onChange={setTab} />
         {childrenLoading ? (
           <SkeletonCards count={2} />
         ) : children.length === 0 ? (
-          <EmptyState icon={Users} title="No children linked yet" />
+          <EmptyState icon={Users} title="Weli ilmo laguma xirin akoonkaaga" />
         ) : !selectedChild || !accessToken ? (
-          <EmptyState icon={Users} title="Select a child above" />
+          <EmptyState icon={Users} title="Kor ka dooro ilmo" />
         ) : (
           <FeesContent key={selectedChild.studentId} accessToken={accessToken} studentId={selectedChild.studentId} tab={tab} />
         )}
@@ -78,7 +74,7 @@ function FeesContent({ accessToken, studentId, tab }: { accessToken: string; stu
     api
       .getMyChildInvoices(accessToken, studentId)
       .then(setInvoices)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load fees"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Lama soo rarin lacagaha"));
   }, [accessToken, studentId]);
 
   if (error) return <Alert tone="danger">{error}</Alert>;
@@ -95,27 +91,21 @@ function FeesContent({ accessToken, studentId, tab }: { accessToken: string; stu
   return (
     <>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Card padding="sm" className="text-center">
-          <p className="text-2xl font-semibold text-foreground">{totalAmount.toFixed(2)}</p>
-          <p className="mt-1 text-xs font-medium uppercase tracking-wide text-foreground-muted">Total fees</p>
-        </Card>
-        <Card padding="sm" className="text-center">
-          <p className="text-2xl font-semibold text-success">{totalPaid.toFixed(2)}</p>
-          <p className="mt-1 text-xs font-medium uppercase tracking-wide text-foreground-muted">Paid</p>
-        </Card>
-        <Card padding="sm" className="text-center">
-          <p className={`text-2xl font-semibold ${totalBalance > 0 ? "text-danger" : "text-success"}`}>
-            {totalBalance.toFixed(2)}
-          </p>
-          <p className="mt-1 text-xs font-medium uppercase tracking-wide text-foreground-muted">Outstanding</p>
-        </Card>
+        <StatTile icon={CircleDollarSign} tone="bg-accent-soft text-accent" label="Wadarta lacagaha" value={`$${totalAmount.toFixed(2)}`} />
+        <StatTile icon={CheckCircle2} tone="bg-success-soft text-success" label="La bixiyay" value={`$${totalPaid.toFixed(2)}`} />
+        <StatTile
+          icon={TriangleAlert}
+          tone={totalBalance > 0 ? "bg-danger-soft text-danger" : "bg-success-soft text-success"}
+          label="Haraaga lagu leeyahay"
+          value={`$${totalBalance.toFixed(2)}`}
+        />
       </div>
 
-      {tab === "Current Fees" && (
-        <Card padding="none">
+      {tab === "Lacagaha hadda" && (
+        <Card padding="none" className="rounded-2xl">
           {invoices.length === 0 ? (
             <div className="p-5">
-              <EmptyState icon={Wallet} title="No invoices yet" />
+              <EmptyState icon={Wallet} title="Weli biil lama soo saarin" />
             </div>
           ) : (
             <InvoiceTable invoices={invoices} />
@@ -123,11 +113,11 @@ function FeesContent({ accessToken, studentId, tab }: { accessToken: string; stu
         </Card>
       )}
 
-      {tab === "Outstanding Balance" && (
-        <Card padding="none">
+      {tab === "Haraaga lagu leeyahay" && (
+        <Card padding="none" className="rounded-2xl">
           {outstanding.length === 0 ? (
             <div className="p-5">
-              <EmptyState icon={Wallet} title="Nothing outstanding" description="All invoices are fully paid." />
+              <EmptyState icon={Wallet} title="Wax lagugu leeyahay ma jiro" description="Dhammaan biilasha si buuxda ayaa loo bixiyay." />
             </div>
           ) : (
             <InvoiceTable invoices={outstanding} />
@@ -135,31 +125,31 @@ function FeesContent({ accessToken, studentId, tab }: { accessToken: string; stu
         </Card>
       )}
 
-      {tab === "Payment History" && (
-        <Card padding="none">
+      {tab === "Taariikhda lacag-bixinta" && (
+        <Card padding="none" className="rounded-2xl">
           {payments.length === 0 ? (
             <div className="p-5">
-              <EmptyState icon={Wallet} title="No payments recorded yet" />
+              <EmptyState icon={Wallet} title="Weli lacag-bixin lama diiwaangelin" />
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[480px] text-left text-sm">
                 <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
                   <tr>
-                    <th className="px-5 py-2.5">Date</th>
-                    <th className="px-5 py-2.5">Fee</th>
-                    <th className="px-5 py-2.5">Amount</th>
-                    <th className="px-5 py-2.5">Method</th>
-                    <th className="px-5 py-2.5">Reference</th>
+                    <th className="px-5 py-2.5">Taariikhda</th>
+                    <th className="px-5 py-2.5">Lacagta</th>
+                    <th className="px-5 py-2.5">Qadarka</th>
+                    <th className="px-5 py-2.5">Habka</th>
+                    <th className="px-5 py-2.5">Tixraaca</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {payments.map((p) => (
                     <tr key={p.id}>
-                      <td className="px-5 py-3 text-foreground">{new Date(p.paidAt).toLocaleDateString()}</td>
+                      <td className="px-5 py-3 text-foreground">{soDate(p.paidAt)}</td>
                       <td className="px-5 py-3 text-foreground-soft">{p.feeName}</td>
                       <td className="px-5 py-3 text-foreground-soft">{p.amount.toFixed(2)}</td>
-                      <td className="px-5 py-3 text-foreground-soft">{p.method.replace("_", " ")}</td>
+                      <td className="px-5 py-3 text-foreground-soft">{soStatus(SO_PAYMENT_METHOD, p.method)}</td>
                       <td className="px-5 py-3 text-foreground-muted">{p.reference ?? "—"}</td>
                     </tr>
                   ))}
@@ -170,7 +160,7 @@ function FeesContent({ accessToken, studentId, tab }: { accessToken: string; stu
         </Card>
       )}
 
-      {tab === "Submit Payment" && <ZaadSubmissionSection accessToken={accessToken} studentId={studentId} />}
+      {tab === "Soo sheeg lacag-bixin" && <ZaadSubmissionSection accessToken={accessToken} studentId={studentId} />}
     </>
   );
 }
@@ -191,7 +181,7 @@ function ZaadSubmissionSection({ accessToken, studentId }: { accessToken: string
         setSubmissions(all.filter((s) => s.studentId === studentId));
         setHistoryError(null);
       })
-      .catch((err) => setHistoryError(err instanceof ApiError ? err.message : "Failed to load submissions"));
+      .catch((err) => setHistoryError(err instanceof ApiError ? err.message : "Lama soo rarin warbixinnada"));
   }
 
   useEffect(load, [accessToken, studentId]);
@@ -207,10 +197,10 @@ function ZaadSubmissionSection({ accessToken, studentId }: { accessToken: string
       });
       setAmount("");
       setReference("");
-      show("Payment notice submitted. It will be verified by the school.");
+      show("Warbixinta lacag-bixinta waa la diray. Dugsiga ayaa xaqiijin doona.");
       load();
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Failed to submit payment notice");
+      setFormError(err instanceof ApiError ? err.message : "Lama dirin warbixinta lacag-bixinta");
     } finally {
       setSubmitting(false);
     }
@@ -218,18 +208,18 @@ function ZaadSubmissionSection({ accessToken, studentId }: { accessToken: string
 
   return (
     <div className="space-y-5">
-      <Card>
-        <CardHeader title="Report a ZAAD payment" description="Sent an amount via ZAAD? Let the school know so they can verify it." />
-        <form onSubmit={onSubmit} className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <FormField label="Amount">
+      <Card className="rounded-2xl">
+        <CardHeader title="Soo sheeg lacag ZAAD ah" description="Ma ku dirtay lacag ZAAD? U sheeg dugsiga si ay u xaqiijiyaan." />
+        <form onSubmit={onSubmit} className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <FormField label="Qadarka">
             <Input required type="number" min={0.01} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
           </FormField>
-          <FormField label="Reference (optional)">
-            <Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Transaction ID" />
+          <FormField label="Tixraaca (ikhtiyaari)">
+            <Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Lambarka macaamilka" />
           </FormField>
           <div className="flex items-end">
             <Button type="submit" loading={submitting} className="w-full" icon={<Send className="size-4" />}>
-              Submit
+              Dir
             </Button>
           </div>
           {formError && (
@@ -240,9 +230,9 @@ function ZaadSubmissionSection({ accessToken, studentId }: { accessToken: string
         </form>
       </Card>
 
-      <Card padding="none">
+      <Card padding="none" className="rounded-2xl">
         <div className="border-b border-border px-5 py-3">
-          <h2 className="text-sm font-semibold text-foreground">Submission history</h2>
+          <h2 className="text-sm font-semibold text-foreground">Warbixinnadii hore</h2>
         </div>
         {historyError ? (
           <div className="p-5">
@@ -254,7 +244,7 @@ function ZaadSubmissionSection({ accessToken, studentId }: { accessToken: string
           </div>
         ) : submissions.length === 0 ? (
           <div className="p-5">
-            <EmptyState icon={Wallet} title="No payment notices submitted yet" />
+            <EmptyState icon={Wallet} title="Weli warbixin lacag-bixin lama dirin" />
           </div>
         ) : (
           <div className="divide-y divide-border">
@@ -265,14 +255,14 @@ function ZaadSubmissionSection({ accessToken, studentId }: { accessToken: string
                   <div>
                     <p className="font-medium text-foreground">{Number(s.amount).toFixed(2)}</p>
                     <p className="text-sm text-foreground-soft">
-                      {new Date(s.createdAt).toLocaleDateString()}
-                      {s.providerTransactionReference ? ` · Ref: ${s.providerTransactionReference}` : ""}
+                      {soDate(s.createdAt)}
+                      {s.providerTransactionReference ? ` · Tixraac: ${s.providerTransactionReference}` : ""}
                     </p>
                     {s.status === "REJECTED" && s.rejectionReason && (
-                      <p className="mt-1 text-sm text-danger">Reason: {s.rejectionReason}</p>
+                      <p className="mt-1 text-sm text-danger">Sababta: {s.rejectionReason}</p>
                     )}
                   </div>
-                  <Badge tone={SUBMISSION_STATUS_TONE[s.status]}>{s.status}</Badge>
+                  <Badge tone={SUBMISSION_STATUS_TONE[s.status]}>{soStatus(SO_SUBMISSION_STATUS, s.status)}</Badge>
                 </div>
               ))}
           </div>
@@ -288,12 +278,12 @@ function InvoiceTable({ invoices }: { invoices: MyChildInvoice[] }) {
       <table className="w-full min-w-[480px] text-left text-sm">
         <thead className="bg-surface-soft text-xs font-semibold uppercase tracking-wide text-foreground-muted">
           <tr>
-            <th className="px-5 py-2.5">Fee</th>
-            <th className="px-5 py-2.5">Amount</th>
-            <th className="px-5 py-2.5">Paid</th>
-            <th className="px-5 py-2.5">Balance</th>
-            <th className="px-5 py-2.5">Status</th>
-            <th className="px-5 py-2.5">Due date</th>
+            <th className="px-5 py-2.5">Lacagta</th>
+            <th className="px-5 py-2.5">Qadarka</th>
+            <th className="px-5 py-2.5">La bixiyay</th>
+            <th className="px-5 py-2.5">Haraaga</th>
+            <th className="px-5 py-2.5">Xaaladda</th>
+            <th className="px-5 py-2.5">Waqtiga bixinta</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -304,9 +294,9 @@ function InvoiceTable({ invoices }: { invoices: MyChildInvoice[] }) {
               <td className="px-5 py-3 text-foreground-soft">{i.paid.toFixed(2)}</td>
               <td className="px-5 py-3 text-foreground-soft">{i.balance.toFixed(2)}</td>
               <td className="px-5 py-3">
-                <Badge tone={STATUS_TONE[i.status]}>{i.status.replace("_", " ")}</Badge>
+                <Badge tone={STATUS_TONE[i.status]}>{soStatus(SO_INVOICE_STATUS, i.status)}</Badge>
               </td>
-              <td className="px-5 py-3 text-foreground-muted">{i.dueDate ? new Date(i.dueDate).toLocaleDateString() : "—"}</td>
+              <td className="px-5 py-3 text-foreground-muted">{i.dueDate ? soDate(i.dueDate) : "—"}</td>
             </tr>
           ))}
         </tbody>

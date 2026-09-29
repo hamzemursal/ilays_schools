@@ -10,6 +10,7 @@ import { Alert } from "@/components/ui/Alert";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { Bell, Check } from "lucide-react";
+import { soDate } from "@/features/parent-portal/so";
 
 export default function ParentNotificationsPage() {
   const { accessToken } = useAuth();
@@ -22,7 +23,7 @@ export default function ParentNotificationsPage() {
     api
       .listMyNotifications(accessToken)
       .then(setNotifications)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load notifications"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Lama soo rarin fariimaha"));
   }, [accessToken]);
 
   async function onMarkRead(id: string) {
@@ -38,21 +39,26 @@ export default function ParentNotificationsPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Parent Portal" title="Notifications" description="Updates relevant to you and your children." />
+      <PageHeader variant="plain" eyebrow="Portal-ka Waalidka" title="Fariimaha" description="War-bixinno ku saabsan adiga iyo carruurtaada." />
 
-      <div className="space-y-3 p-4 sm:p-6">
+      <div className="space-y-3 px-3 pb-8 pt-4 sm:px-5">
         {error ? (
           <Alert tone="danger">{error}</Alert>
         ) : !notifications ? (
           <SkeletonCards count={3} />
         ) : notifications.length === 0 ? (
-          <EmptyState icon={Bell} title="No notifications yet" />
+          <Card className="rounded-2xl">
+            <EmptyState icon={Bell} title="Weli fariin ma jirto" />
+          </Card>
         ) : (
           notifications.map((n) => (
-            <Card key={n.id} className={n.isRead ? undefined : "border-accent/40 bg-accent-soft/40"}>
+            <Card key={n.id} className={`rounded-2xl ${n.isRead ? "" : "border-accent/40 bg-accent-soft/30"}`}>
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <p className="font-medium text-foreground">{n.title}</p>
-                <span className="text-xs text-foreground-muted">{new Date(n.createdAt).toLocaleDateString()}</span>
+                <p className="flex items-center gap-2 font-medium text-foreground">
+                  {!n.isRead && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label="Aan la akhrin" />}
+                  {n.title}
+                </p>
+                <span className="text-xs text-foreground-muted">{soDate(n.createdAt)}</span>
               </div>
               <p className="mt-1 text-sm text-foreground-soft">{n.body}</p>
               {!n.isRead && (
@@ -64,7 +70,7 @@ export default function ParentNotificationsPage() {
                   onClick={() => onMarkRead(n.id)}
                   className="mt-3"
                 >
-                  Mark as read
+                  Calaamadee inaan akhriyay
                 </Button>
               )}
             </Card>

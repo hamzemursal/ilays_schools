@@ -31,7 +31,8 @@ export function useCurrentSchool(user: Profile | null) {
 
 function NavLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void }) {
   const pathname = usePathname();
-  const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+  const isPortalHome = item.href === "/parent" || item.href === "/student";
+  const active = pathname === item.href || (!isPortalHome && pathname.startsWith(`${item.href}/`));
   const Icon = item.icon;
   return (
     <Link
@@ -139,7 +140,7 @@ export function Sidebar({
         {parentItems.length > 0 && (
           <div>
             <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">
-              Parent Portal
+              Portal-ka Waalidka
             </p>
             <div className="space-y-0.5">
               {parentItems.map((item) => (

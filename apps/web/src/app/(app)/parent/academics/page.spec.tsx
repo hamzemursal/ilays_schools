@@ -62,18 +62,18 @@ beforeEach(() => {
 describe("Parent AcademicsPage — Exams & Results", () => {
   it("shows the selected child's Term 1 / Term 2 / Annual report, requested for that child only", async () => {
     render(<AcademicsPage />);
-    fireEvent.click(screen.getByRole("button", { name: "Exams & Results" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Imtixaannada & Natiijooyinka" }));
 
     expect(await screen.findByText("85 / 100")).toBeInTheDocument();
     expect(apiMock.getMyChildAcademicYears).toHaveBeenCalledWith("token-1", "stu-1");
     expect(apiMock.getMyChildResultsReport).toHaveBeenCalledWith("token-1", "stu-1", "year-1");
     expect(apiMock.getMyChildResultsReport).not.toHaveBeenCalledWith("token-1", "stu-2", expect.anything());
-    expect(screen.getByText("No published results for Term 2 yet.")).toBeInTheDocument();
+    expect(screen.getByText("Weli lama daabicin natiijooyinka Xilliga 2aad.")).toBeInTheDocument();
   });
 
   it("switching child shows only the other child's results — never both, never a blend", async () => {
     const { rerender } = render(<AcademicsPage />);
-    fireEvent.click(screen.getByRole("button", { name: "Exams & Results" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Imtixaannada & Natiijooyinka" }));
     await screen.findByText("85 / 100");
 
     selectChild("stu-2");
@@ -86,7 +86,7 @@ describe("Parent AcademicsPage — Exams & Results", () => {
 
   it("no longer uses the flat, year-mixing results list", async () => {
     render(<AcademicsPage />);
-    fireEvent.click(screen.getByRole("button", { name: "Exams & Results" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Imtixaannada & Natiijooyinka" }));
     await screen.findByText("85 / 100");
 
     expect(apiMock.getMyChildResults).not.toHaveBeenCalled();
@@ -96,9 +96,9 @@ describe("Parent AcademicsPage — Exams & Results", () => {
 describe("Parent AcademicsPage — Performance", () => {
   it("shows the current year's term/annual figures and per-subject averages, not a blend of every result ever", async () => {
     render(<AcademicsPage />);
-    fireEvent.click(screen.getByRole("button", { name: "Performance" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Horumarka" }));
 
-    expect(await screen.findByText("Average by subject")).toBeInTheDocument();
+    expect(await screen.findByText("Celceliska maaddo kasta")).toBeInTheDocument();
     expect(screen.getByText("Mathematics")).toBeInTheDocument();
     expect(screen.getByText("85%")).toBeInTheDocument();
     expect(screen.queryByText("Overall average")).not.toBeInTheDocument();
@@ -115,8 +115,8 @@ describe("Parent AcademicsPage — Performance", () => {
       ],
     });
     render(<AcademicsPage />);
-    fireEvent.click(screen.getByRole("button", { name: "Performance" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Horumarka" }));
 
-    expect(await screen.findByText("No published results yet")).toBeInTheDocument();
+    expect(await screen.findByText("Weli natiijo lama daabicin")).toBeInTheDocument();
   });
 });

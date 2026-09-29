@@ -104,6 +104,14 @@ describe("AnnouncementsService.create — notification fan-out", () => {
     });
   });
 
+  it("never notifies a parent whose children here are all former — the match requires an ACTIVE enrollment", async () => {
+    prisma.guardian.findMany.mockResolvedValue([]);
+    await service.create(ACTOR, "school-1", dto({ audience: "ALL" as never }));
+    const where = prisma.guardian.findMany.mock.calls[0][0].where;
+    expect(where.students.some.student.enrollments.some).toEqual({ schoolId: "school-1", status: "ACTIVE" });
+    expect(prisma.notification.createMany).not.toHaveBeenCalled();
+  });
+
   it("also fans out for audience PARENTS", async () => {
     prisma.guardian.findMany.mockResolvedValue([{ id: "g1" }]);
     await service.create(ACTOR, "school-1", dto({ audience: "PARENTS" as never }));

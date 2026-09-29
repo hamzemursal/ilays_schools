@@ -319,8 +319,24 @@ export class StudentPortalService {
   async myAnnouncements(actor: AuthenticatedUser) {
     const { enrollment } = await this.getSelfOrThrow(actor);
 
+    // A current student sees the school's announcements as they come. A
+    // student with no ACTIVE enrollment (graduated, or otherwise finished)
+    // is reading their own history: only announcements from while they were
+    // still enrolled — nothing published after the day their enrollment
+    // ended. The account itself stays active; only the feed is cut off.
+    let createdBefore: Date | undefined;
+    if (enrollment.status !== "ACTIVE") {
+      if (!enrollment.endDate) return [];
+      createdBefore = new Date(enrollment.endDate);
+      createdBefore.setUTCDate(createdBefore.getUTCDate() + 1);
+    }
+
     return this.prisma.announcement.findMany({
-      where: { schoolId: enrollment.schoolId, audience: "ALL" },
+      where: {
+        schoolId: enrollment.schoolId,
+        audience: "ALL",
+        ...(createdBefore ? { createdAt: { lt: createdBefore } } : {}),
+      },
       include: { school: { select: { name: true } } },
       orderBy: { createdAt: "desc" },
     });

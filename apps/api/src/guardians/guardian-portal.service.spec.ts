@@ -160,6 +160,17 @@ describe("GuardianPortalService.myChildAcademicYears", () => {
     ({ service } = createService(prisma));
   });
 
+  it("still lists the years of a graduated (former) child — history stays readable", async () => {
+    prisma.studentEnrollment.findMany.mockResolvedValue([
+      { id: "enr-g", status: "GRADUATED", academicYearId: "year-9", academicYear: { name: "2027", isCurrent: false } },
+    ]);
+    prisma.attendance.groupBy.mockResolvedValue([]);
+
+    const result = await service.myChildAcademicYears(ACTOR, "grad-1");
+
+    expect(result.map((y) => y.id)).toEqual(["year-9"]);
+  });
+
   it("de-duplicates repeated academicYearId across multiple enrollments in the same year", async () => {
     prisma.studentEnrollment.findMany.mockResolvedValue([
       { id: "enr-1", academicYearId: "year-1", academicYear: { name: "2028", isCurrent: true } },
@@ -386,6 +397,18 @@ describe("GuardianPortalService.myAnnouncements", () => {
     expect(prisma.announcement.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { schoolId: { in: ["school-1"] }, audience: { in: ["ALL", "PARENTS"] } } }),
     );
+  });
+
+  it("a parent with one active and one graduated child still gets the active child's school announcements", async () => {
+    // The query only loads ACTIVE enrollments, so the graduated child contributes no school.
+    prisma.studentGuardian.findMany.mockResolvedValue([
+      { student: { enrollments: [{ schoolId: "school-1" }] } },
+      { student: { enrollments: [] } },
+    ]);
+    prisma.announcement.findMany.mockResolvedValue([{ id: "a1" }]);
+
+    await expect(service.myAnnouncements(ACTOR)).resolves.toEqual([{ id: "a1" }]);
+    expect(prisma.studentGuardian.findMany.mock.calls[0][0].include.student.include.enrollments.where).toEqual({ status: "ACTIVE" });
   });
 
   it("never includes a TEACHERS-only announcement", async () => {

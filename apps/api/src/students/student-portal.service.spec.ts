@@ -435,6 +435,47 @@ describe("StudentPortalService.myAnnouncements", () => {
       expect.objectContaining({ where: { schoolId: "school-1", audience: "ALL" } }),
     );
   });
+
+  it("gives an active student every current announcement, with no date cutoff", async () => {
+    const prisma = createMockPrisma();
+    prisma.student.findFirst.mockResolvedValue({ id: "student-1" });
+    prisma.studentEnrollment.findFirst.mockResolvedValue({ ...SECONDARY_ENROLLMENT, endDate: null });
+    prisma.announcement.findMany.mockResolvedValue([{ id: "a-new" }]);
+    const service = createService(prisma);
+
+    await expect(service.myAnnouncements(ACTOR)).resolves.toEqual([{ id: "a-new" }]);
+    expect(prisma.announcement.findMany.mock.calls[0][0].where.createdAt).toBeUndefined();
+  });
+
+  it("gives a GRADUATED student only announcements published up to their graduation day — nothing newer", async () => {
+    const prisma = createMockPrisma();
+    prisma.student.findFirst.mockResolvedValue({ id: "student-1" });
+    prisma.studentEnrollment.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...GRADUATED_ENROLLMENT, endDate: new Date("2027-06-30T00:00:00Z") });
+    prisma.announcement.findMany.mockResolvedValue([]);
+    const service = createService(prisma);
+
+    await service.myAnnouncements(ACTOR);
+
+    expect(prisma.announcement.findMany.mock.calls[0][0].where).toEqual({
+      schoolId: "school-1",
+      audience: "ALL",
+      createdAt: { lt: new Date("2027-07-01T00:00:00Z") },
+    });
+  });
+
+  it("gives a finished student with no recorded end date nothing, rather than every announcement", async () => {
+    const prisma = createMockPrisma();
+    prisma.student.findFirst.mockResolvedValue({ id: "student-1" });
+    prisma.studentEnrollment.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...GRADUATED_ENROLLMENT, endDate: null });
+    const service = createService(prisma);
+
+    await expect(service.myAnnouncements(ACTOR)).resolves.toEqual([]);
+    expect(prisma.announcement.findMany).not.toHaveBeenCalled();
+  });
 });
 
 describe("StudentPortalService — read-only surface (no active-student actions)", () => {

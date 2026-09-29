@@ -18,7 +18,8 @@ import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
-import { Eye, GraduationCap, Mail, MapPin, Pencil, Phone, Plus, Send, Star, Trash2, UserSquare2, Users, X } from "lucide-react";
+import { Eye, GraduationCap, Mail, MapPin, Pencil, Phone, Plus, Send, Trash2, UserSquare2, Users, X } from "lucide-react";
+import { StudentAccessBadge } from "@/features/parents/StudentAccessBadge";
 import { Avatar } from "@/components/ui/Avatar";
 
 
@@ -126,6 +127,11 @@ export default function ParentProfilePage({
   }
 
   const activeChildren = parent.students.filter((s) => s.status === "ACTIVE");
+  // Split by enrollment, not only by link: a still-linked child whose
+  // enrollments have all closed (graduated, completed, transferred) is a
+  // former student — shown apart, as history, never as a current child.
+  const currentChildren = activeChildren.filter((s) => s.student.enrollments.some((e) => e.status === "ACTIVE"));
+  const formerChildren = activeChildren.filter((s) => !s.student.enrollments.some((e) => e.status === "ACTIVE"));
   const inactiveChildren = parent.students.filter((s) => s.status === "INACTIVE");
 
   return (
@@ -198,6 +204,7 @@ export default function ParentProfilePage({
                   ) : (
                     <Badge tone="neutral">No portal account</Badge>
                   )}
+                  <StudentAccessBadge access={parent.studentAccess} />
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {parent.phone && (
@@ -220,13 +227,8 @@ export default function ParentProfilePage({
               </div>
             </div>
             <dl className="grid grid-cols-2 gap-3 sm:w-auto lg:w-[340px]">
-              <SummaryStat icon={Users} tone="bg-violet-50 text-violet-600" label="Children linked" value={activeChildren.length} />
-              <SummaryStat
-                icon={Star}
-                tone="bg-amber-50 text-amber-600"
-                label="Primary contact"
-                value={activeChildren.filter((s) => s.isPrimaryContact).length}
-              />
+              <SummaryStat icon={Users} tone="bg-emerald-50 text-emerald-600" label="Active children" value={currentChildren.length} />
+              <SummaryStat icon={GraduationCap} tone="bg-amber-50 text-amber-600" label="Former children" value={formerChildren.length} />
             </dl>
           </div>
         </section>
@@ -256,8 +258,8 @@ export default function ParentProfilePage({
 
         <Card padding="none" className="rounded-2xl">
           <CardHeader
-            title="Children"
-            description="Every student this parent is linked to."
+            title="Active Children"
+            description="Students this parent is linked to who are currently enrolled."
             actions={
               canManage &&
               !addingChild && (
@@ -282,11 +284,15 @@ export default function ParentProfilePage({
               />
             )}
 
-            {activeChildren.length === 0 && !addingChild ? (
-              <EmptyState icon={UserSquare2} title="No children linked yet" description="Use Add Child to link a student." />
+            {currentChildren.length === 0 && !addingChild ? (
+              <EmptyState
+                icon={UserSquare2}
+                title={formerChildren.length > 0 ? "No currently enrolled children" : "No children linked yet"}
+                description={formerChildren.length > 0 ? "Every linked child is a former student — see Former Children below." : "Use Add Child to link a student."}
+              />
             ) : (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {activeChildren.map((s, i) => {
+                {currentChildren.map((s, i) => {
                   const enrollment = s.student.enrollments.find((e) => e.status === "ACTIVE") ?? s.student.enrollments[0];
                   const tone = CHILD_TONES[i % CHILD_TONES.length];
                   const childName = `${s.student.firstName} ${s.student.lastName}`;
@@ -340,6 +346,49 @@ export default function ParentProfilePage({
             )}
           </div>
         </Card>
+
+        {formerChildren.length > 0 && (
+          <Card padding="none" className="rounded-2xl">
+            <CardHeader
+              title="Former Children"
+              description="Graduated, completed or transferred — their history stays viewable; they are not current students."
+            />
+            <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2 xl:grid-cols-3">
+              {formerChildren.map((s) => {
+                const last = s.student.enrollments[0];
+                const childName = `${s.student.firstName} ${s.student.lastName}`;
+                return (
+                  <div key={s.studentId} className="flex flex-col rounded-2xl border border-dashed border-border bg-surface-soft/50 p-4">
+                    <div className="flex items-start gap-3">
+                      <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-sm font-bold text-amber-700" aria-hidden>
+                        {initials(childName)}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-semibold text-foreground">{childName}</p>
+                        {last && (
+                          <p className="mt-0.5 text-sm text-foreground-soft">
+                            Last: {last.class.name} · {last.section.name} · {last.academicYear.name}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                      <Badge tone="warning">{last ? FORMER_LABEL[last.status] ?? "Former student" : "Former student"}</Badge>
+                      <RelationshipBadge relationship={s.relationship} />
+                    </div>
+                    <div className="mt-4 border-t border-border pt-3">
+                      <Link href={`/schools/${schoolId}/students/${s.studentId}`}>
+                        <Button size="sm" variant="secondary" className="w-full" icon={<Eye className="size-4" />}>
+                          View history
+                        </Button>
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
 
         {canManage && !parent.user && (
           <Card padding="none" className="rounded-2xl">
@@ -397,6 +446,16 @@ export default function ParentProfilePage({
     </div>
   );
 }
+
+// How a former child's last enrollment ended, in plain words.
+const FORMER_LABEL: Record<string, string> = {
+  GRADUATED: "Graduated",
+  COMPLETED: "Completed",
+  TRANSFERRED_OUT: "Transferred",
+  WITHDRAWN: "Withdrawn",
+  PROMOTED: "Former student",
+  RETAINED: "Former student",
+};
 
 // One color per child card (category only, never a status).
 const CHILD_TONES = [

@@ -248,11 +248,13 @@ export class GuardiansService {
           include: {
             student: {
               include: {
+                // Every enrollment at THIS school (not only ACTIVE) — needed to
+                // tell a former child from an unrelated one. The ACTIVE one, if
+                // any, is still the only one shown as the child's enrollment.
                 enrollments: {
-                  where: { status: "ACTIVE" },
+                  where: { schoolId },
                   include: { class: true, section: true, academicYear: true, school: true },
                   orderBy: { startDate: "desc" },
-                  take: 1,
                 },
               },
             },
@@ -288,7 +290,7 @@ export class GuardiansService {
       },
     });
 
-    return guardian;
+    return { ...guardian, ...studentAccessFor(guardian.students, schoolId) };
   }
 
   // Duplicate check mirrors StudentsService.create: exact phone/email match
@@ -591,7 +593,7 @@ export class GuardiansService {
     // ACTIVE only — a removed relationship shouldn't inflate the "how many
     // children does this parent currently have here" count on the list.
     const childrenInThisSchool = guardian.students.filter(
-      (sg) => sg.status === "ACTIVE" && sg.student.enrollments.some((e) => e.schoolId === schoolId),
+      (sg) => sg.status === "ACTIVE" && sg.student.enrollments.some((e) => e.schoolId === schoolId && e.status === "ACTIVE"),
     );
     return {
       id: guardian.id,
@@ -604,21 +606,47 @@ export class GuardiansService {
       status: guardian.status,
       hasPortalAccount: !!guardian.user,
       portalAccountStatus: guardian.user?.status ?? null,
-      children: childrenInThisSchool.map((sg) => ({
+      ...studentAccessFor(guardian.students, schoolId),
+      children: childrenInThisSchool.map((sg) => {
+        const active = sg.student.enrollments.find((e) => e.schoolId === schoolId && e.status === "ACTIVE")!;
+        return {
         studentId: sg.studentId,
         firstName: sg.student.firstName,
         lastName: sg.student.lastName,
         relationship: sg.relationship,
         isPrimaryContact: sg.isPrimaryContact,
         status: sg.status,
-        enrollment: sg.student.enrollments[0]
-          ? {
-              className: sg.student.enrollments[0].class.name,
-              sectionName: sg.student.enrollments[0].section.name,
-              academicYearName: sg.student.enrollments[0].academicYear.name,
-            }
-          : null,
-      })),
+        enrollment: {
+          className: active.class.name,
+          sectionName: active.section.name,
+          academicYearName: active.academicYear.name,
+        },
+        };
+      }),
     };
   }
+}
+
+export type StudentAccess = "ACTIVE_STUDENT" | "FORMER_STUDENTS_ONLY" | "NO_LINKED_STUDENT";
+
+// Derived, never stored: a parent's relationship to CURRENT students at this
+// school, kept separate from their portal account status. Only ACTIVE links
+// count. A child with an ACTIVE enrollment here is current; a child whose
+// enrollments here are all closed (graduated, completed, transferred...) is
+// former. One current child is enough for ACTIVE_STUDENT.
+export function studentAccessFor(
+  links: { status: string; student: { enrollments: { schoolId: string; status: string }[] } }[],
+  schoolId: string,
+): { activeChildren: number; formerChildren: number; studentAccess: StudentAccess } {
+  let activeChildren = 0;
+  let formerChildren = 0;
+  for (const link of links) {
+    if (link.status !== "ACTIVE") continue;
+    const here = link.student.enrollments.filter((e) => e.schoolId === schoolId);
+    if (here.some((e) => e.status === "ACTIVE")) activeChildren++;
+    else if (here.length > 0) formerChildren++;
+  }
+  const studentAccess: StudentAccess =
+    activeChildren > 0 ? "ACTIVE_STUDENT" : formerChildren > 0 ? "FORMER_STUDENTS_ONLY" : "NO_LINKED_STUDENT";
+  return { activeChildren, formerChildren, studentAccess };
 }

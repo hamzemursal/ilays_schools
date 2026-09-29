@@ -1,6 +1,6 @@
 import { ConflictException } from "@nestjs/common";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
-import { GuardiansService } from "./guardians.service";
+import { GuardiansService, studentAccessFor } from "./guardians.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { SchoolsService } from "../schools/schools.service";
 import { AuditService } from "../audit/audit.service";
@@ -420,5 +420,62 @@ describe("GuardiansService.linkToStudent — a student has at most one Mother an
     await service.linkToStudent(tx as unknown as Tx, "student-B", "guardian-1", "MOTHER", false);
 
     expect(tx.studentGuardian.upsert).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("studentAccessFor — derived Student Access, separate from the portal account", () => {
+  const link = (status: string, enrollments: { schoolId: string; status: string }[]) => ({ status, student: { enrollments } });
+
+  it("is ACTIVE_STUDENT when at least one linked child is actively enrolled here", () => {
+    expect(studentAccessFor([link("ACTIVE", [{ schoolId: "s1", status: "ACTIVE" }])], "s1")).toEqual({
+      activeChildren: 1,
+      formerChildren: 0,
+      studentAccess: "ACTIVE_STUDENT",
+    });
+  });
+
+  it("stays ACTIVE_STUDENT for a parent with one active and one graduated child", () => {
+    const result = studentAccessFor(
+      [link("ACTIVE", [{ schoolId: "s1", status: "ACTIVE" }]), link("ACTIVE", [{ schoolId: "s1", status: "GRADUATED" }])],
+      "s1",
+    );
+    expect(result).toEqual({ activeChildren: 1, formerChildren: 1, studentAccess: "ACTIVE_STUDENT" });
+  });
+
+  it("is FORMER_STUDENTS_ONLY when every linked child's enrollments here are closed", () => {
+    const result = studentAccessFor(
+      [link("ACTIVE", [{ schoolId: "s1", status: "GRADUATED" }]), link("ACTIVE", [{ schoolId: "s1", status: "TRANSFERRED_OUT" }])],
+      "s1",
+    );
+    expect(result).toEqual({ activeChildren: 0, formerChildren: 2, studentAccess: "FORMER_STUDENTS_ONLY" });
+  });
+
+  it("is NO_LINKED_STUDENT with no active link, or only children at other schools", () => {
+    expect(studentAccessFor([], "s1").studentAccess).toBe("NO_LINKED_STUDENT");
+    expect(studentAccessFor([link("INACTIVE", [{ schoolId: "s1", status: "ACTIVE" }])], "s1").studentAccess).toBe("NO_LINKED_STUDENT");
+    expect(studentAccessFor([link("ACTIVE", [{ schoolId: "s2", status: "ACTIVE" }])], "s1").studentAccess).toBe("NO_LINKED_STUDENT");
+  });
+});
+
+describe("GuardiansService.assertGuardianCanAccessStudent — former children stay readable, others never", () => {
+  function build(link: unknown) {
+    const prisma = {
+      guardian: { findFirst: jest.fn().mockResolvedValue({ id: "g1" }) },
+      studentGuardian: { findFirst: jest.fn().mockResolvedValue(link) },
+    };
+    const service = new GuardiansService(prisma as unknown as PrismaService, {} as unknown as SchoolsService, {} as unknown as AuditService);
+    return { prisma, service };
+  }
+  const actor = { id: "u1", roles: ["PARENT"], permissions: [], schoolIds: [] } as unknown as Parameters<GuardiansService["assertGuardianCanAccessStudent"]>[0];
+
+  it("allows a linked child regardless of enrollment status (a graduated child's history stays visible)", async () => {
+    const { prisma, service } = build({ guardianId: "g1", studentId: "grad-1", status: "ACTIVE" });
+    await expect(service.assertGuardianCanAccessStudent(actor, "grad-1")).resolves.toBeDefined();
+    expect(prisma.studentGuardian.findFirst).toHaveBeenCalledWith({ where: { guardianId: "g1", studentId: "grad-1", status: "ACTIVE" } });
+  });
+
+  it("refuses a student this parent is not linked to", async () => {
+    const { service } = build(null);
+    await expect(service.assertGuardianCanAccessStudent(actor, "someone-else")).rejects.toThrow("Student not found");
   });
 });

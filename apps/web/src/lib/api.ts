@@ -429,8 +429,16 @@ export interface ParentListItem {
   status: ParentStatus;
   hasPortalAccount: boolean;
   portalAccountStatus: PortalAccountStatus | null;
+  // Derived server-side, separate from the portal account: whether this
+  // parent currently has a child enrolled here, only former children, or none.
+  studentAccess: StudentAccess;
+  activeChildren: number;
+  formerChildren: number;
+  // Current (actively enrolled) children only.
   children: ParentChildSummary[];
 }
+
+export type StudentAccess = "ACTIVE_STUDENT" | "FORMER_STUDENTS_ONLY" | "NO_LINKED_STUDENT";
 
 export interface ParentDetail {
   id: string;
@@ -442,6 +450,9 @@ export interface ParentDetail {
   address: string | null;
   status: ParentStatus;
   user: { id: string; email: string; status: PortalAccountStatus } | null;
+  studentAccess: StudentAccess;
+  activeChildren: number;
+  formerChildren: number;
   students: {
     studentId: string;
     relationship: GuardianRelationship;

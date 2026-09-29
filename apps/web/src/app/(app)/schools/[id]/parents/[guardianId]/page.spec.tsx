@@ -45,6 +45,9 @@ function parent(overrides: Partial<ParentDetail> = {}): ParentDetail {
     address: null,
     status: "ACTIVE",
     user: { id: "user-1", email: "amina@example.test", status: "ACTIVE" },
+    studentAccess: "NO_LINKED_STUDENT",
+    activeChildren: 0,
+    formerChildren: 0,
     students: [],
     ...overrides,
   };
@@ -108,5 +111,61 @@ describe("Parent profile — portal account actions", () => {
     expect(screen.getByText(/Login email: amina@example.test/)).toBeInTheDocument();
     expect(apiMock.resetParentPortalPassword).toHaveBeenCalledWith("token", "school-1", "guardian-1");
     expect(apiMock.createParentPortalAccount).not.toHaveBeenCalled();
+  });
+});
+
+function link(studentId: string, firstName: string, status: "ACTIVE" | "GRADUATED"): ParentDetail["students"][number] {
+  return {
+    studentId,
+    relationship: "MOTHER",
+    isPrimaryContact: false,
+    status: "ACTIVE",
+    student: {
+      firstName,
+      lastName: "Hassan",
+      enrollments: [
+        {
+          status,
+          startDate: "2026-09-01",
+          school: { id: "school-1", name: "Saamalay" },
+          class: { id: "c4", name: "Form 4" },
+          section: { id: "s", name: "A" },
+          academicYear: { id: "y", name: "2026-2027" },
+        },
+      ],
+    },
+  };
+}
+
+describe("Parent profile — Active vs Former children", () => {
+  it("shows a graduated child under Former Children, never as a current child", async () => {
+    apiMock.getParent.mockResolvedValue(
+      parent({ studentAccess: "FORMER_STUDENTS_ONLY", formerChildren: 1, students: [link("st-1", "Ahmed", "GRADUATED")] }),
+    );
+    await renderPage();
+
+    expect(screen.getByText("Former Students Only")).toBeInTheDocument();
+    expect(screen.getByText("Former Children")).toBeInTheDocument();
+    expect(screen.getByText("No currently enrolled children")).toBeInTheDocument();
+    expect(screen.getByText("Graduated")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View history" })).toBeInTheDocument();
+  });
+
+  it("keeps an active child current while listing a graduated sibling separately", async () => {
+    apiMock.getParent.mockResolvedValue(
+      parent({
+        studentAccess: "ACTIVE_STUDENT",
+        activeChildren: 1,
+        formerChildren: 1,
+        students: [link("st-1", "Amina", "ACTIVE"), link("st-2", "Ahmed", "GRADUATED")],
+      }),
+    );
+    await renderPage();
+
+    expect(screen.getByText("Active Student")).toBeInTheDocument();
+    expect(screen.getByText("Amina Hassan")).toBeInTheDocument();
+    expect(screen.getByText("Ahmed Hassan")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "View history" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "View Student" })).toHaveLength(1);
   });
 });

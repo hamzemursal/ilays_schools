@@ -26,7 +26,11 @@ export default function StudentAnnouncementsPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Student Portal" title="Announcements" description="School-wide announcements." />
+      <PageHeader
+        eyebrow="Student Portal"
+        title="Announcements"
+        description="School-wide announcements. After graduation, only announcements from while you were enrolled are shown."
+      />
 
       <div className="space-y-3 p-4 sm:p-6">
         {error ? (

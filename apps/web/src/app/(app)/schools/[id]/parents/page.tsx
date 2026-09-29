@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth, ApiError } from "@/lib/auth-context";
 import { type ParentListItem } from "@/lib/api";
+import { StudentAccessBadge } from "@/features/parents/StudentAccessBadge";
 import { parentsApi } from "@/features/parents/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -30,6 +31,7 @@ export default function ParentsListPage({ params }: { params: Promise<{ id: stri
   const [statusFilter, setStatusFilter] = useState("");
   const [relationshipFilter, setRelationshipFilter] = useState("");
   const [portalFilter, setPortalFilter] = useState("");
+  const [accessFilter, setAccessFilter] = useState("");
 
   useEffect(() => {
     if (!accessToken) return;
@@ -46,9 +48,10 @@ export default function ParentsListPage({ params }: { params: Promise<{ id: stri
       if (relationshipFilter && !p.children.some((c) => c.relationship === relationshipFilter)) return false;
       if (portalFilter === "yes" && !p.hasPortalAccount) return false;
       if (portalFilter === "no" && p.hasPortalAccount) return false;
+      if (accessFilter && p.studentAccess !== accessFilter) return false;
       return true;
     });
-  }, [parents, statusFilter, relationshipFilter, portalFilter]);
+  }, [parents, statusFilter, relationshipFilter, portalFilter, accessFilter]);
 
   const canCreate = user?.permissions.includes("guardians.manage") ?? false;
   const schoolName = user?.schools.find((s) => s.id === schoolId)?.name ?? "School";
@@ -71,14 +74,23 @@ export default function ParentsListPage({ params }: { params: Promise<{ id: stri
     { key: "email", header: "Email", render: (p) => p.email ?? <span className="text-foreground-muted">—</span> },
     {
       key: "children",
-      header: "Children",
-      sortValue: (p) => p.children.length,
+      header: "Active Children",
+      sortValue: (p) => p.activeChildren,
       render: (p) =>
-        p.children.length === 0 ? (
-          <span className="text-foreground-muted">None</span>
+        p.activeChildren === 0 ? (
+          <span className="text-foreground-muted">{p.formerChildren > 0 ? `0 · ${p.formerChildren} former` : "None"}</span>
         ) : (
-          <span>{p.children.length}</span>
+          <span>
+            {p.activeChildren}
+            {p.formerChildren > 0 && <span className="text-foreground-muted"> · {p.formerChildren} former</span>}
+          </span>
         ),
+    },
+    {
+      key: "studentAccess",
+      header: "Student Access",
+      sortValue: (p) => p.studentAccess,
+      render: (p) => <StudentAccessBadge access={p.studentAccess} />,
     },
     {
       key: "relationship",
@@ -172,6 +184,17 @@ export default function ParentsListPage({ params }: { params: Promise<{ id: stri
                   <option value="">Any portal account</option>
                   <option value="yes">Has portal account</option>
                   <option value="no">No portal account</option>
+                </Select>
+                <Select
+                  value={accessFilter}
+                  onChange={(e) => setAccessFilter(e.target.value)}
+                  aria-label="Student access"
+                  className="w-auto"
+                >
+                  <option value="">All student access</option>
+                  <option value="ACTIVE_STUDENT">Active Student</option>
+                  <option value="FORMER_STUDENTS_ONLY">Former Students Only</option>
+                  <option value="NO_LINKED_STUDENT">No Linked Student</option>
                 </Select>
               </div>
             }

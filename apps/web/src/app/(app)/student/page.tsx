@@ -38,6 +38,13 @@ function InfoItem({ icon: Icon, label, value }: { icon: LucideIcon; label: strin
   );
 }
 
+const FINISHED_LABEL: Record<string, string> = {
+  GRADUATED: "Graduated",
+  COMPLETED: "Completed",
+  TRANSFERRED_OUT: "Transferred",
+  WITHDRAWN: "Withdrawn",
+};
+
 export default function StudentDashboardPage() {
   const { accessToken } = useAuth();
   const { profile, error: profileError } = useStudentProfile();
@@ -87,16 +94,33 @@ export default function StudentDashboardPage() {
     return null;
   })();
 
+  // No ACTIVE enrollment means this account is an alumnus reading their own
+  // history — the portal stays open, but nothing is presented as current.
+  const isAlumni = profile.enrollment.status !== "ACTIVE";
+  const finishedLabel = FINISHED_LABEL[profile.enrollment.status] ?? profile.enrollment.status;
+
   return (
     <div>
       <PageHeader
-        eyebrow="Student Portal"
+        eyebrow={isAlumni ? "Alumni · Read-only" : "Student Portal"}
         title={`Welcome back, ${profile.firstName}`}
-        description={`${profile.loginId} · ${profile.enrollment.className} · Section ${profile.enrollment.sectionName}`}
+        description={
+          isAlumni
+            ? `${profile.loginId} · ${finishedLabel} · ${profile.enrollment.className} · ${profile.enrollment.academicYearName}`
+            : `${profile.loginId} · ${profile.enrollment.className} · Section ${profile.enrollment.sectionName}`
+        }
       />
 
       <div className="space-y-5 p-4 sm:p-6">
         {widgetsError && <Alert tone="danger">{widgetsError}</Alert>}
+
+        {isAlumni && (
+          <Alert tone="info">
+            You are an alumnus of {profile.enrollment.schoolName} ({finishedLabel.toLowerCase()} in{" "}
+            {profile.enrollment.academicYearName}). Your portal stays open so you can view your results, attendance and
+            history — everything here is read-only, and new school announcements are no longer sent to you.
+          </Alert>
+        )}
 
         <Card>
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
@@ -107,9 +131,7 @@ export default function StudentDashboardPage() {
                   <p className="text-lg font-semibold text-foreground">
                     {profile.firstName} {profile.lastName}
                   </p>
-                  <Badge tone={profile.enrollment.status === "ACTIVE" ? "success" : "neutral"}>
-                    {profile.enrollment.status}
-                  </Badge>
+                  <Badge tone={isAlumni ? "accent" : "success"}>{isAlumni ? `Alumni · ${finishedLabel}` : profile.enrollment.status}</Badge>
                 </div>
                 <div className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1.5 text-sm text-foreground-soft sm:grid-cols-2">
                   <InfoItem icon={IdCard} label="Student ID" value={profile.loginId} />
@@ -191,8 +213,9 @@ export default function StudentDashboardPage() {
         {attendance && attendance.summary.total > 0 && (
           <div className="flex items-center gap-2 text-xs text-foreground-muted">
             <CalendarDays className="size-3.5" />
-            Showing {profile.enrollment.academicYearName} data. Switch academic years on the Attendance page for
-            history.
+            {isAlumni
+              ? `Showing your final year (${profile.enrollment.academicYearName}). Earlier years are on the Attendance page.`
+              : `Showing ${profile.enrollment.academicYearName} data. Switch academic years on the Attendance page for history.`}
           </div>
         )}
       </div>

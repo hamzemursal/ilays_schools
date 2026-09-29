@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { deliveredAnnouncements, mergeAnnouncements } from "../announcements/delivered-announcements";
 import { GuardiansService } from "./guardians.service";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { buildStudentResultsReport } from "../exams/student-results-report";
@@ -303,20 +304,27 @@ export class GuardianPortalService {
       where: { guardianId: guardian.id, status: "ACTIVE" },
       include: { student: { include: { enrollments: { where: { status: "ACTIVE" }, select: { schoolId: true } } } } },
     });
-    const schoolIds = Array.from(new Set(links.flatMap((l) => l.student.enrollments.map((e) => e.schoolId))));
-    if (schoolIds.length === 0) return [];
+    // Delivered announcements (stored per parent when published — the same
+    // rows the Notifications page and the topbar bell read).
+    const delivered = await deliveredAnnouncements(this.prisma, actor.id, guardian.id);
 
-    return this.prisma.announcement.findMany({
-      where: { schoolId: { in: schoolIds }, audience: { in: ["ALL", "PARENTS"] } },
+    // Legacy announcements (created before audience delivery) keep the old
+    // view-time rule: only schools where a child is currently enrolled.
+    const schoolIds = Array.from(new Set(links.flatMap((l) => l.student.enrollments.map((e) => e.schoolId))));
+    if (schoolIds.length === 0) return delivered;
+
+    const legacy = await this.prisma.announcement.findMany({
+      where: { schoolId: { in: schoolIds }, audience: { in: ["ALL", "PARENTS"] }, deliveredAt: null },
       include: { school: { select: { name: true } } },
       orderBy: { createdAt: "desc" },
     });
+    return mergeAnnouncements(delivered, legacy);
   }
 
   async myNotifications(actor: AuthenticatedUser) {
     const guardian = await this.guardians.getSelfGuardianOrThrow(actor);
     return this.prisma.notification.findMany({
-      where: { guardianId: guardian.id },
+      where: { OR: [{ guardianId: guardian.id }, { userId: actor.id }] },
       orderBy: { createdAt: "desc" },
     });
   }
@@ -324,7 +332,7 @@ export class GuardianPortalService {
   async markNotificationRead(actor: AuthenticatedUser, notificationId: string) {
     const guardian = await this.guardians.getSelfGuardianOrThrow(actor);
     const notification = await this.prisma.notification.findFirst({
-      where: { id: notificationId, guardianId: guardian.id },
+      where: { id: notificationId, OR: [{ guardianId: guardian.id }, { userId: actor.id }] },
     });
     if (!notification) throw new NotFoundException("Notification not found");
 

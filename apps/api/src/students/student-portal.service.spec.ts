@@ -24,6 +24,7 @@ type MockPrisma = {
   term: { findMany: jest.Mock };
   invoice: { findMany: jest.Mock };
   announcement: { findMany: jest.Mock };
+  notification: { findMany: jest.Mock };
 };
 
 function createMockPrisma(): MockPrisma {
@@ -39,6 +40,7 @@ function createMockPrisma(): MockPrisma {
     term: { findMany: jest.fn() },
     invoice: { findMany: jest.fn() },
     announcement: { findMany: jest.fn() },
+    notification: { findMany: jest.fn().mockResolvedValue([]) },
   };
 }
 
@@ -432,7 +434,7 @@ describe("StudentPortalService.myAnnouncements", () => {
     await service.myAnnouncements(ACTOR);
 
     expect(prisma.announcement.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { schoolId: "school-1", audience: "ALL" } }),
+      expect.objectContaining({ where: { schoolId: "school-1", audience: "ALL", deliveredAt: null } }),
     );
   });
 
@@ -461,6 +463,7 @@ describe("StudentPortalService.myAnnouncements", () => {
     expect(prisma.announcement.findMany.mock.calls[0][0].where).toEqual({
       schoolId: "school-1",
       audience: "ALL",
+      deliveredAt: null,
       createdAt: { lt: new Date("2027-07-01T00:00:00Z") },
     });
   });

@@ -43,7 +43,7 @@ function createMockPrisma(): MockPrisma {
     invoice: { findMany: jest.fn() },
     charge: { findMany: jest.fn() },
     announcement: { findMany: jest.fn() },
-    notification: { findMany: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+    notification: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn(), update: jest.fn() },
   };
 }
 
@@ -395,7 +395,7 @@ describe("GuardianPortalService.myAnnouncements", () => {
     await service.myAnnouncements(ACTOR);
 
     expect(prisma.announcement.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { schoolId: { in: ["school-1"] }, audience: { in: ["ALL", "PARENTS"] } } }),
+      expect.objectContaining({ where: { schoolId: { in: ["school-1"] }, audience: { in: ["ALL", "PARENTS"] }, deliveredAt: null } }),
     );
   });
 
@@ -434,7 +434,7 @@ describe("GuardianPortalService.myNotifications / markNotificationRead", () => {
   it("myNotifications scopes to the guardian's own id", async () => {
     prisma.notification.findMany.mockResolvedValue([]);
     await service.myNotifications(ACTOR);
-    expect(prisma.notification.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { guardianId: "guardian-1" } }));
+    expect(prisma.notification.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { OR: [{ guardianId: "guardian-1" }, { userId: "user-1" }] } }));
   });
 
   it("markNotificationRead throws NotFoundException for a notification not belonging to this guardian", async () => {
@@ -449,7 +449,7 @@ describe("GuardianPortalService.myNotifications / markNotificationRead", () => {
 
     await service.markNotificationRead(ACTOR, "notif-1");
 
-    expect(prisma.notification.findFirst).toHaveBeenCalledWith({ where: { id: "notif-1", guardianId: "guardian-1" } });
+    expect(prisma.notification.findFirst).toHaveBeenCalledWith({ where: { id: "notif-1", OR: [{ guardianId: "guardian-1" }, { userId: "user-1" }] } });
     expect(prisma.notification.update).toHaveBeenCalledWith({ where: { id: "notif-1" }, data: { isRead: true } });
   });
 });

@@ -118,6 +118,8 @@ model AcademicYear {
   terms   Term[]
   classes Class[]
 
+  announcements Announcement[]
+
   @@unique([schoolId, name])
   @@map("academic_years")
 }
@@ -202,6 +204,7 @@ model Class {
   enrollments   StudentEnrollment[]
   examSubjects  ExamSubject[]
   feeStructures FeeStructure[]
+  announcements Announcement[]
 
   @@unique([divisionId, academicYearId, level])
   @@index([academicYearId])
@@ -244,6 +247,7 @@ model Section {
   enrollments        StudentEnrollment[]
   teacherAssignments TeacherAssignment[]
   resultSubmissions  ResultSubmission[]
+  announcements      Announcement[]
 
   @@unique([classId, name])
   @@map("sections")
@@ -476,10 +480,20 @@ model StudentGuardian {
 // than a general-purpose event bus.
 // ---------------------------------------------------------------------------
 
+// WHO an announcement is for. Every value resolves from people's CURRENT
+// relationship to the school (enrollment, parent link, employment) — never
+// from an active login alone. ALL means every current user of the school
+// (current students, current parents, teachers, staff); it never includes
+// alumni or former parents. See AnnouncementAudienceService.
 enum AnnouncementAudience {
   ALL
   PARENTS
   TEACHERS
+  CURRENT_STUDENTS
+  STAFF
+  ALUMNI
+  FORMER_PARENTS
+  INDIVIDUAL
 }
 
 model Announcement {
@@ -491,6 +505,22 @@ model Announcement {
   body            String
   audience        AnnouncementAudience @default(ALL)
   createdByUserId String
+
+  // Optional narrowing for current audiences (ALL, CURRENT_STUDENTS, PARENTS,
+  // TEACHERS): none = whole school; year + class = one class; year + class +
+  // section = one section. Always validated to belong to schoolId.
+  academicYearId String?
+  academicYear   AcademicYear? @relation(fields: [academicYearId], references: [id], onDelete: SetNull)
+  classId        String?
+  class          Class?        @relation(fields: [classId], references: [id], onDelete: SetNull)
+  sectionId      String?
+  section        Section?      @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+
+  // Set when recipients were resolved and stored as Notification rows (the
+  // single source of truth for delivery). Null only on announcements created
+  // before audience delivery existed — those are still shown by the legacy
+  // view-time rule and are never re-sent.
+  deliveredAt DateTime?
 
   createdAt DateTime @default(now())
 
@@ -527,6 +557,10 @@ model Notification {
 
   createdAt DateTime @default(now())
 
+  // One delivery per announcement per person, however many audiences
+  // (or roles) that person matches.
+  @@unique([announcementId, userId])
+  @@unique([announcementId, guardianId])
   @@index([guardianId, createdAt])
   @@index([userId, createdAt])
   @@map("notifications")

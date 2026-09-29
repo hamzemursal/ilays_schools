@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { deliveredAnnouncements, mergeAnnouncements } from "../announcements/delivered-announcements";
 import type { AuthenticatedUser } from "../auth/types/authenticated-user";
 import { buildStudentResultsReport } from "../exams/student-results-report";
 
@@ -319,26 +320,33 @@ export class StudentPortalService {
   async myAnnouncements(actor: AuthenticatedUser) {
     const { enrollment } = await this.getSelfOrThrow(actor);
 
-    // A current student sees the school's announcements as they come. A
-    // student with no ACTIVE enrollment (graduated, or otherwise finished)
-    // is reading their own history: only announcements from while they were
-    // still enrolled — nothing published after the day their enrollment
-    // ended. The account itself stays active; only the feed is cut off.
+    // Announcements delivered to this student (Notification rows written
+    // when they were published — shared with the topbar bell).
+    const delivered = await deliveredAnnouncements(this.prisma, actor.id);
+
+    // Legacy: announcements created before audience delivery existed were
+    // never stored per person, so they are still shown by the old rule —
+    // a current student sees them as they came; a student with no ACTIVE
+    // enrollment (graduated, or otherwise finished) only sees those from
+    // while they were still enrolled. The account itself stays active.
     let createdBefore: Date | undefined;
     if (enrollment.status !== "ACTIVE") {
-      if (!enrollment.endDate) return [];
+      if (!enrollment.endDate) return delivered;
       createdBefore = new Date(enrollment.endDate);
       createdBefore.setUTCDate(createdBefore.getUTCDate() + 1);
     }
 
-    return this.prisma.announcement.findMany({
+    const legacy = await this.prisma.announcement.findMany({
       where: {
         schoolId: enrollment.schoolId,
         audience: "ALL",
+        deliveredAt: null,
         ...(createdBefore ? { createdAt: { lt: createdBefore } } : {}),
       },
       include: { school: { select: { name: true } } },
       orderBy: { createdAt: "desc" },
     });
+    return mergeAnnouncements(delivered, legacy);
   }
+
 }

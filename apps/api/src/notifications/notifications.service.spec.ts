@@ -119,7 +119,7 @@ describe("NotificationsService.myNotifications", () => {
     await service.myNotifications(ACTOR);
 
     expect(prisma.notification.findMany).toHaveBeenCalledWith({
-      where: { userId: "user-1" },
+      where: { OR: [{ userId: "user-1" }, { guardian: { userId: "user-1" } }] },
       orderBy: { createdAt: "desc" },
       take: 50,
     });
@@ -148,7 +148,7 @@ describe("NotificationsService.markRead", () => {
 
     await service.markRead(ACTOR, "notif-1");
 
-    expect(prisma.notification.findFirst).toHaveBeenCalledWith({ where: { id: "notif-1", userId: "user-1" } });
+    expect(prisma.notification.findFirst).toHaveBeenCalledWith({ where: { id: "notif-1", OR: [{ userId: "user-1" }, { guardian: { userId: "user-1" } }] } });
   });
 
   it("marks it read", async () => {

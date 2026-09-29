@@ -53,9 +53,17 @@ export class NotificationsService {
     });
   }
 
+  // The caller's own rows: by userId, plus — for a parent — rows addressed
+  // to their guardian record (announcement deliveries to a parent written
+  // before they had a login carry only guardianId). This is what makes the
+  // topbar bell show the same announcements as the Parent Portal inbox.
+  private ownedBy(actor: AuthenticatedUser) {
+    return { OR: [{ userId: actor.id }, { guardian: { userId: actor.id } }] };
+  }
+
   async myNotifications(actor: AuthenticatedUser) {
     return this.prisma.notification.findMany({
-      where: { userId: actor.id },
+      where: this.ownedBy(actor),
       orderBy: { createdAt: "desc" },
       take: 50,
     });
@@ -63,7 +71,7 @@ export class NotificationsService {
 
   async markRead(actor: AuthenticatedUser, notificationId: string) {
     const notification = await this.prisma.notification.findFirst({
-      where: { id: notificationId, userId: actor.id },
+      where: { id: notificationId, ...this.ownedBy(actor) },
     });
     if (!notification) throw new NotFoundException("Notification not found");
     return this.prisma.notification.update({ where: { id: notificationId }, data: { isRead: true } });

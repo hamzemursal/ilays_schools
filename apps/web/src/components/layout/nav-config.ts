@@ -37,6 +37,9 @@ export interface NavItem {
 // Sidebar's useCurrentSchool. Items simply declare the permission that gates
 // them; a School Admin, Super Admin, and Teacher naturally see different
 // subsets without any role-name branching here.
+// School roles that read announcements through their own inbox.
+const INBOX_ROLES = ["TEACHER", "FINANCE_STAFF", "ACCOUNTANT", "HR_STAFF", "EXAM_OFFICER", "LIBRARY_STAFF"];
+
 export function schoolNavItems(user: Profile, schoolId: string): NavItem[] {
   const items: NavItem[] = [];
   const has = (p: string) => user.permissions.includes(p);
@@ -64,6 +67,11 @@ export function schoolNavItems(user: Profile, schoolId: string): NavItem[] {
   }
   if (has("announcements.view")) {
     items.push({ label: "Announcements", href: `/schools/${schoolId}/announcements`, icon: Megaphone });
+  }
+  // Teachers and staff without the management permission still get their
+  // own inbox — only announcements delivered to them.
+  else if (user.roles.some((r) => INBOX_ROLES.includes(r))) {
+    items.push({ label: "Announcements", href: `/announcements`, icon: Megaphone });
   }
   if (user.roles.includes("TEACHER")) {
     items.push({ label: "My classes", href: `/my-classes`, icon: BookUser });

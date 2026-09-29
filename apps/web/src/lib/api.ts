@@ -649,7 +649,31 @@ export interface MyStudentProfile {
   };
 }
 
-export type AnnouncementAudience = "ALL" | "PARENTS" | "TEACHERS";
+export type AnnouncementAudience =
+  | "ALL"
+  | "CURRENT_STUDENTS"
+  | "PARENTS"
+  | "TEACHERS"
+  | "STAFF"
+  | "ALUMNI"
+  | "FORMER_PARENTS"
+  | "INDIVIDUAL";
+
+// Who an announcement goes to, plus its optional year/class/section scope
+// (current audiences only) or its chosen people (Specific People only).
+export interface AnnouncementTargetInput {
+  audience: AnnouncementAudience;
+  academicYearId?: string;
+  classId?: string;
+  sectionId?: string;
+  recipientUserIds?: string[];
+}
+
+export interface AnnouncementRecipientOption {
+  userId: string;
+  name: string;
+  kind: "Student" | "Alumni" | "Parent" | "Teacher" | "Staff";
+}
 
 export interface Announcement {
   id: string;
@@ -659,6 +683,11 @@ export interface Announcement {
   audience: AnnouncementAudience;
   createdAt: string;
   school?: { name: string };
+  // Management list only.
+  academicYear?: { name: string } | null;
+  class?: { name: string } | null;
+  section?: { name: string } | null;
+  recipientCount?: number | null;
 }
 
 export interface MyGuardianProfile {
@@ -2473,8 +2502,14 @@ export const api = {
   createAnnouncement: (
     accessToken: string,
     schoolId: string,
-    body: { title: string; body: string; audience?: AnnouncementAudience },
+    body: { title: string; body: string } & AnnouncementTargetInput,
   ) => request<Announcement>(`/schools/${schoolId}/announcements`, { method: "POST", body, accessToken }),
+  previewAnnouncement: (accessToken: string, schoolId: string, body: AnnouncementTargetInput) =>
+    request<{ recipients: number }>(`/schools/${schoolId}/announcements/preview`, { method: "POST", body, accessToken }),
+  searchAnnouncementRecipients: (accessToken: string, schoolId: string, q: string) =>
+    request<AnnouncementRecipientOption[]>(`/schools/${schoolId}/announcements/recipient-options${qs({ q })}`, { accessToken }),
+  // The caller's own delivered announcements (teachers, staff, anyone).
+  getMyAnnouncements: (accessToken: string) => request<Announcement[]>(`/announcements/me`, { accessToken }),
 
   // Parent Portal — self-service, scoped to the authenticated parent's own
   // linked children (see GuardianPortalController on the backend).

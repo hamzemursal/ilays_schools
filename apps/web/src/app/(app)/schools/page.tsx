@@ -14,7 +14,8 @@ import { FormField, Input, Select } from "@/components/ui/FormControls";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Briefcase, Building2, GraduationCap, MapPin, Plus, Search, ShieldCheck, ShieldX, Trash2, Users } from "lucide-react";
+import { ArrowRight, Briefcase, Building2, GraduationCap, MapPin, Plus, School as School2, Search, ShieldCheck, ShieldX, Trash2, Users } from "lucide-react";
+import { SchoolTypeBadge } from "@/features/my-classes/components/SchoolTypeBadge";
 
 const SCHOOL_TYPES: { value: SchoolType; label: string }[] = [
   { value: "PRIMARY", label: "Primary" },
@@ -148,11 +149,22 @@ export default function SchoolsPage() {
     );
   }
 
+  const inTab = (s: School, t: Tab) =>
+    t === "Primary Schools"
+      ? s.type === "PRIMARY" || s.type === "PRIMARY_AND_SECONDARY"
+      : s.type === "SECONDARY" || s.type === "PRIMARY_AND_SECONDARY";
+  const tabStats = (t: Tab) => {
+    const list = (schools ?? []).filter((s) => inTab(s, t));
+    return { total: list.length, active: list.filter((s) => s.status === "ACTIVE").length };
+  };
+
   return (
     <div>
       <PageHeader
+        variant="plain"
         eyebrow="Organization"
         title="Schools"
+        description="Every school in your organization, by division."
         breadcrumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Schools" }]}
         actions={
           canCreate && (
@@ -167,26 +179,42 @@ export default function SchoolsPage() {
         }
       />
 
-      <div className="border-b border-border px-4 sm:px-6">
-        <div className="flex gap-1 overflow-x-auto">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`shrink-0 border-b-2 px-3 py-3 text-sm font-medium transition-colors ${
-                tab === t ? "border-accent text-accent" : "border-transparent text-foreground-soft hover:text-foreground"
-              }`}
-            >
-              {t}
-            </button>
-          ))}
+      <div className="space-y-5 px-3 pb-8 pt-4 sm:px-5">
+        {/* Division switcher: one card per division, with its real counts. */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" role="tablist" aria-label="Division">
+          {TABS.map((t) => {
+            const active = tab === t;
+            const meta = TAB_META[t];
+            const stats = tabStats(t);
+            return (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setTab(t)}
+                className={`flex items-center gap-4 rounded-2xl border bg-background p-4 text-left shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 sm:p-5 ${
+                  active ? `${meta.activeBorder} ring-1 ${meta.ring}` : "border-border hover:-translate-y-0.5 hover:shadow-md"
+                }`}
+              >
+                <span className={`flex size-12 shrink-0 items-center justify-center rounded-2xl ${meta.soft} ${meta.text}`}>
+                  <meta.icon className="size-6" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-base font-semibold text-foreground">{t}</span>
+                  <span className="mt-0.5 block text-sm text-foreground-soft">
+                    {schools ? `${stats.total} school${stats.total === 1 ? "" : "s"} · ${stats.active} active` : "Loading…"}
+                  </span>
+                </span>
+                {active && <span className={`h-10 w-1.5 shrink-0 rounded-full ${meta.bar}`} aria-hidden />}
+              </button>
+            );
+          })}
         </div>
-      </div>
 
-      <div className="space-y-5 p-4 sm:p-6">
         {showForm && (
-          <Card>
-            <h2 className="text-sm font-semibold text-foreground">Create school</h2>
+          <Card className="rounded-2xl">
+            <h2 className="text-base font-semibold text-foreground">Create school</h2>
             <form onSubmit={onCreate} className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField label="Name" htmlFor="new-school-name" required>
                 <Input
@@ -225,27 +253,35 @@ export default function SchoolsPage() {
           </Card>
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative w-full max-w-xs">
+        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-background p-4 shadow-sm sm:flex-row sm:items-center">
+          <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-muted" />
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search by name or location…"
+              aria-label="Search schools"
               className="pl-9"
             />
           </div>
-          <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} className="w-auto">
-            <option value="ALL">All statuses</option>
-            <option value="ACTIVE">Active</option>
-            <option value="INACTIVE">Inactive</option>
-          </Select>
-          <Select value={sort} onChange={(e) => setSort(e.target.value as SortOption)} className="w-auto">
-            <option value="NAME_ASC">Name (A–Z)</option>
-            <option value="NAME_DESC">Name (Z–A)</option>
-            <option value="STUDENTS_DESC">Most students</option>
-            <option value="STUDENTS_ASC">Fewest students</option>
-          </Select>
+          <div className="flex gap-3">
+            <Select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+              aria-label="Status"
+              className="w-full sm:w-44"
+            >
+              <option value="ALL">All statuses</option>
+              <option value="ACTIVE">Active</option>
+              <option value="INACTIVE">Inactive</option>
+            </Select>
+            <Select value={sort} onChange={(e) => setSort(e.target.value as SortOption)} aria-label="Sort" className="w-full sm:w-44">
+              <option value="NAME_ASC">Name (A–Z)</option>
+              <option value="NAME_DESC">Name (Z–A)</option>
+              <option value="STUDENTS_DESC">Most students</option>
+              <option value="STUDENTS_ASC">Fewest students</option>
+            </Select>
+          </div>
         </div>
 
         {listError ? (
@@ -253,79 +289,80 @@ export default function SchoolsPage() {
         ) : !filtered ? (
           <SkeletonCards count={6} />
         ) : filtered.length === 0 ? (
-          <EmptyState
-            icon={Building2}
-            title={`No ${tab === "Primary Schools" ? "primary" : "secondary"} schools yet`}
-            description="Create one to get started, or adjust your filters."
-          />
+          <Card className="rounded-2xl">
+            <EmptyState
+              icon={Building2}
+              title={`No ${tab === "Primary Schools" ? "primary" : "secondary"} schools yet`}
+              description="Create one to get started, or adjust your filters."
+            />
+          </Card>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map((school) => (
-              <Card key={school.id} padding="none" className="flex flex-col">
-                <div className="flex-1 p-5">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="font-semibold text-foreground">{school.name}</p>
-                    <Badge tone={school.status === "ACTIVE" ? "success" : "neutral"}>{school.status}</Badge>
-                  </div>
-                  <p className="mt-1 text-xs font-medium uppercase tracking-wide text-foreground-muted">
-                    {school.type.replace(/_/g, " ")}
-                  </p>
-                  {school.address && (
-                    <p className="mt-2 flex items-center gap-1.5 text-sm text-foreground-soft">
-                      <MapPin className="size-3.5 shrink-0" /> {school.address}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {filtered.map((school) => {
+              const tone = TYPE_TONE[school.type];
+              return (
+                <div
+                  key={school.id}
+                  className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+                >
+                  <div className={`h-1.5 ${tone.bar}`} aria-hidden />
+                  <div className="flex-1 p-5">
+                    <div className="flex items-start gap-3">
+                      <span className={`flex size-12 shrink-0 items-center justify-center rounded-2xl ${tone.soft} ${tone.text}`}>
+                        <Building2 className="size-6" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-base font-semibold text-foreground">{school.name}</p>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <SchoolTypeBadge type={school.type} />
+                          <Badge tone={school.status === "ACTIVE" ? "success" : "neutral"}>{school.status}</Badge>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="mt-3 flex items-center gap-1.5 text-sm text-foreground-soft">
+                      <MapPin className="size-3.5 shrink-0 text-foreground-muted" />
+                      <span className="truncate">{school.address || "No address on file"}</span>
                     </p>
-                  )}
-                  <div className="mt-3 grid grid-cols-3 gap-3">
-                    <div>
-                      <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-                        <Users className="size-3.5 text-foreground-muted" /> {school.studentCount}
-                      </p>
-                      <p className="text-xs text-foreground-muted">Students</p>
+
+                    <div className="mt-4 grid grid-cols-3 gap-2">
+                      <SchoolStat icon={Users} tone="bg-accent-soft text-accent" value={school.studentCount} label="Students" />
+                      <SchoolStat icon={GraduationCap} tone="bg-violet-50 text-violet-600" value={school.teacherCount} label="Teachers" />
+                      <SchoolStat icon={Briefcase} tone="bg-amber-50 text-amber-600" value={school.staffCount} label="Staff" />
                     </div>
-                    <div>
-                      <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-                        <GraduationCap className="size-3.5 text-foreground-muted" /> {school.teacherCount}
-                      </p>
-                      <p className="text-xs text-foreground-muted">Teachers</p>
-                    </div>
-                    <div>
-                      <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-                        <Briefcase className="size-3.5 text-foreground-muted" /> {school.staffCount}
-                      </p>
-                      <p className="text-xs text-foreground-muted">Staff</p>
+
+                    <div className="mt-4">
+                      {school.hasActiveAdmin ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-success-soft px-2.5 py-1 text-xs font-medium text-success">
+                          <ShieldCheck className="size-3.5" /> Admin active
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-warning-soft px-2.5 py-1 text-xs font-medium text-warning">
+                          <ShieldX className="size-3.5" /> No admin yet
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <div className="mt-3">
-                    {school.hasActiveAdmin ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium text-success">
-                        <ShieldCheck className="size-3.5" /> Admin active
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium text-warning">
-                        <ShieldX className="size-3.5" /> No admin yet
-                      </span>
+                  <div className="flex gap-2 border-t border-border bg-surface-soft/60 p-3">
+                    <Link href={`/schools/${school.id}`} className="flex-1">
+                      <Button size="sm" variant="secondary" className="w-full" icon={<ArrowRight className="size-4" />}>
+                        View School
+                      </Button>
+                    </Link>
+                    {canManage && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-danger hover:bg-danger-soft hover:text-danger"
+                        icon={<Trash2 className="size-4" />}
+                        loading={loadingImpactFor === school.id}
+                        onClick={() => onClickDelete(school)}
+                        aria-label={`Delete ${school.name}`}
+                      />
                     )}
                   </div>
                 </div>
-                <div className="flex gap-2 border-t border-border p-3">
-                  <Link href={`/schools/${school.id}`} className="flex-1">
-                    <Button size="sm" variant="outline" className="w-full">
-                      View School
-                    </Button>
-                  </Link>
-                  {canManage && (
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      icon={<Trash2 className="size-4" />}
-                      loading={loadingImpactFor === school.id}
-                      onClick={() => onClickDelete(school)}
-                      aria-label={`Delete ${school.name}`}
-                    />
-                  )}
-                </div>
-              </Card>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -343,6 +380,55 @@ export default function SchoolsPage() {
           setDeletionImpact(null);
         }}
       />
+    </div>
+  );
+}
+
+// Division colors: Primary blue, Secondary violet (same as SchoolTypeBadge),
+// a school teaching both in teal.
+const TAB_META = {
+  "Primary Schools": {
+    icon: GraduationCap,
+    soft: "bg-accent-soft",
+    text: "text-accent",
+    bar: "bg-accent",
+    activeBorder: "border-accent",
+    ring: "ring-accent/30",
+  },
+  "Secondary Schools": {
+    icon: School2,
+    soft: "bg-violet-50",
+    text: "text-violet-600",
+    bar: "bg-violet-500",
+    activeBorder: "border-violet-400",
+    ring: "ring-violet-300",
+  },
+} as const;
+
+const TYPE_TONE: Record<SchoolType, { bar: string; soft: string; text: string }> = {
+  PRIMARY: { bar: "bg-accent", soft: "bg-accent-soft", text: "text-accent" },
+  SECONDARY: { bar: "bg-violet-500", soft: "bg-violet-50", text: "text-violet-600" },
+  PRIMARY_AND_SECONDARY: { bar: "bg-teal-500", soft: "bg-teal-50", text: "text-teal-600" },
+};
+
+function SchoolStat({
+  icon: Icon,
+  tone,
+  value,
+  label,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  tone: string;
+  value: number;
+  label: string;
+}) {
+  return (
+    <div className="rounded-xl bg-surface-soft p-2.5">
+      <span className={`flex size-7 items-center justify-center rounded-lg ${tone}`}>
+        <Icon className="size-3.5" />
+      </span>
+      <p className="mt-1.5 text-lg font-bold leading-none tabular-nums text-foreground">{value}</p>
+      <p className="mt-0.5 text-xs text-foreground-muted">{label}</p>
     </div>
   );
 }
